@@ -7,36 +7,27 @@
 //! RDCleanPath coverage drives the public `ironrdp-agent` 0.1.0 CLI (`cargo install
 //! ironrdp-agent --version 0.1.0`) over `ws://127.0.0.1/jet/rdp`.
 
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use testsuite::ironrdp_agent::{
     agent_query_logs, connect_rdcleanpath, ironrdp_agent_endpoint, require_ironrdp_agent, start_ironrdp_daemon,
 };
-use testsuite::rdp_injection::credssp::{
-    complete_client_credssp, complete_ntlm_credssp, complete_raw_ntlm_credssp, connect_ntlm_client,
-};
 use testsuite::rdp_injection::gateway::GatewayProc;
-use testsuite::rdp_injection::mock_kdc::{
-    MockKdc, ObservedKdcReply, ObservedKdcReq, RefusingKdc, assert_target_kdc_as_and_tgs,
+use testsuite::rdp_injection::peers::{
+    ClientAuth, FakeClosedTarget, MockKdc, MockRdp, ObservedKdcReply, ObservedKdcReq, RefusingKdc,
+    assert_target_kdc_as_and_tgs, connect_credssp_client, send_hybrid_connection_request,
 };
-use testsuite::rdp_injection::mock_rdp::MockRdp;
 use testsuite::rdp_injection::preflight::{provision_credentials, provision_mapping};
-use testsuite::rdp_injection::rdp::{FakeClosedTarget, encode_hybrid_cr, encode_pcb};
-use testsuite::rdp_injection::tls::install_crypto_provider;
 use testsuite::rdp_injection::tokens::{association_token_for_host, kdc_proxy_url, next_id};
 use testsuite::rdp_injection::{
     FORWARD_LOG, INJECT_LOG, KERBEROS_TARGET_USER, MISSING_LOG, PROXY_KERBEROS_USER, PROXY_PASSWORD, PROXY_USER,
     RDCLEANPATH_FORWARD_LOG, RDCLEANPATH_INJECT_LOG, REALM, SERVICE_HOST, TARGET_PASSWORD, TARGET_USER,
 };
-use tokio::io::AsyncWriteExt as _;
-use tokio::net::TcpStream;
 
 // oracle: intent testsuite/src/rdp_injection/INTENT.md §2
 #[tokio::test]
 async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Result<()> {
-    install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
@@ -53,8 +44,9 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
     )
     .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
-    complete_ntlm_credssp(tls)
+    connect_credssp_client(gateway.config.tcp_port(), &association_token, ClientAuth::Ntlm)
+        .await?
+        .finish()
         .await
         .context("Gateway-facing NTLM CredSSP")?;
     rdp.wait_credssp()
@@ -87,7 +79,6 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
 // oracle: intent testsuite/src/rdp_injection/INTENT.md §2
 #[tokio::test]
 async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()> {
-    install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
@@ -107,19 +98,15 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     .await?;
 
     let kdc_proxy = kdc_proxy_url(gateway.config.http_port(), &association_jti)?;
-    let proxy_replies = Mutex::new(Vec::new());
-    let proxy_requests = Mutex::new(Vec::new());
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
-    complete_client_credssp(
-        tls,
-        PROXY_KERBEROS_USER,
-        Some(&kdc_proxy),
-        false,
-        Some(&proxy_replies),
-        Some(&proxy_requests),
+    let client = connect_credssp_client(
+        gateway.config.tcp_port(),
+        &association_token,
+        ClientAuth::Kerberos {
+            kdc_proxy_url: kdc_proxy,
+        },
     )
-    .await
-    .with_context(|| {
+    .await?;
+    let proxy_traffic = client.finish().await.with_context(|| {
         format!(
             "client-leg Kerberos CredSSP; gateway logs:\n{}",
             gateway.logs.snapshot()
@@ -138,12 +125,12 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
         gateway.logs.snapshot()
     );
     assert_target_kdc_as_and_tgs(&kdc)?;
-    let replies = proxy_replies.lock().expect("proxy reply mutex").clone();
+    let replies = proxy_traffic.replies;
     anyhow::ensure!(
         replies.contains(&ObservedKdcReply::AsRep) && replies.contains(&ObservedKdcReply::TgsRep),
         "/jet/KdcProxy must return AS-REP and TGS-REP (PREAUTH KRB-ERROR is allowed first); replies={replies:?}"
     );
-    let requests = proxy_requests.lock().expect("proxy request mutex").clone();
+    let requests = proxy_traffic.requests;
     anyhow::ensure!(
         requests.iter().any(|req| matches!(
             req,
@@ -179,7 +166,6 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
 // oracle: intent testsuite/src/rdp_injection/INTENT.md §4
 #[tokio::test]
 async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
-    install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;
@@ -198,8 +184,8 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     )
     .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
-    let _ = complete_ntlm_credssp(tls).await;
+    let client = connect_credssp_client(gateway.config.tcp_port(), &association_token, ClientAuth::Ntlm).await?;
+    let _ = client.finish().await;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     anyhow::ensure!(
         logs.contains("kerberos=true"),
@@ -257,7 +243,6 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
 // oracle: intent testsuite/src/rdp_injection/INTENT.md §4
 #[tokio::test]
 async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
-    install_crypto_provider();
     let kdc = RefusingKdc::start().await?;
     let rdp_kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(rdp_kdc.url()).await?;
@@ -275,8 +260,8 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     )
     .await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
-    let _ = complete_ntlm_credssp(tls).await;
+    let client = connect_credssp_client(gateway.config.tcp_port(), &association_token, ClientAuth::Ntlm).await?;
+    let _ = client.finish().await;
     let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
     anyhow::ensure!(
         logs.contains("kerberos=true"),
@@ -335,15 +320,7 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
     )
     .await?;
 
-    let mut stream = TcpStream::connect(("127.0.0.1", gateway.config.tcp_port()))
-        .await
-        .context("connect gateway TCP")?;
-    stream
-        .write_all(&encode_pcb(&association_token)?)
-        .await
-        .context("write PCB")?;
-    stream.write_all(&encode_hybrid_cr()?).await.context("write CR")?;
-    stream.flush().await.context("flush CR")?;
+    let _client = send_hybrid_connection_request(gateway.config.tcp_port(), &association_token).await?;
     let logs = gateway.logs.wait_contains(MISSING_LOG).await?;
     anyhow::ensure!(
         !logs.contains(FORWARD_LOG) && !logs.contains(INJECT_LOG),
@@ -362,7 +339,6 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
 // oracle: intent testsuite/src/rdp_injection/INTENT.md §1
 #[tokio::test]
 async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
-    install_crypto_provider();
     let rdp = MockRdp::start_ntlm().await?;
     let mut gateway = GatewayProc::start().await?;
 
@@ -371,8 +347,9 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     let association_token = association_token_for_host(&association_jti, &association_id, rdp.port, 60)?;
     provision_credentials(gateway.config.http_port(), &association_token, TARGET_USER, 300, None).await?;
 
-    let tls = connect_ntlm_client(gateway.config.tcp_port(), &association_token).await?;
-    complete_raw_ntlm_credssp(tls)
+    connect_credssp_client(gateway.config.tcp_port(), &association_token, ClientAuth::RawNtlm)
+        .await?
+        .finish()
         .await
         .with_context(|| format!("client-leg NTLM CredSSP; logs:\n{}", gateway.logs.snapshot()))?;
     rdp.wait_credssp()
@@ -405,7 +382,6 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     let Some(bin) = require_ironrdp_agent()? else {
         return Ok(());
     };
-    install_crypto_provider();
     let rdp = MockRdp::start_ntlm().await?;
     let mut gateway = GatewayProc::start().await?;
     let endpoint = ironrdp_agent_endpoint();
@@ -467,7 +443,6 @@ async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
     let Some(bin) = require_ironrdp_agent()? else {
         return Ok(());
     };
-    install_crypto_provider();
     let kdc = MockKdc::start().await?;
     let rdp = MockRdp::start_kerberos(kdc.url()).await?;
     let mut gateway = GatewayProc::start().await?;

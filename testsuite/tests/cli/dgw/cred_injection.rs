@@ -7,8 +7,8 @@
 //! completed: the contract under test is checkout, reconnect, and fail-closed routing.
 
 use testsuite::rdp_injection::gateway::GatewayProc;
+use testsuite::rdp_injection::peers::{FakeRdpTarget, connect_rdp_client};
 use testsuite::rdp_injection::preflight::provision_credentials;
-use testsuite::rdp_injection::rdp::{FakeRdpTarget, connect_rdp_client};
 use testsuite::rdp_injection::tokens::{association_token, next_id};
 use testsuite::rdp_injection::{
     CLIENT_COOKIE, FORWARD_LOG, INJECT_LOG, KERBEROS_TARGET_USER, PUBLISHED_KDC_LOG, TARGET_USER,

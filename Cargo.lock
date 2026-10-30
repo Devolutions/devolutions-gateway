@@ -1489,6 +1489,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "credential-injection-mock"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "ironrdp-connector",
+ "ironrdp-core 0.2.1",
+ "ironrdp-pdu",
+ "ironrdp-tokio",
+ "kdc",
+ "picky-asn1-der",
+ "picky-krb",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio 1.52.3",
+ "tokio-rustls",
+ "x509-cert 0.3.0",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8175,12 +8195,7 @@ dependencies = [
  "gateway-db",
  "hex",
  "ipnetwork",
- "ironrdp-connector",
- "ironrdp-core 0.2.1",
- "ironrdp-pdu",
- "ironrdp-tokio",
  "jmux-proto",
- "kdc",
  "libc",
  "libsql",
  "mcp-proxy",
@@ -8188,8 +8203,6 @@ dependencies = [
  "network-scanner-proto",
  "nonempty",
  "picky",
- "picky-asn1-der",
- "picky-krb",
  "private-fs",
  "proxy-socks",
  "quinn",
@@ -8216,7 +8229,6 @@ dependencies = [
  "uuid",
  "win-api-wrappers",
  "windows 0.61.3",
- "x509-cert 0.3.0",
 ]
 
 [[package]]
