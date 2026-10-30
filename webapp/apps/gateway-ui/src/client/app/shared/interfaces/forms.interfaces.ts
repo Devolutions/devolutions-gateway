@@ -3,6 +3,7 @@ import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { ArdQualityMode } from '../enums/ard-quality-mode.enum';
 import { Encoding } from '../enums/encoding.enum';
 import { ResolutionQuality } from '../enums/resolution-quality.enum';
+import { ArdControlMode } from './ard-control.interfaces';
 
 export interface HostnameObject {
   hostname: string;
@@ -67,6 +68,7 @@ export interface ArdFormDataInput {
   wheelSpeedFactor: number;
   resolutionQuality: ResolutionQuality;
   ardQualityMode: ArdQualityMode;
+  ardStartMode: ArdControlMode;
   autoClipboard?: boolean;
   ardOnlyInputEncryption: boolean;
 }

@@ -5,6 +5,8 @@ import {
   ScreenMode,
   ToolbarFeatures,
   ToolbarInitialState,
+  ToolbarModeToggle,
+  ToolbarStatusBadge,
   WheelSpeedControl,
 } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
 import {
@@ -24,17 +26,24 @@ import {
       [initialWheelSpeed]="initialState?.wheelSpeed ?? 1"
       [wheelSpeedControl]="wheelSpeedControl"
       [clipboardActionButtons]="actions"
+      [sessionActions]="sessionActions"
+      [modeToggle]="modeToggle"
+      [statusBadges]="statusBadges"
       [sessionInfo]="sessionInfo"
       [sessionInfoTemplate]="sessionInfoTemplate"
       (sessionClose)="sessionClose.emit()"
       (screenModeChange)="screenModeChange.emit($event)"
       (cursorCrosshairChange)="cursorCrosshairChange.emit($event)"
-      (wheelSpeedChange)="wheelSpeedChange.emit($event)">
+      (wheelSpeedChange)="wheelSpeedChange.emit($event)"
+      (modeToggleChange)="controlModeChange.emit($event)">
     </floating-session-toolbar>
   `,
 })
 export class ArdToolbarWrapperComponent {
   @Input() actions: ToolbarAction[] = [];
+  @Input() sessionActions: ToolbarAction[] = [];
+  @Input() modeToggle: ToolbarModeToggle | null = null;
+  @Input() statusBadges: ToolbarStatusBadge[] = [];
   @Input() sessionInfo: ToolbarSessionInfo | null = null;
   @Input() sessionInfoTemplate: TemplateRef<ToolbarSessionInfoTemplateContext> | null = null;
   @Input() initialState?: ToolbarInitialState;
@@ -44,6 +53,7 @@ export class ArdToolbarWrapperComponent {
   @Output() readonly screenModeChange = new EventEmitter<ScreenMode>();
   @Output() readonly cursorCrosshairChange = new EventEmitter<boolean>();
   @Output() readonly wheelSpeedChange = new EventEmitter<number>();
+  @Output() readonly controlModeChange = new EventEmitter<string>();
 
   protected readonly features: ToolbarFeatures = {
     sessionInfo: true,
