@@ -1024,8 +1024,8 @@ mod windows_tests {
         }
     }
 
-    /// The rules of a drop box that the current user provisioned under `__debug__.identity.acl_grant_current_user`, as a
-    /// test session without SYSTEM can.
+    /// The rules of a drop box that the current user provisioned under the access grant for the current user, as a test
+    /// session without SYSTEM can.
     fn provisioned_by_current_user() -> DropBox {
         DropBox::provisioned_by(Account::CurrentUser, true)
     }
@@ -1251,8 +1251,8 @@ mod windows_tests {
         Ok(())
     }
 
-    /// Writes a pending file the current user owns, with the DACL the agent gives it under
-    /// `__debug__.identity.acl_grant_current_user` plus `extra`.
+    /// Writes a pending file the current user owns, with the DACL the agent gives it under the access grant for the
+    /// current user, plus `extra`.
     fn pending_file_owned_by_the_agent(directory: &TestDir, extra: Option<Ace>) -> anyhow::Result<Utf8PathBuf> {
         let path = directory.pending_file('a');
         write_atomic(&directory.0, &path, b"blob", true)?;
