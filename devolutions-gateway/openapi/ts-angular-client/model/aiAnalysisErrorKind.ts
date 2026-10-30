@@ -12,7 +12,7 @@
 /**
  * Kind of failure of an AI analysis Task
  */
-export type AiAnalysisErrorKind = 'aiRejected' | 'aiBadAnswer' | 'keyLost' | 'noRecording' | 'mixedRecording' | 'unreadableRecording' | 'invalidTask' | 'panicked' | 'internal' | 'attemptsExhausted' | 'deadlinePassed' | 'notQueued';
+export type AiAnalysisErrorKind = 'aiRejected' | 'aiBadAnswer' | 'keyLost' | 'noRecording' | 'mixedRecording' | 'unreadableRecording' | 'invalidTask' | 'panicked' | 'internal' | 'attemptsExhausted' | 'deadlinePassed';
 
 export const AiAnalysisErrorKind = {
     AiRejected: 'aiRejected' as AiAnalysisErrorKind,
@@ -25,7 +25,6 @@ export const AiAnalysisErrorKind = {
     Panicked: 'panicked' as AiAnalysisErrorKind,
     Internal: 'internal' as AiAnalysisErrorKind,
     AttemptsExhausted: 'attemptsExhausted' as AiAnalysisErrorKind,
-    DeadlinePassed: 'deadlinePassed' as AiAnalysisErrorKind,
-    NotQueued: 'notQueued' as AiAnalysisErrorKind
+    DeadlinePassed: 'deadlinePassed' as AiAnalysisErrorKind
 };
 

@@ -3976,7 +3976,7 @@ words it
 | 
 |  <<AiAnalysisErrorKind>>  
 | 
-|    aiRejected, aiBadAnswer, keyLost, noRecording, mixedRecording, unreadableRecording, invalidTask, panicked, internal, attemptsExhausted, deadlinePassed, notQueued,  
+|    aiRejected, aiBadAnswer, keyLost, noRecording, mixedRecording, unreadableRecording, invalidTask, panicked, internal, attemptsExhausted, deadlinePassed,  
 
 | last
 | 
@@ -4027,7 +4027,6 @@ Kind of failure of an AI analysis Task
 | internal
 | attemptsExhausted
 | deadlinePassed
-| notQueued
 
 |===
 

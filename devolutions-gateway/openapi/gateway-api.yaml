@@ -1627,7 +1627,6 @@ components:
       - internal
       - attemptsExhausted
       - deadlinePassed
-      - notQueued
     AiAnalysisFailedPayload:
       type: object
       description: 'Payload of a `failed` AI analysis Task: why it failed, and the tokens it used'

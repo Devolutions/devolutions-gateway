@@ -98,13 +98,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Enum DeadlinePassed for value: deadlinePassed
         /// </summary>
         [EnumMember(Value = "deadlinePassed")]
-        DeadlinePassed = 11,
-
-        /// <summary>
-        /// Enum NotQueued for value: notQueued
-        /// </summary>
-        [EnumMember(Value = "notQueued")]
-        NotQueued = 12
+        DeadlinePassed = 11
     }
 
     public static class AiAnalysisErrorKindExtensions
@@ -138,8 +132,6 @@ namespace Devolutions.Gateway.Client.Model
                     return "attemptsExhausted";
                 case AiAnalysisErrorKind.DeadlinePassed:
                     return "deadlinePassed";
-                case AiAnalysisErrorKind.NotQueued:
-                    return "notQueued";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }
