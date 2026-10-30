@@ -136,7 +136,7 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
 /// - PowerShell installs and updates default to `CurrentUser`.
 /// - Chocolatey always runs machine-wide.
 /// - WinGet leaves the scope to the installer.
-fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
+pub(super) fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
     use now_policy_api::{ManagerName as M, Operation as O, Scope as S};
 
     if matches!(request.manager, M::PowerShell | M::PowerShell7 | M::Pip) && request.operation == O::Uninstall {

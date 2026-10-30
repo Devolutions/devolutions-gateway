@@ -733,6 +733,44 @@ fn effective_elevation_lowers_explicit_user_scope_and_raises_machine_scope() {
 }
 
 #[test]
+fn implicit_user_scope_matches_standard_elevation_policy() {
+    // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4379344015.
+    let policy = make_policy(
+        Decision::Deny,
+        vec![rule(
+            "allow-standard-user",
+            10,
+            Decision::Allow,
+            PolicyMatch {
+                scopes: BTreeSet::from([now_policy::Scope::User]),
+                execution_elevation: BTreeSet::from([now_policy::Elevation::Standard]),
+                ..Default::default()
+            },
+        )],
+    );
+
+    for (manager, source, operation) in [
+        (api::ManagerName::Dotnet, "nuget.org", api::Operation::Install),
+        (api::ManagerName::Dotnet, "nuget.org", api::Operation::Update),
+        (api::ManagerName::Dotnet, "nuget.org", api::Operation::Uninstall),
+        (api::ManagerName::PowerShell, "PSGallery", api::Operation::Install),
+        (api::ManagerName::PowerShell, "PSGallery", api::Operation::Update),
+        (api::ManagerName::PowerShell7, "PSGallery", api::Operation::Install),
+        (api::ManagerName::PowerShell7, "PSGallery", api::Operation::Update),
+    ] {
+        let mut request = make_request(operation, "Contoso.Tool");
+        request.manager = manager;
+        request.source.name = source.to_owned();
+
+        assert_eq!(
+            evaluate(&policy, &request).rule_id,
+            "allow-standard-user",
+            "{manager:?} {operation:?}"
+        );
+    }
+}
+
+#[test]
 fn unacceptable_kill_process_names_are_denied_before_rules() {
     let policy = make_policy(Decision::Allow, Vec::new());
 
