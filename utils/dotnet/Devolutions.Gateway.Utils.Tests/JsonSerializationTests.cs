@@ -230,6 +230,28 @@ public class JsonSerializationTests
         Assert.Equal(EXPECTED, result);
     }
 
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
+    [Fact]
+    public void ScopeClaimsRecordingAiAnalysisStart()
+    {
+        const string EXPECTED = """{"scope":"gateway.tasks.recording-ai-analysis.start","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayTasksRecordingAiAnalysisStart);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
+    [Fact]
+    public void ScopeClaimsRecordingAiAnalysisRead()
+    {
+        const string EXPECTED = """{"scope":"gateway.tasks.recording-ai-analysis.read","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayTasksRecordingAiAnalysisRead);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
     [Fact]
     public void EnrollmentClaimsAllFields()
     {

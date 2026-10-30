@@ -1,0 +1,17 @@
+# Devolutions.Gateway.Client.Model.AiAnalysisRequest
+Settings of an AI analysis
+
+## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**ApiKey** | **string** | API key of the provider, kept in memory only until the Task ends. | 
+**BaseUrl** | **string** | Endpoint of the provider API, kept in memory only; required for &#x60;openai-compatible&#x60;. | [optional] 
+**Language** | **string** | Language the AI writes in, any text of 1 to 10 characters such as &#x60;fr-CA&#x60; or &#x60;français&#x60;; English when absent. | [optional] 
+**MaxOutputTokens** | **long?** | Upper bound of tokens in each AI answer. | [optional] 
+**Model** | **string** | Model identifier, passed to the provider as is. | 
+**Provider** | **AiProvider** |  | 
+**SessionId** | **Guid** | Recorded session to analyze. | 
+
+[[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
