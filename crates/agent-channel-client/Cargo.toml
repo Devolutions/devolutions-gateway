@@ -15,7 +15,7 @@ agent-identity-httpsig = { path = "../agent-identity-httpsig" }
 device-key = { path = "../device-key" }
 http-client-proxy = { path = "../http-client-proxy" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 http = "1"
 hyper = { version = "1", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "http2", "tokio"] }
