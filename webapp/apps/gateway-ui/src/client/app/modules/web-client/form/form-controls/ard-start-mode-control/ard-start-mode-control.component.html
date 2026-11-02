@@ -1,0 +1,10 @@
+<div [formGroup]="parentForm">
+  <label for="ardStartMode">Start Mode</label>
+  <div class="gateway-form-input">
+    <p-select id="ardStartMode"
+                class="full-width-dropdown"
+                appendTo="body"
+                formControlName="ardStartMode"
+                [options]="ardStartModeOptions"></p-select>
+  </div>
+</div>
