@@ -1,7 +1,6 @@
 //! Heartbeat API tests.
 
 use anyhow::Context as _;
-use testsuite::cli::start_dgw;
 use testsuite::dgw_config::DgwConfig;
 
 /// Scope token with `gateway.heartbeat.read` scope.
@@ -73,7 +72,7 @@ async fn heartbeat_reports_disk_space_when_recording_dir_not_yet_created() -> an
         .init()
         .context("init config")?;
 
-    let mut process = start_dgw(&config_handle).await?;
+    let mut process = config_handle.start().await?;
 
     let heartbeat = get_heartbeat(config_handle.http_port())
         .await

@@ -7,7 +7,6 @@ publish = false
 autotests = false
 
 [lib]
-doctest = false
 test = false
 
 [[test]]
