@@ -17,6 +17,8 @@ import { CustomHttpParameterCodec }                          from '../encoder';
 import { Observable }                                        from 'rxjs';
 
 // @ts-ignore
+import { ApiError } from '../model/apiError';
+// @ts-ignore
 import { InterfaceInfo } from '../model/interfaceInfo';
 // @ts-ignore
 import { NetworkInterfacesResponse } from '../model/networkInterfacesResponse';
@@ -97,10 +99,10 @@ export class NetService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public getNetConfig(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<Array<{ [key: string]: Array<InterfaceInfo>; }>>;
-    public getNetConfig(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<{ [key: string]: Array<InterfaceInfo>; }>>>;
-    public getNetConfig(observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<{ [key: string]: Array<InterfaceInfo>; }>>>;
-    public getNetConfig(observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public getNetConfig(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<Array<{ [key: string]: Array<InterfaceInfo>; }>>;
+    public getNetConfig(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<{ [key: string]: Array<InterfaceInfo>; }>>>;
+    public getNetConfig(observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<{ [key: string]: Array<InterfaceInfo>; }>>>;
+    public getNetConfig(observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
 
         let localVarHeaders = this.defaultHeaders;
 
@@ -115,7 +117,8 @@ export class NetService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -164,10 +167,10 @@ export class NetService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public getNetInterfaces(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<NetworkInterfacesResponse>;
-    public getNetInterfaces(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<NetworkInterfacesResponse>>;
-    public getNetInterfaces(observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<NetworkInterfacesResponse>>;
-    public getNetInterfaces(observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public getNetInterfaces(observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<NetworkInterfacesResponse>;
+    public getNetInterfaces(observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<NetworkInterfacesResponse>>;
+    public getNetInterfaces(observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<NetworkInterfacesResponse>>;
+    public getNetInterfaces(observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
 
         let localVarHeaders = this.defaultHeaders;
 
@@ -182,7 +185,8 @@ export class NetService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -264,10 +268,10 @@ export class NetService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any>;
-    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<any>>;
-    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<any>>;
-    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any>;
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<any>>;
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<any>>;
+    public getNetScan(pingInterval?: number, pingTimeout?: number, broadcastTimeout?: number, portScanTimeout?: number, netbiosTimeout?: number, netbiosInterval?: number, mdnsQueryTimeout?: number, maxWait?: number, range?: Array<string>, target?: Array<string>, interfaceId?: Array<string>, probe?: Array<string>, enablePingStart?: boolean, enableBroadcast?: boolean, enableSubnetScan?: boolean, enableZeroconf?: boolean, enableNetbios?: boolean, enableResolveDns?: boolean, includeHostResults?: boolean, reportPingStart?: boolean, reportPingSuccess?: boolean, reportPingFailure?: boolean, enableTcpProbes?: boolean, rangeInterfacePolicy?: string, allowCrossInterfaceRange?: boolean, responseFormat?: string, maxConcurrency?: number, maxPingConcurrency?: number, maxTcpProbeConcurrency?: number, enableFailure?: boolean, reportTcpFailure?: boolean, interfaceBindStrict?: boolean, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
 
         let localVarQueryParameters = new HttpParams({encoder: this.encoder});
         if (pingInterval !== undefined && pingInterval !== null) {
@@ -420,6 +424,7 @@ export class NetService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }

@@ -111,6 +111,7 @@ impl ClockDiagnostic {
     path = "/jet/diagnostics/logs",
     responses(
         (status = 200, description = "Latest logs", body = String),
+        // No error body declared: generated clients pick the first JSON media type of all responses, and would expect JSON on success.
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -150,9 +151,9 @@ async fn get_logs(
     path = "/jet/diagnostics/configuration",
     responses(
         (status = 200, description = "Service configuration diagnostic (including version)", body = ConfigDiagnostic),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]

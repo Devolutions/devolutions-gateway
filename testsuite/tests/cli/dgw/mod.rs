@@ -1,4 +1,5 @@
 mod ai_analysis;
+mod api_errors;
 mod benign_disconnect;
 mod cli_args;
 mod heartbeat;

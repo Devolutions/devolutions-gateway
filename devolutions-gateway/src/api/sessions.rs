@@ -19,10 +19,10 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     path = "/jet/sessions",
     responses(
         (status = 200, description = "Running sessions", body = [SessionInfo]),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.sessions.read"])),
 ))]

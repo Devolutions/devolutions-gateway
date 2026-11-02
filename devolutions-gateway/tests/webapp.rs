@@ -258,7 +258,7 @@ async fn sign_app_token_bad_password() -> anyhow::Result<()> {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     let body = response.into_body().collect().await?.to_bytes();
-    assert!(body.is_empty());
+    assert_unauthorized_body(&body)?;
 
     Ok(())
 }
@@ -296,7 +296,19 @@ async fn sign_app_token_username_mismatch() -> anyhow::Result<()> {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     let body = response.into_body().collect().await?.to_bytes();
-    assert!(body.is_empty());
+    assert_unauthorized_body(&body)?;
+
+    Ok(())
+}
+
+/// Asserts that a rejected login carries the generic code only, whatever the reason.
+fn assert_unauthorized_body(body: &[u8]) -> anyhow::Result<()> {
+    let body: serde_json::Value = serde_json::from_slice(body)?;
+
+    assert_eq!(
+        body,
+        json!({ "type": "about:blank", "title": "Unauthorized", "status": 401, "error": "unauthorized" })
+    );
 
     Ok(())
 }

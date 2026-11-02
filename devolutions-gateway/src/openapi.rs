@@ -139,6 +139,8 @@ use crate::provisioner_tasks::recording_ai_analysis::{BadAnswer, Failure, Recove
         crate::api::tunnel::AgentDomainAdvertisement,
         crate::api::tunnel::AgentStatus,
         crate::api::tunnel::AgentInfo,
+        crate::http::ApiError,
+        crate::error_code::ErrorCode,
     )),
     modifiers(&SecurityAddon),
 )]
