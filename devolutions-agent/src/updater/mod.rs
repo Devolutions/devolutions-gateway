@@ -666,7 +666,7 @@ async fn check_for_updates(
                 let proxy_config = proxy_conf.to_proxy_config();
 
                 let client = http_client_proxy::get_or_create_cached_client(
-                    reqwest::Client::builder(),
+                    io::http_client_builder(),
                     &target_url,
                     &proxy_config,
                 )?;
