@@ -13,7 +13,7 @@ export interface WebMRecorderOptions {
    * Called when recording stops on its own after `start()` resolved. By then the start promise is
    * settled, so this is the only way a consumer hears about it. The error is
    * 'ConnectionToTheRecordingServerLost' when the push WebSocket fails or closes, and
-   * 'MediaRecorderFailed' when the browser's recorder fails. Failures before `start()` resolves
+   * 'MediaRecorderFailed' when the browser's recorder fails or stops on its own. Failures before `start()` resolves
    * reject the start promise instead.
    */
   onError?: (error: string) => void;
@@ -247,7 +247,7 @@ export class WebMRecorder {
   private handleMediaRecorderDataAvailable(event: BlobEvent): void {
     if (!event.data || event.data.size === 0) return;
 
-    if (!this._isRecording && this.pendingError === null) {
+    if (!this._isRecording && this.mediaRecorder?.state === 'recording') {
       this.isStarting = false;
       this._isRecording = true;
       // Resolve the start promise — first data confirms recording is active.
@@ -262,8 +262,11 @@ export class WebMRecorder {
   }
 
   private handleMediaRecorderStop(): void {
-    const error = this.pendingError; // read before cleanupResources() clears it
-    const failedAfterStart = error !== null && this.rejectStart === null;
+    // A stop nobody asked for (all tracks ended) arrives without isCleaningUp set, so it is a failure too.
+    const error =
+      this.pendingError ??
+      (this.isCleaningUp ? null : this._isRecording ? 'MediaRecorderFailed' : 'UnableToStartRecording');
+    const failedAfterStart = error !== null && this._isRecording;
     // Only a stop() the user asked for ends the recording; a failure leaves it open for a reconnection.
     this.closeWebSocket(error ? undefined : RECORDING_ENDED_CLOSE_CODE);
     // Settle the start promise before cleanup resets isCleaningUp.
