@@ -1,4 +1,6 @@
-use axum::extract::State;
+use std::time::UNIX_EPOCH;
+
+use axum::extract::{Path, State};
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -15,6 +17,8 @@ use crate::log::GatewayLog;
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/logs", get(get_logs))
+        .route("/logs/files", get(list_log_files))
+        .route("/logs/files/{name}", get(get_log_file))
         .route("/clock", get(get_clock))
         .route("/configuration", get(get_configuration))
         .with_state(state)
@@ -133,6 +137,100 @@ async fn get_logs(
         .map_err(HttpError::internal().err())?;
 
     Ok(axum_extra::body::AsyncReadBody::new(file).into_response())
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LogFileInfo {
+    name: String,
+    size: u64,
+    modified_unix_millis: u64,
+}
+
+/// Lists the log files retained by this Gateway.
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "ListLogFiles",
+    tag = "Diagnostics",
+    path = "/jet/diagnostics/logs/files",
+    responses(
+        (status = 200, description = "Retained log files", body = [LogFileInfo]),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 500, description = "Failed to list log files"),
+    ),
+    security(("scope_token" = ["gateway.diagnostics.read"])),
+))]
+async fn list_log_files(
+    State(DgwState { conf_handle, .. }): State<DgwState>,
+    _scope: DiagnosticsReadScope,
+) -> Result<Json<Vec<LogFileInfo>>, HttpError> {
+    let conf = conf_handle.get_conf();
+    let files = devolutions_log::list_log_files::<GatewayLog>(conf.log_file.as_path())
+        .await
+        .map_err(HttpError::internal().err())?;
+
+    Ok(Json(
+        files
+            .into_iter()
+            .map(|file| LogFileInfo {
+                name: file.name,
+                size: file.size,
+                modified_unix_millis: file
+                    .modified
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
+            })
+            .collect(),
+    ))
+}
+
+/// Retrieves one retained log file by its listed name.
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "GetLogFile",
+    tag = "Diagnostics",
+    path = "/jet/diagnostics/logs/files/{name}",
+    params(("name" = String, Path, description = "Name returned by ListLogFiles")),
+    responses(
+        (status = 200, description = "Log file contents", body = String, content_type = "text/plain"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Log file no longer exists"),
+        (status = 500, description = "Failed to read log file"),
+    ),
+    security(("scope_token" = ["gateway.diagnostics.read"])),
+))]
+async fn get_log_file(
+    State(DgwState { conf_handle, .. }): State<DgwState>,
+    Path(name): Path<String>,
+    _scope: DiagnosticsReadScope,
+) -> Result<Response, HttpError> {
+    let conf = conf_handle.get_conf();
+    let files = devolutions_log::list_log_files::<GatewayLog>(conf.log_file.as_path())
+        .await
+        .map_err(HttpError::internal().err())?;
+    let file = files
+        .into_iter()
+        .find(|file| file.name == name)
+        .ok_or_else(|| HttpError::not_found().msg("log file not found"))?;
+    let file = File::open(file.path).await.map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            HttpError::not_found().build(error)
+        } else {
+            HttpError::internal().build(error)
+        }
+    })?;
+
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        axum_extra::body::AsyncReadBody::new(file),
+    )
+        .into_response())
 }
 
 /// Retrieves a subset of the configuration, for diagnosis purposes.
