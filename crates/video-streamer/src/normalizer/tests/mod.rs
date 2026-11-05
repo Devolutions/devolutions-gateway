@@ -495,7 +495,9 @@ fn truncated_clip_tail_does_not_abort_the_following_clip() {
     ];
     let (input_sender, input_receiver) = mpsc::channel(events.len());
     for event in events {
-        input_sender.blocking_send(Ok(event)).expect("queue recording event");
+        input_sender
+            .blocking_send(InputEvent::Recording(Ok(event)))
+            .expect("queue recording event");
     }
     drop(input_sender);
     let (output_sender, mut output_receiver) = mpsc::channel(1);
@@ -529,7 +531,9 @@ fn corruption_before_an_incomplete_tail_still_fails() {
     ];
     let (input_sender, input_receiver) = mpsc::channel(events.len());
     for event in events {
-        input_sender.blocking_send(Ok(event)).expect("queue recording event");
+        input_sender
+            .blocking_send(InputEvent::Recording(Ok(event)))
+            .expect("queue recording event");
     }
     drop(input_sender);
     let (output_sender, _output_receiver) = mpsc::channel(1);
@@ -545,4 +549,15 @@ fn corruption_before_an_incomplete_tail_still_fails() {
     .expect_err("corruption before the incomplete tail must fail");
 
     assert!(format!("{error:#}").contains("corrupted"), "{error:#}");
+}
+
+#[test]
+fn a_synthetic_key_frame_holds_the_next_one_back_by_its_size() {
+    let sent_at = Instant::now();
+    let key_frame = SyntheticKeyFrame {
+        sent_at,
+        bytes: 150_000,
+    };
+
+    assert_eq!(key_frame.next_allowed_at(), sent_at + Duration::from_millis(500));
 }

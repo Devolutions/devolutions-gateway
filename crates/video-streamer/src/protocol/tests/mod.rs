@@ -129,7 +129,7 @@ where
         .await?
         .ok_or_else(|| anyhow::anyhow!("test transport closed before Start"))?;
 
-    let stream_result = run_started_session(&mut transport, &mut segments).await;
+    let stream_result = run_started_session(&mut transport, &mut segments, version).await;
     let shutdown_result = segments.into_inner().shutdown().await;
 
     match (stream_result, shutdown_result) {
@@ -407,7 +407,11 @@ fn client_messages_require_one_complete_transport_message() {
         decode_client_message(b"\x01").expect("decode pull"),
         ClientMessage::Pull
     );
-    assert!(decode_client_message(b"\x02").is_err());
+    assert_eq!(
+        decode_client_message(b"\x02").expect("decode pull or key frame"),
+        ClientMessage::PullOrKeyFrame
+    );
+    assert!(decode_client_message(b"\x03").is_err());
     assert!(decode_client_message(b"\x00\x01").is_err());
     assert!(decode_client_message(b"").is_err());
 }
@@ -902,3 +906,127 @@ async fn non_contiguous_segment_sequences_are_rejected() {
         );
     }
 }
+
+fn spawn_v3_session<S>(
+    transport: ChannelTransport,
+    source: S,
+) -> (tokio::task::JoinHandle<anyhow::Result<()>>, mpsc::Receiver<()>)
+where
+    S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
+{
+    let (session, key_frame_requests) = crate::normalizer::test_session_with_requests(source);
+    let task = tokio::spawn(async move {
+        let mut transport = CodecTransport::new(transport);
+        let mut segments = SessionSegments::new(session, ShadowProtocolVersion::V3);
+        receive_expected_request(&mut transport, ClientMessage::Start)
+            .await?
+            .context("test transport closed before Start")?;
+        let stream_result = run_started_session(&mut transport, &mut segments, ShadowProtocolVersion::V3).await;
+        let shutdown_result = segments.into_inner().shutdown().await;
+        stream_result.and(shutdown_result)
+    });
+    (task, key_frame_requests)
+}
+
+fn first_segment_begin() -> anyhow::Result<SegmentEvent> {
+    Ok(SegmentEvent::Begin(SegmentInfo {
+        sequence: 0,
+        width: 640,
+        height: 480,
+    }))
+}
+
+async fn start_and_send_pull_or_key_frame(
+    client_sender: &ClientSender,
+    client_receiver: &mut mpsc::UnboundedReceiver<Bytes>,
+) {
+    client_sender.send(Bytes::from_static(b"\x00")).expect("send Start");
+    receive_response(client_receiver).await;
+    client_sender
+        .send(Bytes::from_static(b"\x02"))
+        .expect("send PullOrKeyFrame");
+}
+
+async fn receive_key_frame_request(key_frame_requests: &mut mpsc::Receiver<()>) {
+    tokio::time::timeout(Duration::from_secs(1), key_frame_requests.recv())
+        .await
+        .expect("timed out waiting for a key-frame request")
+        .expect("key-frame request channel closed");
+}
+
+#[tokio::test]
+async fn v2_rejects_pull_or_key_frame() {
+    let source = stream::iter([first_segment_begin()]).chain(stream::pending());
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let task = tokio::spawn(stream_versioned_segment_source(
+        transport,
+        source,
+        ShadowProtocolVersion::V2,
+    ));
+
+    start_and_send_pull_or_key_frame(&client_sender, &mut client_receiver).await;
+
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x02{\"error\":\"UnexpectedError\"}")
+    );
+    assert!(task.await.expect("stream task panicked").is_err());
+}
+
+#[tokio::test]
+async fn pull_or_key_frame_answers_with_ready_data_first() {
+    let source = stream::iter([
+        first_segment_begin(),
+        Ok(SegmentEvent::Data(Bytes::from_static(b"new"))),
+    ])
+    .chain(stream::pending());
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let (task, mut key_frame_requests) = spawn_v3_session(transport, source);
+
+    start_and_send_pull_or_key_frame(&client_sender, &mut client_receiver).await;
+
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x00new")
+    );
+    assert!(
+        key_frame_requests.try_recv().is_err(),
+        "ready data needs no key frame"
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn pull_or_key_frame_asks_for_a_key_frame_when_nothing_is_ready() {
+    let (source_sender, mut source_receiver) = mpsc::unbounded_channel();
+    source_sender.send(first_segment_begin()).expect("queue segment begin");
+    let source = stream::poll_fn(move |cx| source_receiver.poll_recv(cx));
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let (task, mut key_frame_requests) = spawn_v3_session(transport, source);
+
+    start_and_send_pull_or_key_frame(&client_sender, &mut client_receiver).await;
+    receive_key_frame_request(&mut key_frame_requests).await;
+    source_sender
+        .send(Ok(SegmentEvent::Data(Bytes::from_static(b"key"))))
+        .expect("queue key frame");
+
+    assert_eq!(
+        receive_response(&mut client_receiver).await,
+        Bytes::from_static(b"\x00key")
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn a_turned_down_key_frame_request_is_asked_again() {
+    let source = stream::iter([first_segment_begin()]).chain(stream::pending());
+    let (transport, client_sender, mut client_receiver) = channel_transport();
+    let (task, mut key_frame_requests) = spawn_v3_session(transport, source);
+
+    start_and_send_pull_or_key_frame(&client_sender, &mut client_receiver).await;
+
+    receive_key_frame_request(&mut key_frame_requests).await;
+    receive_key_frame_request(&mut key_frame_requests).await;
+    task.abort();
+}
+

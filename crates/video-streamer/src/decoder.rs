@@ -7,14 +7,12 @@ pub(crate) struct Dimensions {
     pub height: u32,
 }
 
-pub(crate) struct DecodedFrame<'decoder> {
-    pub image: VpxImage<'decoder>,
-    pub dimensions: Dimensions,
-}
-
 pub(crate) struct InputDecoder {
     codec: VpxCodec,
     threads: u32,
+    // INVARIANT: `picture` points into a frame buffer owned by `decoder`, which stays valid until the next decode.
+    // It is cleared before every decode, and it is declared before `decoder` so that it is dropped first.
+    picture: Option<VpxImage<'static>>,
     decoder: Option<VpxDecoder>,
 }
 
@@ -23,11 +21,15 @@ impl InputDecoder {
         Self {
             codec,
             threads,
+            picture: None,
             decoder: None,
         }
     }
 
-    pub(crate) fn decode<'decoder>(&'decoder mut self, data: &[u8]) -> anyhow::Result<DecodedFrame<'decoder>> {
+    /// Decodes one frame and keeps its picture until the next call.
+    pub(crate) fn decode(&mut self, data: &[u8]) -> anyhow::Result<Dimensions> {
+        self.picture = None;
+
         if self.decoder.is_none() {
             self.decoder = Some(
                 VpxDecoder::builder()
@@ -50,6 +52,17 @@ impl InputDecoder {
             dimensions.width > 0 && dimensions.height > 0,
             "decoder returned invalid frame dimensions"
         );
-        Ok(DecodedFrame { image, dimensions })
+
+        // SAFETY: Only the lifetime changes. Per the field invariant, the picture is dropped before the decoder
+        // decodes again or is dropped, so it never outlives the frame buffer it points into.
+        let image = unsafe { core::mem::transmute::<VpxImage<'_>, VpxImage<'static>>(image) };
+        self.picture = Some(image);
+
+        Ok(dimensions)
+    }
+
+    /// The picture of the last decoded frame.
+    pub(crate) fn picture(&self) -> Option<&VpxImage<'_>> {
+        self.picture.as_ref()
     }
 }

@@ -11,7 +11,7 @@ use tokio::fs::{File, OpenOptions};
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 use video_streamer::{
-    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt, stream_session,
+    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SHADOW_PROTOCOL_V3, SessionConfig, ShadowProtocolVersion, StartAt, stream_session,
 };
 
 use crate::token::RecordingFileType;
@@ -190,17 +190,17 @@ pub(crate) async fn stream_recording(
     }
 }
 
-/// Selects shadow protocol V2 when the client offers its WebSocket subprotocol, and V1 otherwise.
+/// Selects the newest shadow protocol whose WebSocket subprotocol the client offers: V3, then V2, and V1 otherwise.
 ///
-/// The upgrade response echoes the subprotocol only for V2, so V2 clients can tell which version they got.
+/// The upgrade response echoes the selected subprotocol, so V2 and V3 clients can tell which version they got.
 pub(crate) fn negotiate_shadow_protocol(
     ws: axum::extract::WebSocketUpgrade,
 ) -> (axum::extract::WebSocketUpgrade, ShadowProtocolVersion) {
-    let ws = ws.protocols([SHADOW_PROTOCOL_V2]);
-    let version = if ws.selected_protocol().is_some() {
-        ShadowProtocolVersion::V2
-    } else {
-        ShadowProtocolVersion::V1
+    let ws = ws.protocols([SHADOW_PROTOCOL_V3, SHADOW_PROTOCOL_V2]);
+    let version = match ws.selected_protocol().map(|protocol| protocol.as_bytes()) {
+        Some(protocol) if protocol == SHADOW_PROTOCOL_V3.as_bytes() => ShadowProtocolVersion::V3,
+        Some(protocol) if protocol == SHADOW_PROTOCOL_V2.as_bytes() => ShadowProtocolVersion::V2,
+        _ => ShadowProtocolVersion::V1,
     };
     (ws, version)
 }
@@ -547,6 +547,7 @@ mod tests {
                                     let version = match version {
                                         ShadowProtocolVersion::V1 => "v1",
                                         ShadowProtocolVersion::V2 => "v2",
+                                        ShadowProtocolVersion::V3 => "v3",
                                     };
                                     ws.on_upgrade(move |mut socket| async move {
                                         let _ = socket
@@ -620,9 +621,11 @@ mod tests {
 
     #[rstest::rstest]
     #[case::offers_v2(Some("jrec-shadow.v2"), Some("jrec-shadow.v2"), "v2")]
-    #[case::offers_v2_among_others(Some("jrec-shadow.v3, jrec-shadow.v2"), Some("jrec-shadow.v2"), "v2")]
+    #[case::offers_v2_among_others(Some("jrec-shadow.v9, jrec-shadow.v2"), Some("jrec-shadow.v2"), "v2")]
+    #[case::offers_v3(Some("jrec-shadow.v3"), Some("jrec-shadow.v3"), "v3")]
+    #[case::offers_v3_after_v2(Some("jrec-shadow.v2, jrec-shadow.v3"), Some("jrec-shadow.v3"), "v3")]
     #[case::offers_nothing(None, None, "v1")]
-    #[case::offers_an_unknown_protocol(Some("jrec-shadow.v3"), None, "v1")]
+    #[case::offers_an_unknown_protocol(Some("jrec-shadow.v9"), None, "v1")]
     #[tokio::test]
     async fn client_gets_the_shadow_protocol_it_offers(
         #[case] offered: Option<&str>,
