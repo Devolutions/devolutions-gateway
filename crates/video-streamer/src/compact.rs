@@ -185,7 +185,7 @@ impl FrameReader {
                 }
                 MatroskaSpec::TrackEntry(Master::Start) => {
                     self.track_entries += 1;
-                    if self.track_entries > 1 {
+                    if 1 < self.track_entries {
                         return Ok(self.stop("multiple tracks are not supported".to_owned()));
                     }
                     self.track_entry = Some(TrackEntry::default());
@@ -372,8 +372,8 @@ impl Compactor {
         }
 
         let media_ms = frame.timestamp_ms.saturating_sub(self.first_ms);
-        let outgrown = self.output_bytes > self.input_size
-            || (media_ms >= SIZE_CHECK_GRACE_MS && self.output_bytes > self.input_bytes);
+        let outgrown = self.input_size < self.output_bytes
+            || (SIZE_CHECK_GRACE_MS <= media_ms && self.input_bytes < self.output_bytes);
         Ok(outgrown.then_some(SkipReason::NotSmaller))
     }
 
@@ -385,7 +385,7 @@ impl Compactor {
         last_key_frame_ms: Option<u64>,
     ) -> anyhow::Result<()> {
         let force_key_frame = last_key_frame_ms
-            .is_none_or(|key_frame_ms| timestamp_ms.saturating_sub(key_frame_ms) >= KEY_FRAME_INTERVAL_MS);
+            .is_none_or(|key_frame_ms| KEY_FRAME_INTERVAL_MS <= timestamp_ms.saturating_sub(key_frame_ms));
         // The duration only drives rate control; a kept frame may stand for minutes of unchanged picture.
         let duration = previous_encoded_ms.map_or(1000, |previous| timestamp_ms.saturating_sub(previous).max(1));
         *previous_encoded_ms = Some(timestamp_ms);
@@ -419,7 +419,7 @@ impl Compactor {
 
             let new_cluster = match self.cluster_start_ms {
                 None => true,
-                Some(start) => is_key_frame || timestamp.saturating_sub(start) > MAX_CLUSTER_SPAN_MS,
+                Some(start) => is_key_frame || MAX_CLUSTER_SPAN_MS < timestamp.saturating_sub(start),
             };
             if new_cluster {
                 if self.cluster_start_ms.is_some() {
@@ -454,7 +454,7 @@ impl Compactor {
         let mut file = self.writer.into_inner()?;
         file.flush()?;
 
-        if self.output_bytes >= self.input_size {
+        if self.input_size <= self.output_bytes {
             return Ok(CompactOutcome::Skipped(SkipReason::NotSmaller));
         }
 
@@ -527,8 +527,9 @@ fn picture_changed(previous: &[u8], current: &[u8], width: usize) -> bool {
                     .map(|(a, b)| u32::from(a.abs_diff(*b)))
                     .sum::<u32>();
             }
+            // INVARIANT: a block is at most BLOCK_SIZE x BLOCK_SIZE pixels, so the count fits in u32.
             let pixels = u32::try_from(rows.len() * columns.len()).expect("a block has at most 64 pixels");
-            if sum > CHANGE_THRESHOLD * pixels {
+            if CHANGE_THRESHOLD * pixels < sum {
                 return true;
             }
         }

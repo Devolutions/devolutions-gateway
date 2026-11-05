@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::io::Cursor;
+use std::path::Path;
 
 use cadeau::xmf::recorder::Recorder;
 use video_streamer::{CompactOutcome, SkipReason, compact_webm};
-
-mod support;
-use support::*;
+use webm_iterable::WebmIterator;
+use webm_iterable::matroska_spec::{Master, MatroskaSpec, SimpleBlock};
 
 const WIDTH: usize = 320;
 const HEIGHT: usize = 240;
@@ -56,16 +56,8 @@ fn noise(seed: u64) -> Vec<u8> {
         .collect()
 }
 
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = unique_temp_dir(name);
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
 fn decode_all(path: &Path) -> usize {
     use cadeau::xmf::vpx::{VpxCodec, VpxDecoder};
-    use webm_iterable::WebmIterator;
-    use webm_iterable::matroska_spec::{MatroskaSpec, SimpleBlock};
 
     let bytes = std::fs::read(path).expect("read output");
     let mut decoder = VpxDecoder::builder()
@@ -76,7 +68,7 @@ fn decode_all(path: &Path) -> usize {
         .build()
         .expect("build decoder");
     let mut frame_count = 0;
-    for tag in WebmIterator::new(std::io::Cursor::new(bytes), &[]) {
+    for tag in WebmIterator::new(Cursor::new(bytes), &[]) {
         let Ok(tag @ MatroskaSpec::SimpleBlock(_)) = tag else {
             continue;
         };
@@ -90,17 +82,52 @@ fn decode_all(path: &Path) -> usize {
     frame_count
 }
 
-// oracle: intent crates/video-streamer/src/compact.intent.md §changed-frame
+fn maybe_init_xmf() -> bool {
+    let Ok(path) = std::env::var("DGATEWAY_LIB_XMF_PATH") else {
+        eprintln!("Skipping test: DGATEWAY_LIB_XMF_PATH is not set");
+        return false;
+    };
+    let Ok(canonical) = std::fs::canonicalize(&path) else {
+        eprintln!("Skipping test: DGATEWAY_LIB_XMF_PATH ({path}) does not exist");
+        return false;
+    };
+    let path = canonical.to_str().expect("XMF path is UTF-8");
+    // SAFETY: XMF is loaded once per process from a path the test runner chose, as the service does at startup.
+    if let Err(error) = unsafe { cadeau::xmf::init(path) } {
+        eprintln!("Skipping test: failed to initialize XMF from {path}: {error}");
+        return false;
+    }
+    true
+}
+
+fn block_timestamps_ms(webm_bytes: &[u8]) -> Vec<u64> {
+    let mut cluster_ms = None;
+    let mut out = Vec::new();
+    for tag in WebmIterator::new(Cursor::new(webm_bytes), &[]) {
+        match tag.expect("valid WebM") {
+            MatroskaSpec::Cluster(Master::Start | Master::End) => cluster_ms = None,
+            MatroskaSpec::Timestamp(ms) => cluster_ms = Some(ms),
+            tag @ MatroskaSpec::SimpleBlock(_) => {
+                let block = SimpleBlock::try_from(&tag).expect("simple block");
+                let cluster_ms = cluster_ms.expect("block inside a cluster");
+                out.push(cluster_ms.saturating_add_signed(i64::from(block.timestamp)));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+// oracle: mutant dropping the last frame, which cuts the timeline short
 #[test]
 fn still_page_keeps_only_changed_frames_and_the_timeline() {
-    init_tracing();
     if !maybe_init_xmf() {
         return;
     }
 
-    let dir = temp_dir("video-streamer-compact-still");
-    let input = dir.join("input.webm");
-    let output = dir.join("output.webm");
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let input = dir.path().join("input.webm");
+    let output = dir.path().join("output.webm");
     record(&input, 300, |second| page(second >= 120));
 
     let outcome = compact_webm(&input, &output).expect("compact");
@@ -120,8 +147,8 @@ fn still_page_keeps_only_changed_frames_and_the_timeline() {
         input_bytes.len()
     );
 
-    let input_timestamps = extract_block_absolute_timestamps_ms(&input_bytes).expect("input timestamps");
-    let output_timestamps = extract_block_absolute_timestamps_ms(&output_bytes).expect("output timestamps");
+    let input_timestamps = block_timestamps_ms(&input_bytes);
+    let output_timestamps = block_timestamps_ms(&output_bytes);
     assert_eq!(input_timestamps.first(), output_timestamps.first());
     assert_eq!(input_timestamps.last(), output_timestamps.last());
     assert!(
@@ -130,46 +157,38 @@ fn still_page_keeps_only_changed_frames_and_the_timeline() {
     );
 
     assert_eq!(decode_all(&output), output_timestamps.len());
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
-// oracle: intent devolutions-gateway/src/recording.intent.md §compaction
+// oracle: mutant writing the output when it is not smaller than the input
 #[test]
 fn constant_change_is_not_compacted() {
-    init_tracing();
     if !maybe_init_xmf() {
         return;
     }
 
-    let dir = temp_dir("video-streamer-compact-noise");
-    let input = dir.join("input.webm");
-    let output = dir.join("output.webm");
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let input = dir.path().join("input.webm");
+    let output = dir.path().join("output.webm");
     record(&input, 90, noise);
 
     let outcome = compact_webm(&input, &output).expect("compact");
 
     assert_eq!(outcome, CompactOutcome::Skipped(SkipReason::NotSmaller));
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 // oracle: mutant failing on an input with no frames instead of skipping it
 #[test]
 fn missing_frames_are_skipped() {
-    init_tracing();
     if !maybe_init_xmf() {
         return;
     }
 
-    let dir = temp_dir("video-streamer-compact-empty");
-    let input = dir.join("input.webm");
-    let output = dir.join("output.webm");
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let input = dir.path().join("input.webm");
+    let output = dir.path().join("output.webm");
     std::fs::write(&input, b"").expect("write input");
 
     let outcome = compact_webm(&input, &output).expect("compact");
 
     assert_eq!(outcome, CompactOutcome::Skipped(SkipReason::NoFrames));
-
-    let _ = std::fs::remove_dir_all(dir);
 }

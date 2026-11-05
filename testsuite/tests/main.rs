@@ -12,3 +12,4 @@ mod private_fs;
 mod service_accounts;
 mod sysevent;
 mod timing;
+mod video_streamer;
