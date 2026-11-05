@@ -90,7 +90,7 @@ fn decode_all(path: &Path) -> usize {
     frame_count
 }
 
-// oracle: mutant dropping the last frame, which cuts the timeline short
+// oracle: intent crates/video-streamer/src/compact.intent.md §changed-frame
 #[test]
 fn still_page_keeps_only_changed_frames_and_the_timeline() {
     init_tracing();
@@ -134,7 +134,7 @@ fn still_page_keeps_only_changed_frames_and_the_timeline() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-// oracle: mutant writing the output when it is not smaller than the input
+// oracle: intent devolutions-gateway/src/recording.intent.md §compaction
 #[test]
 fn constant_change_is_not_compacted() {
     init_tracing();

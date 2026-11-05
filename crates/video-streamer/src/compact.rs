@@ -2,11 +2,12 @@
 //!
 //! Recorders that capture on a fixed tick (e.g. web pages at 1 fps) keep spending bytes on a picture that did not
 //! change, because the encoder keeps refining it. Compaction decodes the recording, keeps only the frames whose
-//! picture changed, and re-encodes them at their original timestamps with a quantizer ceiling so that text stays
-//! legible. The first and last frames are always kept, so the duration is unchanged.
+//! picture changed, and re-encodes them as VP8 at their original timestamps with a fixed quantizer, so every kept
+//! frame gets the same quality and no more bytes than that quality needs. The first and last frames are always kept,
+//! so the duration is unchanged.
 //!
-//! Damage-driven recordings (e.g. RDP) already contain only changed frames and usually grow when re-encoded with a
-//! quality ceiling. Compaction gives up as soon as its output outgrows the input it has consumed so far.
+//! Damage-driven recordings (e.g. RDP) already contain only changed frames and often grow when re-encoded.
+//! Compaction gives up as soon as its output outgrows the input it has consumed so far.
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write as _};
@@ -23,8 +24,10 @@ use crate::streamer::block_tag::{VideoBlock, is_vpx_key_frame};
 /// A block counts as changed when its mean absolute luma difference exceeds this value.
 const CHANGE_THRESHOLD: u32 = 12;
 const BLOCK_SIZE: usize = 8;
-/// Quantizer ceiling for the re-encode; 63 (the libvpx default) makes small text unreadable on sparse frames.
-const MAX_QUANTIZER: u8 = 30;
+/// The re-encode's quality: low enough that small text stays readable, high enough that most recordings shrink.
+const QUANTIZER: u8 = 30;
+/// High enough that rate control never pushes the quantizer away from [`QUANTIZER`].
+const BITRATE_KBPS: u32 = 100_000;
 const KEY_FRAME_INTERVAL_MS: u64 = 30_000;
 /// Media time after which the output must stay smaller than the input consumed so far.
 const SIZE_CHECK_GRACE_MS: u64 = 60_000;
@@ -87,16 +90,13 @@ struct Probe {
     width: u32,
     height: u32,
     first_ms: u64,
-    last_ms: u64,
 }
 
 fn probe(path: &Path) -> anyhow::Result<Result<Probe, SkipReason>> {
     let mut frames = FrameReader::open(path)?;
     let mut first_ms = None;
-    let mut last_ms = 0;
     while let Some(frame) = frames.next_frame()? {
         first_ms.get_or_insert(frame.timestamp_ms);
-        last_ms = frame.timestamp_ms;
     }
 
     if let Some(reason) = frames.unsupported.take() {
@@ -115,7 +115,6 @@ fn probe(path: &Path) -> anyhow::Result<Result<Probe, SkipReason>> {
         width,
         height,
         first_ms,
-        last_ms,
     }))
 }
 
@@ -268,8 +267,6 @@ impl FrameReader {
 }
 
 struct Compactor {
-    /// The output keeps the input codec.
-    codec: VpxCodec,
     width: u32,
     height: u32,
     first_ms: u64,
@@ -300,17 +297,16 @@ impl Compactor {
             .build()
             .context("build decoder")?;
 
-        let span_ms = probe.last_ms.saturating_sub(probe.first_ms).max(1000);
-        let bitrate_kbps = input_size.saturating_mul(8).div_ceil(span_ms).max(1);
         let encoder = VpxEncoder::builder()
             .timebase_num(1)
             .timebase_den(1000)
-            .codec(probe.codec)
+            .codec(VpxCodec::VP8)
             .width(probe.width)
             .height(probe.height)
             .threads(1)
-            .bitrate(u32::try_from(bitrate_kbps).unwrap_or(u32::MAX))
-            .max_quantizer(MAX_QUANTIZER)
+            .bitrate(BITRATE_KBPS)
+            .min_quantizer(QUANTIZER)
+            .max_quantizer(QUANTIZER)
             .build()
             .context("build encoder")?;
 
@@ -321,7 +317,6 @@ impl Compactor {
         let luma_size = usize::try_from(u64::from(probe.width) * u64::from(probe.height))?;
 
         Ok(Self {
-            codec: probe.codec,
             width: probe.width,
             height: probe.height,
             first_ms: probe.first_ms,
@@ -417,7 +412,7 @@ impl Compactor {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         for (timestamp, data) in frames {
-            let is_key_frame = is_vpx_key_frame(&data, self.codec);
+            let is_key_frame = is_vpx_key_frame(&data, VpxCodec::VP8);
             if is_key_frame {
                 self.last_key_frame_ms = Some(timestamp);
             }
@@ -471,10 +466,6 @@ impl Compactor {
 }
 
 fn write_header<W: std::io::Write>(writer: &mut WebmWriter<W>, probe: &Probe) -> anyhow::Result<()> {
-    let codec_id = match probe.codec {
-        VpxCodec::VP8 => "V_VP8",
-        VpxCodec::VP9 => "V_VP9",
-    };
     writer.write(&MatroskaSpec::Ebml(Master::Full(vec![
         MatroskaSpec::EbmlVersion(1),
         MatroskaSpec::EbmlReadVersion(1),
@@ -499,7 +490,7 @@ fn write_header<W: std::io::Write>(writer: &mut WebmWriter<W>, probe: &Probe) ->
             MatroskaSpec::TrackUID(1),
             MatroskaSpec::TrackType(1),
             MatroskaSpec::FlagLacing(0),
-            MatroskaSpec::CodecID(codec_id.to_owned()),
+            MatroskaSpec::CodecID("V_VP8".to_owned()),
             MatroskaSpec::Video(Master::Full(vec![
                 MatroskaSpec::PixelWidth(u64::from(probe.width)),
                 MatroskaSpec::PixelHeight(u64::from(probe.height)),
@@ -553,14 +544,14 @@ mod tests {
         vec![value; width * height]
     }
 
-    // oracle: mutant the detector reporting a change when no block differs
+    // oracle: intent crates/video-streamer/src/compact.intent.md §changed-frame
     #[test]
     fn identical_pictures_are_unchanged() {
         let a = picture(64, 48, 100);
         assert!(!picture_changed(&a, &a, 64));
     }
 
-    // oracle: mutant a change threshold below a mean luma difference of 10
+    // oracle: intent crates/video-streamer/src/compact.intent.md §changed-frame
     #[test]
     fn noise_below_threshold_is_unchanged() {
         let a = picture(64, 48, 100);
@@ -571,7 +562,7 @@ mod tests {
         assert!(!picture_changed(&a, &b, 64));
     }
 
-    // oracle: mutant the scan skipping the last full block column
+    // oracle: intent crates/video-streamer/src/compact.intent.md §changed-frame
     #[test]
     fn one_changed_block_counts() {
         let a = picture(64, 48, 100);
