@@ -34,13 +34,17 @@ const SIZE_CHECK_GRACE_MS: u64 = 60_000;
 const MAX_CLUSTER_SPAN_MS: u64 = 30_000;
 const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 const VPX_EFLAG_FORCE_KF: u32 = 0x0000_0001;
+/// The size the client declares decides two picture buffers before any frame is decoded, so it is capped.
+const MAX_DIMENSION: u32 = 8192;
 
+/// How many frames a written compaction read and kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompactStats {
     pub input_frames: u64,
     pub kept_frames: u64,
 }
 
+/// What [`compact_webm`] did with a recording.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactOutcome {
     /// The compacted recording was written to the output path. It still needs a remux to get cues and a duration.
@@ -49,9 +53,12 @@ pub enum CompactOutcome {
     Skipped(SkipReason),
 }
 
+/// Why a recording was left as it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkipReason {
+    /// The recording holds no video frame.
     NoFrames,
+    /// The recording uses something compaction does not handle; the text is for logs only.
     Unsupported(String),
     /// The output grew larger than the input it replaces.
     NotSmaller,
@@ -109,6 +116,11 @@ fn probe(path: &Path) -> anyhow::Result<Result<Probe, SkipReason>> {
     let (Some(width), Some(height)) = (video.width, video.height) else {
         return Ok(Err(SkipReason::Unsupported("video dimensions are missing".to_owned())));
     };
+    if !(width <= MAX_DIMENSION && height <= MAX_DIMENSION) {
+        return Ok(Err(SkipReason::Unsupported(format!(
+            "video is {width}x{height}, above {MAX_DIMENSION}"
+        ))));
+    }
 
     Ok(Ok(Probe {
         codec: video.codec,
