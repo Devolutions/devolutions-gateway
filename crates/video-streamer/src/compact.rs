@@ -553,12 +553,14 @@ mod tests {
         vec![value; width * height]
     }
 
+    // oracle: mutant the detector reporting a change when no block differs
     #[test]
     fn identical_pictures_are_unchanged() {
         let a = picture(64, 48, 100);
         assert!(!picture_changed(&a, &a, 64));
     }
 
+    // oracle: mutant a change threshold below a mean luma difference of 10
     #[test]
     fn noise_below_threshold_is_unchanged() {
         let a = picture(64, 48, 100);
@@ -569,6 +571,7 @@ mod tests {
         assert!(!picture_changed(&a, &b, 64));
     }
 
+    // oracle: mutant the scan skipping the last full block column
     #[test]
     fn one_changed_block_counts() {
         let a = picture(64, 48, 100);
@@ -582,6 +585,7 @@ mod tests {
         assert!(picture_changed(&a, &b, 64));
     }
 
+    // oracle: mutant the scan skipping a partial block on the right edge
     #[test]
     fn partial_edge_block_counts() {
         // 66x50 leaves 2-pixel-wide/high blocks on the right and bottom edges.
