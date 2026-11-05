@@ -1357,14 +1357,15 @@ fn compact(input_path: &Utf8Path) -> anyhow::Result<()> {
             .context("failed to read compacted recording metadata")?
             .len();
 
-        if compacted_size >= original_size {
+        if original_size <= compacted_size {
             debug!(%input_path, original_size, compacted_size, "Compacted recording is not smaller; keep the original");
             return Ok(());
         }
 
-        std::fs::rename(compacted_path, input_path).context("failed to override compacted file")?;
+        std::fs::rename(compacted_path, input_path)
+            .context("failed to replace the recording with the compacted file")?;
 
-        info!(
+        debug!(
             %input_path,
             original_size,
             compacted_size,

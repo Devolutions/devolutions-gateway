@@ -8164,6 +8164,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "base64 0.23.1",
+ "cadeau",
  "camino",
  "devolutions-gateway",
  "devolutions-gateway-task",
@@ -8207,6 +8208,8 @@ dependencies = [
  "tokio-util",
  "typed-builder",
  "uuid",
+ "video-streamer",
+ "webm-iterable",
  "win-api-wrappers",
  "windows 0.61.3",
 ]
