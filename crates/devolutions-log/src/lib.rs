@@ -21,6 +21,13 @@ pub trait StaticLogConfig {
     const LOG_FILE_PREFIX: &'static str;
 }
 
+pub struct LogFile {
+    pub path: std::path::PathBuf,
+    pub name: String,
+    pub size: u64,
+    pub modified: SystemTime,
+}
+
 pub struct LoggerGuard {
     _file_guard: WorkerGuard,
     _stdio_guard: WorkerGuard,
@@ -123,6 +130,63 @@ pub async fn find_latest_log_file<C: StaticLogConfig>(prefix: &Utf8Path) -> anyh
     }
 
     most_recent.context("no file found")
+}
+
+/// Lists the regular log files retained under the configured log path.
+pub async fn list_log_files<C: StaticLogConfig>(path: &Utf8Path) -> anyhow::Result<Vec<LogFile>> {
+    let cfg = LogPathCfg::<C>::from_path(path)?;
+    let mut read_dir = fs::read_dir(cfg.folder).await.context("couldn't read log directory")?;
+    let mut files = Vec::new();
+
+    while let Some(entry) = read_dir.next_entry().await.context("couldn't read log entry")? {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+
+        if !name.starts_with(cfg.prefix) || !name.ends_with(".log") {
+            continue;
+        }
+
+        let file_type = match entry.file_type().await {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                warn!(%error, name, "Couldn't read log file type");
+                continue;
+            }
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let metadata = match entry.metadata().await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                warn!(%error, name, "Couldn't read log metadata");
+                continue;
+            }
+        };
+        let modified = match metadata.modified() {
+            Ok(modified) => modified,
+            Err(error) => {
+                warn!(%error, name, "Couldn't read log modification time");
+                continue;
+            }
+        };
+        files.push(LogFile {
+            path: entry.path(),
+            name,
+            size: metadata.len(),
+            modified,
+        });
+    }
+
+    files.sort_by(|left, right| {
+        right
+            .modified
+            .cmp(&left.modified)
+            .then_with(|| right.name.cmp(&left.name))
+    });
+    Ok(files)
 }
 
 /// File deletion task (by age)
