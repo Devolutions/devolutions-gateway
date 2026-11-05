@@ -90,6 +90,7 @@ fn decode_all(path: &Path) -> usize {
     frame_count
 }
 
+// oracle: mutant dropping the last frame, which cuts the timeline short
 #[test]
 fn still_page_keeps_only_changed_frames_and_the_timeline() {
     init_tracing();
@@ -133,6 +134,7 @@ fn still_page_keeps_only_changed_frames_and_the_timeline() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+// oracle: mutant writing the output when it is not smaller than the input
 #[test]
 fn constant_change_is_not_compacted() {
     init_tracing();
@@ -152,6 +154,7 @@ fn constant_change_is_not_compacted() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+// oracle: mutant failing on an input with no frames instead of skipping it
 #[test]
 fn missing_frames_are_skipped() {
     init_tracing();
