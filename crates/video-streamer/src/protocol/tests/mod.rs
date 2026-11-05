@@ -989,10 +989,7 @@ async fn pull_or_key_frame_answers_with_ready_data_first() {
         receive_response(&mut client_receiver).await,
         Bytes::from_static(b"\x00new")
     );
-    assert!(
-        key_frame_requests.try_recv().is_err(),
-        "ready data needs no key frame"
-    );
+    assert!(key_frame_requests.try_recv().is_err(), "ready data needs no key frame");
     task.abort();
 }
 
@@ -1029,4 +1026,3 @@ async fn a_turned_down_key_frame_request_is_asked_again() {
     receive_key_frame_request(&mut key_frame_requests).await;
     task.abort();
 }
-

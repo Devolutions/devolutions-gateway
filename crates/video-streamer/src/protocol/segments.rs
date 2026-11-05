@@ -8,7 +8,7 @@ use super::message::ServerMessage;
 use crate::normalizer::{NormalizedSession, SegmentEvent};
 use crate::session::ShadowProtocolVersion;
 
-// A request the byte budget turns down is asked again at this interval while the client still waits.
+// The normalizer drops a request the byte budget turns down without telling us, so we ask again while we wait.
 const KEY_FRAME_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,12 +108,14 @@ impl SessionSegments<NormalizedSession> {
     pub(super) async fn next_or_key_frame(&mut self) -> anyhow::Result<ServerMessage> {
         let mut retry = tokio::time::interval(KEY_FRAME_RETRY_INTERVAL);
         retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
+        let response = loop {
             tokio::select! {
                 biased;
-                response = self.next() => return response,
+                response = self.next() => break response,
                 _ = retry.tick() => self.inner.request_key_frame(),
             }
-        }
+        };
+        self.inner.key_frame_answered();
+        response
     }
 }

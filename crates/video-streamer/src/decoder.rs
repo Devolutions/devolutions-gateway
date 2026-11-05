@@ -10,8 +10,8 @@ pub(crate) struct Dimensions {
 pub(crate) struct InputDecoder {
     codec: VpxCodec,
     threads: u32,
-    // INVARIANT: `picture` points into a frame buffer owned by `decoder`, which stays valid until the next decode.
-    // It is cleared before every decode, and it is declared before `decoder` so that it is dropped first.
+    /// INVARIANT: points into a frame buffer owned by `decoder`, which stays valid until the next decode.
+    /// It is cleared before every decode, and it is declared before `decoder` so that it is dropped first.
     picture: Option<VpxImage<'static>>,
     decoder: Option<VpxDecoder>,
 }

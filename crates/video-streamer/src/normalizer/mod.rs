@@ -1,5 +1,7 @@
 use std::io::{self, SeekFrom, Write};
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration, Instant};
 
@@ -48,6 +50,7 @@ pub(crate) enum SegmentEvent {
 pub(crate) struct NormalizedSession {
     receiver: mpsc::Receiver<anyhow::Result<SegmentEvent>>,
     key_frame_requests: mpsc::Sender<()>,
+    key_frame_wanted: Arc<AtomicBool>,
     supervisor: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -65,7 +68,13 @@ impl NormalizedSession {
     /// The request is dropped when one is already waiting, when there is no picture yet, or when the byte budget
     /// for synthetic key frames does not allow one yet; the caller asks again while it still waits.
     pub(crate) fn request_key_frame(&self) {
+        self.key_frame_wanted.store(true, Ordering::Release);
         let _ = self.key_frame_requests.try_send(());
+    }
+
+    /// Withdraws the request once the caller got its answer, so a request still in flight makes no key frame.
+    pub(crate) fn key_frame_answered(&self) {
+        self.key_frame_wanted.store(false, Ordering::Release);
     }
 
     pub(crate) async fn shutdown(mut self) -> anyhow::Result<()> {
@@ -116,6 +125,7 @@ where
         NormalizedSession {
             receiver,
             key_frame_requests,
+            key_frame_wanted: Arc::default(),
             supervisor: Some(supervisor),
         },
         request_receiver,
@@ -134,10 +144,14 @@ where
     let (output_sender, output_receiver) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
     let (input_sender, input_receiver) = mpsc::channel(INPUT_CHANNEL_CAPACITY);
     let (key_frame_requests, mut request_receiver) = mpsc::channel(1);
+    let key_frame_wanted = Arc::new(AtomicBool::new(false));
+    let worker_key_frame_wanted = Arc::clone(&key_frame_wanted);
 
     let supervisor = tokio::spawn(async move {
         let worker_sender = output_sender.clone();
-        let mut worker = tokio::task::spawn_blocking(move || normalize_events(input_receiver, worker_sender, config));
+        let mut worker = tokio::task::spawn_blocking(move || {
+            normalize_events(input_receiver, worker_sender, config, &worker_key_frame_wanted)
+        });
         let mut forward = Box::pin(async move {
             tokio::pin!(source);
             loop {
@@ -170,6 +184,7 @@ where
     NormalizedSession {
         receiver: output_receiver,
         key_frame_requests,
+        key_frame_wanted,
         supervisor: Some(supervisor),
     }
 }
@@ -190,16 +205,18 @@ fn normalize_events(
     mut receiver: mpsc::Receiver<InputEvent>,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
+    key_frame_wanted: &AtomicBool,
 ) -> anyhow::Result<()> {
     let mut phase = SessionPhase::AwaitClip;
     let mut next_segment_sequence = 0;
+    let mut last_synthetic_key_frame = None;
 
     while let Some(event) = receiver.blocking_recv() {
         let event = match event {
             InputEvent::Recording(event) => event,
             InputEvent::KeyFrameRequested => {
                 if let SessionPhase::InClip(clip) = &mut phase {
-                    clip.provide_key_frame()?;
+                    clip.provide_key_frame(key_frame_wanted, &mut last_synthetic_key_frame)?;
                 }
                 continue;
             }
@@ -324,7 +341,6 @@ struct ClipNormalizer {
     frames_since_last_encode: u32,
     source_frames_processed: u64,
     last_source_frame: Option<SourceFrameClock>,
-    last_synthetic_key_frame: Option<SyntheticKeyFrame>,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
 }
@@ -385,7 +401,6 @@ impl ClipNormalizer {
             frames_since_last_encode: 0,
             source_frames_processed: 0,
             last_source_frame: None,
-            last_synthetic_key_frame: None,
             sender,
             config,
         })
@@ -394,7 +409,11 @@ impl ClipNormalizer {
     /// Answers a key-frame request: new source frames first, otherwise a key frame of the current picture.
     ///
     /// Synthetic key frames share a byte budget, so each one waits until the previous one has had time to drain.
-    fn provide_key_frame(&mut self) -> anyhow::Result<()> {
+    fn provide_key_frame(
+        &mut self,
+        key_frame_wanted: &AtomicBool,
+        last_synthetic_key_frame: &mut Option<SyntheticKeyFrame>,
+    ) -> anyhow::Result<()> {
         if !matches!(self.phase, ClipPhase::Live) || self.sender.is_closed() {
             return Ok(());
         }
@@ -405,10 +424,7 @@ impl ClipNormalizer {
             return Ok(());
         }
 
-        if self
-            .last_synthetic_key_frame
-            .is_some_and(|previous| Instant::now() < previous.next_allowed_at())
-        {
+        if last_synthetic_key_frame.is_some_and(|previous| Instant::now() < previous.next_allowed_at()) {
             return Ok(());
         }
         let Some(source) = self.last_source_frame else {
@@ -420,12 +436,18 @@ impl ClipNormalizer {
         ) else {
             return Ok(());
         };
+        if key_frame_wanted
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Ok(());
+        }
 
         let elapsed_ms = u64::try_from(source.processed_at.elapsed().as_millis()).unwrap_or(u64::MAX);
         let timestamp = source.timestamp.saturating_add(elapsed_ms);
         let bytes = segment.encode(picture, timestamp, true)?;
-        debug!(timestamp, bytes, "Sent a synthetic key frame");
-        self.last_synthetic_key_frame = Some(SyntheticKeyFrame {
+        trace!(timestamp, bytes, "Sent a synthetic key frame");
+        *last_synthetic_key_frame = Some(SyntheticKeyFrame {
             sent_at: Instant::now(),
             bytes,
         });

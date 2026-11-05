@@ -11,7 +11,8 @@ use tokio::fs::{File, OpenOptions};
 use tokio::sync::{Notify, watch};
 use uuid::Uuid;
 use video_streamer::{
-    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SHADOW_PROTOCOL_V3, SessionConfig, ShadowProtocolVersion, StartAt, stream_session,
+    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SHADOW_PROTOCOL_V3, SessionConfig, ShadowProtocolVersion,
+    StartAt, stream_session,
 };
 
 use crate::token::RecordingFileType;

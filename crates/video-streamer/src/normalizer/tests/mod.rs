@@ -509,6 +509,7 @@ fn truncated_clip_tail_does_not_abort_the_following_clip() {
             encoder_threads: 1,
             adaptive_frame_skip: false,
         },
+        &AtomicBool::new(false),
     )
     .expect("normalize reconnecting clips");
     assert!(output_receiver.blocking_recv().is_none());
@@ -545,6 +546,7 @@ fn corruption_before_an_incomplete_tail_still_fails() {
             encoder_threads: 1,
             adaptive_frame_skip: false,
         },
+        &AtomicBool::new(false),
     )
     .expect_err("corruption before the incomplete tail must fail");
 
