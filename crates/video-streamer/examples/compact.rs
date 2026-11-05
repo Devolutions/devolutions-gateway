@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
     let input = PathBuf::from(args.next().context(usage)?);
     let output = PathBuf::from(args.next().context(usage)?);
 
-    // SAFETY: XMF has no initialization precondition beyond a valid library path.
+    // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
     unsafe { cadeau::xmf::init(&xmf_path) }.context("load XMF")?;
 
     let raw = output.with_extension("raw.webm");
@@ -30,8 +30,8 @@ fn main() -> anyhow::Result<()> {
             cadeau::xmf::muxer::webm_remux(&raw, &output).context("remux")?;
             let output_size = std::fs::metadata(&output)?.len();
             println!(
-                "written in={input_size} out={output_size} ratio={:.3} frames={}/{} cpu_s={:.2}",
-                output_size as f64 / input_size as f64,
+                "written in={input_size} out={output_size} ratio_pct={} frames={}/{} cpu_s={:.2}",
+                output_size.saturating_mul(100) / input_size.max(1),
                 stats.kept_frames,
                 stats.input_frames,
                 elapsed.as_secs_f64(),

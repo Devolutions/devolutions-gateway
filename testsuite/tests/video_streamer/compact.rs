@@ -82,22 +82,11 @@ fn decode_all(path: &Path) -> usize {
     frame_count
 }
 
-fn maybe_init_xmf() -> bool {
-    let Ok(path) = std::env::var("DGATEWAY_LIB_XMF_PATH") else {
-        eprintln!("Skipping test: DGATEWAY_LIB_XMF_PATH is not set");
-        return false;
-    };
-    let Ok(canonical) = std::fs::canonicalize(&path) else {
-        eprintln!("Skipping test: DGATEWAY_LIB_XMF_PATH ({path}) does not exist");
-        return false;
-    };
-    let path = canonical.to_str().expect("XMF path is UTF-8");
-    // SAFETY: XMF is loaded once per process from a path the test runner chose, as the service does at startup.
-    if let Err(error) = unsafe { cadeau::xmf::init(path) } {
-        eprintln!("Skipping test: failed to initialize XMF from {path}: {error}");
-        return false;
-    }
-    true
+/// These tests only run on request (`--ignored`), so a missing library is a setup error, not a reason to pass.
+fn init_xmf() {
+    let path = std::env::var("DGATEWAY_LIB_XMF_PATH").expect("DGATEWAY_LIB_XMF_PATH points at the XMF library");
+    // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
+    unsafe { cadeau::xmf::init(&path) }.expect("load XMF");
 }
 
 fn block_timestamps_ms(webm_bytes: &[u8]) -> Vec<u64> {
@@ -120,10 +109,9 @@ fn block_timestamps_ms(webm_bytes: &[u8]) -> Vec<u64> {
 
 // oracle: mutant dropping the last frame, which cuts the timeline short
 #[test]
+#[ignore = "needs XMF; run by the XMF step of the CI tests job"]
 fn still_page_keeps_only_changed_frames_and_the_timeline() {
-    if !maybe_init_xmf() {
-        return;
-    }
+    init_xmf();
 
     let dir = tempfile::tempdir().expect("create temp dir");
     let input = dir.path().join("input.webm");
@@ -161,10 +149,9 @@ fn still_page_keeps_only_changed_frames_and_the_timeline() {
 
 // oracle: mutant writing the output when it is not smaller than the input
 #[test]
+#[ignore = "needs XMF; run by the XMF step of the CI tests job"]
 fn constant_change_is_not_compacted() {
-    if !maybe_init_xmf() {
-        return;
-    }
+    init_xmf();
 
     let dir = tempfile::tempdir().expect("create temp dir");
     let input = dir.path().join("input.webm");
@@ -178,10 +165,9 @@ fn constant_change_is_not_compacted() {
 
 // oracle: mutant failing on an input with no frames instead of skipping it
 #[test]
+#[ignore = "needs XMF; run by the XMF step of the CI tests job"]
 fn missing_frames_are_skipped() {
-    if !maybe_init_xmf() {
-        return;
-    }
+    init_xmf();
 
     let dir = tempfile::tempdir().expect("create temp dir");
     let input = dir.path().join("input.webm");
