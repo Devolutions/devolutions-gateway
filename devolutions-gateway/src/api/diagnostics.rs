@@ -257,6 +257,7 @@ async fn open_regular_log_file(path: &FsPath) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt as _;
+
         use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
         if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
