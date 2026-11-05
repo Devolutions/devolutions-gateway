@@ -41,7 +41,7 @@ where
         }
     };
     let mut segments = SessionSegments::new(crate::normalizer::normalize(source_stream, config), version);
-    let stream_result = run_started_session(&mut transport, &mut segments, version).await;
+    let stream_result = run_started_session(&mut transport, &mut segments).await;
     let shutdown_result = segments.into_inner().shutdown().await;
 
     match (stream_result, shutdown_result) {
@@ -124,7 +124,6 @@ where
 async fn run_started_session<T, E>(
     transport: &mut CodecTransport<T>,
     segments: &mut SessionSegments<NormalizedSession>,
-    version: ShadowProtocolVersion,
 ) -> anyhow::Result<()>
 where
     T: Stream<Item = Result<Bytes, E>> + Sink<Bytes, Error = E> + Unpin,
@@ -134,7 +133,7 @@ where
     transport.send(ServerMessage::Metadata).await?;
 
     loop {
-        let Some(request) = receive_pull(transport, version).await? else {
+        let Some(request) = receive_pull(transport, segments.version()).await? else {
             return Ok(());
         };
         debug!(?request, "Serving pull request");

@@ -65,6 +65,9 @@ impl Stream for NormalizedSession {
 impl NormalizedSession {
     /// Asks for a key frame of the current picture when no new source frame has arrived.
     ///
+    /// The channel wakes the normalizer; the flag says whether the caller still waits, so a request that is
+    /// still in flight after [`Self::key_frame_answered`] makes no key frame.
+    ///
     /// The request is dropped when one is already waiting, when there is no picture yet, or when the byte budget
     /// for synthetic key frames does not allow one yet; the caller asks again while it still waits.
     pub(crate) fn request_key_frame(&self) {

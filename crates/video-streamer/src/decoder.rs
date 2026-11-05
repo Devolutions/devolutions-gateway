@@ -11,7 +11,7 @@ pub(crate) struct InputDecoder {
     codec: VpxCodec,
     threads: u32,
     /// INVARIANT: points into a frame buffer owned by `decoder`, which stays valid until the next decode.
-    /// It is cleared before every decode, and it is declared before `decoder` so that it is dropped first.
+    /// It is cleared before every decode and on drop, and only `decode` may replace `decoder`.
     picture: Option<VpxImage<'static>>,
     decoder: Option<VpxDecoder>,
 }
@@ -64,5 +64,12 @@ impl InputDecoder {
     /// The picture of the last decoded frame.
     pub(crate) fn picture(&self) -> Option<&VpxImage<'_>> {
         self.picture.as_ref()
+    }
+}
+
+impl Drop for InputDecoder {
+    fn drop(&mut self) {
+        // Field order alone would also drop the picture first; this keeps the invariant if the fields move.
+        self.picture = None;
     }
 }

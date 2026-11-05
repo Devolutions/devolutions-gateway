@@ -43,6 +43,13 @@ where
         *Pin::into_inner(self.inner)
     }
 
+    pub(super) fn version(&self) -> ShadowProtocolVersion {
+        self.version
+    }
+
+    /// # Cancel safety
+    ///
+    /// Cancel-safe: it only awaits the next event, and updates its state right after receiving one.
     pub(super) async fn next(&mut self) -> anyhow::Result<ServerMessage> {
         anyhow::ensure!(self.state != SegmentState::Ended, "segment stream already ended");
 

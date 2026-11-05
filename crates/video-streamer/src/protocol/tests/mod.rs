@@ -129,7 +129,7 @@ where
         .await?
         .ok_or_else(|| anyhow::anyhow!("test transport closed before Start"))?;
 
-    let stream_result = run_started_session(&mut transport, &mut segments, version).await;
+    let stream_result = run_started_session(&mut transport, &mut segments).await;
     let shutdown_result = segments.into_inner().shutdown().await;
 
     match (stream_result, shutdown_result) {
@@ -921,7 +921,7 @@ where
         receive_expected_request(&mut transport, ClientMessage::Start)
             .await?
             .context("test transport closed before Start")?;
-        let stream_result = run_started_session(&mut transport, &mut segments, ShadowProtocolVersion::V3).await;
+        let stream_result = run_started_session(&mut transport, &mut segments).await;
         let shutdown_result = segments.into_inner().shutdown().await;
         stream_result.and(shutdown_result)
     });
