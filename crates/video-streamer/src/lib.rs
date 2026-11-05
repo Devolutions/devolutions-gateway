@@ -40,7 +40,7 @@ pub use streamer::reopenable_file::ReOpenableFile;
 pub use streamer::webm_stream;
 #[rustfmt::skip]
 pub use session::{
-    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
+    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SHADOW_PROTOCOL_V3, SessionConfig, ShadowProtocolVersion, StartAt,
     stream_session,
 };
 

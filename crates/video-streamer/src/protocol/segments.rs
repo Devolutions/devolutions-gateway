@@ -1,11 +1,15 @@
 use std::pin::Pin;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use futures_util::{Stream, StreamExt as _};
 
 use super::message::ServerMessage;
-use crate::normalizer::SegmentEvent;
+use crate::normalizer::{NormalizedSession, SegmentEvent};
 use crate::session::ShadowProtocolVersion;
+
+// The normalizer drops a request the byte budget turns down without telling us, so we ask again while we wait.
+const KEY_FRAME_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SegmentState {
@@ -39,6 +43,13 @@ where
         *Pin::into_inner(self.inner)
     }
 
+    pub(super) fn version(&self) -> ShadowProtocolVersion {
+        self.version
+    }
+
+    /// # Cancel safety
+    ///
+    /// Cancel-safe: it only awaits the next event, and updates its state right after receiving one.
     pub(super) async fn next(&mut self) -> anyhow::Result<ServerMessage> {
         anyhow::ensure!(self.state != SegmentState::Ended, "segment stream already ended");
 
@@ -96,5 +107,22 @@ where
                 }
             }
         }
+    }
+}
+
+impl SessionSegments<NormalizedSession> {
+    /// Answers with new data when it is ready, and otherwise asks the normalizer for a synthetic key frame.
+    pub(super) async fn next_or_key_frame(&mut self) -> anyhow::Result<ServerMessage> {
+        let mut retry = tokio::time::interval(KEY_FRAME_RETRY_INTERVAL);
+        retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let response = loop {
+            tokio::select! {
+                biased;
+                response = self.next() => break response,
+                _ = retry.tick() => self.inner.request_key_frame(),
+            }
+        };
+        self.inner.key_frame_answered();
+        response
     }
 }
