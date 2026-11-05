@@ -71,6 +71,10 @@ pub fn compact_webm(input_path: &Path, output_path: &Path) -> anyhow::Result<Com
     let input_size = std::fs::metadata(input_path)
         .with_context(|| format!("read metadata of {}", input_path.display()))?
         .len();
+    // Creating the output truncates it, which would destroy the recording if both paths name the same file.
+    if output_path.exists() && std::fs::canonicalize(output_path)? == std::fs::canonicalize(input_path)? {
+        anyhow::bail!("output {} is the input recording", output_path.display());
+    }
 
     let probe = match probe(input_path)? {
         Ok(probe) => probe,
@@ -356,7 +360,8 @@ impl Compactor {
         self.decoder.decode(&frame.data).context("decode frame")?;
         // Frames that produce no picture (e.g. VP9 hidden frames) leave the screen unchanged.
         let Ok(image) = self.decoder.next_frame() else {
-            return Ok(None);
+            // The last frame is what keeps the duration, so a last frame without a picture leaves the recording as is.
+            return Ok(is_last.then(|| SkipReason::Unsupported("the last frame has no picture".to_owned())));
         };
 
         if image.width() != self.width || image.height() != self.height {

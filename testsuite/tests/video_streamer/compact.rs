@@ -178,3 +178,19 @@ fn missing_frames_are_skipped() {
 
     assert_eq!(outcome, CompactOutcome::Skipped(SkipReason::NoFrames));
 }
+
+// oracle: intent devolutions-gateway/src/recording.intent.md §compaction
+#[test]
+#[ignore = "needs XMF; run by the XMF step of the CI tests job"]
+fn output_naming_the_input_leaves_the_recording_intact() {
+    init_xmf();
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let input = dir.path().join("input.webm");
+    record(&input, 30, |second| page(second >= 10));
+    let before = std::fs::read(&input).expect("read input");
+
+    compact_webm(&input, &input).expect_err("compacting a recording onto itself is refused");
+
+    assert_eq!(std::fs::read(&input).expect("read input"), before);
+}
