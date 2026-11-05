@@ -954,6 +954,7 @@ async fn receive_key_frame_request(key_frame_requests: &mut mpsc::Receiver<()>) 
         .expect("key-frame request channel closed");
 }
 
+// oracle: intent devolutions-gateway/src/streaming.intent.md §synthetic-key-frames
 #[tokio::test]
 async fn v2_rejects_pull_or_key_frame() {
     let source = stream::iter([first_segment_begin()]).chain(stream::pending());
@@ -973,6 +974,7 @@ async fn v2_rejects_pull_or_key_frame() {
     assert!(task.await.expect("stream task panicked").is_err());
 }
 
+// oracle: intent devolutions-gateway/src/streaming.intent.md §synthetic-key-frames
 #[tokio::test]
 async fn pull_or_key_frame_answers_with_ready_data_first() {
     let source = stream::iter([
@@ -993,6 +995,7 @@ async fn pull_or_key_frame_answers_with_ready_data_first() {
     task.abort();
 }
 
+// oracle: intent devolutions-gateway/src/streaming.intent.md §synthetic-key-frames
 #[tokio::test]
 async fn pull_or_key_frame_asks_for_a_key_frame_when_nothing_is_ready() {
     let (source_sender, mut source_receiver) = mpsc::unbounded_channel();
@@ -1014,6 +1017,7 @@ async fn pull_or_key_frame_asks_for_a_key_frame_when_nothing_is_ready() {
     task.abort();
 }
 
+// oracle: intent devolutions-gateway/src/streaming.intent.md §synthetic-key-frames
 #[tokio::test]
 async fn a_turned_down_key_frame_request_is_asked_again() {
     let source = stream::iter([first_segment_begin()]).chain(stream::pending());

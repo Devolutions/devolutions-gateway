@@ -553,6 +553,7 @@ fn corruption_before_an_incomplete_tail_still_fails() {
     assert!(format!("{error:#}").contains("corrupted"), "{error:#}");
 }
 
+// oracle: intent devolutions-gateway/src/streaming.intent.md §synthetic-key-frames
 #[test]
 fn a_synthetic_key_frame_holds_the_next_one_back_by_its_size() {
     let sent_at = Instant::now();
