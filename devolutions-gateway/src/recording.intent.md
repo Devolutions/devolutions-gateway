@@ -22,3 +22,9 @@ As soon as 4011 is received:
 Every other close, including a WebSocket close without a code or with code 1000, and a connection lost without any close, is treated as a network interruption or a clip switch.
 In that case, the recording stays active until its reconnection timeout passes.
 Gateway does not refuse a later push for the same session with a new token after 4011.
+
+
+<a id="compaction"></a>
+# Compaction
+Gateway always remuxes a finished WebM recording, whether or not compaction then runs or succeeds.
+Compaction replaces the recording only when its remuxed output is strictly smaller; otherwise the remuxed recording stays.

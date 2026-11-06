@@ -400,6 +400,18 @@ jobs:
         env:
           AWS_LC_SYS_NO_ASM: true
 
+      - name: XMF tests
+        if: ${{ matrix.os != 'macos' }}
+        run: |
+          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
+          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture '${{ matrix.arch }}'
+          $Lib = @{'windows'='xmf.dll'; 'linux'='libxmf.so'}['${{ matrix.os }}']
+          $Env:DGATEWAY_LIB_XMF_PATH = Join-Path 'native-libs' $Lib | Resolve-Path
+          cargo test --locked --target ${{ matrix.target }} -p testsuite --test integration_tests video_streamer:: -- --ignored
+        shell: pwsh
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
       - name: Root-only tests
         if: ${{ matrix.os == 'linux' }}
         # Cargo builds as the runner user and runs only the test binary as root, so no build output is owned by root.
