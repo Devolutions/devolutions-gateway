@@ -130,7 +130,7 @@ dlopen = "0.1"
 dlopen_derive = "0.1"
 
 # Video processing for session recording
-cadeau = { version = "0.5.3", features = ["dlopen"] }
+cadeau = { version = "0.5.4", features = ["dlopen"] }
 
 # Dependencies required for PCAP support
 # QUESTION: should we keep that built-in?
