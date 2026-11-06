@@ -341,48 +341,6 @@
             "text": "Impossible de joindre le serveur PowerShell Universal ({0}).\n\nVoulez-vous continuer quand même ?"
           }
         ],
-        "deviceManagement": [
-          {
-            "id": "DeviceManagementDlgTitle",
-            "text": "Gestion des appareils"
-          },
-          {
-            "id": "DeviceManagementDlgDescription",
-            "text": "L'agent inscrit cette machine dans Devolutions Server pour la gestion des appareils."
-          },
-          {
-            "id": "DeviceManagementDlgGrpcUrlLabel",
-            "text": "URL gRPC de Devolutions Server :"
-          },
-          {
-            "id": "DeviceManagementDlgGrpcUrlHint",
-            "text": "Requis. p. ex. http://dvls-host:5002"
-          },
-          {
-            "id": "DeviceManagementDlgTestConnection",
-            "text": "Tester la connexion"
-          },
-          {
-            "id": "DeviceManagementDlgTestingConnection",
-            "text": "Test de la connexion..."
-          },
-          {
-            "id": "DeviceManagementDlgConnectionSuccessful",
-            "text": "Connexion réussie"
-          },
-          {
-            "id": "DeviceManagementDlgConnectionFailed",
-            "text": "Échec de la connexion : {0}"
-          },
-          {
-            "id": "DeviceManagementDlgGrpcUrlInvalid",
-            "text": "L'URL gRPC doit être une URL http ou https absolue, par exemple http://dvls-host:5002."
-          },
-          {
-            "id": "DeviceManagementDlgGrpcUrlRequired",
-            "text": "Une URL gRPC est requise. Saisissez l'URL gRPC de Devolutions Server, ou revenez en arrière et désélectionnez la fonctionnalité PEDM."
-          }
-        ],
         "firewall": [
           {
             "id": "msierrFirewallCannotConnect",

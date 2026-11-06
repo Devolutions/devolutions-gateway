@@ -1,26 +1,37 @@
 //! Device management prototype.
 //!
-//! The agent enrolls the machine in Devolutions Server with an unauthenticated gRPC call (prototype
-//! only, no security), then keeps a bidirectional gRPC stream open. Devolutions Server asks for an inventory sync on this stream, and
-//! the agent reads the installed packages from the local UniGetUI IPC API. DVLS also sends package operations (install,
-//! update, uninstall) on this stream. The agent runs them through UniGetUI, then sends the result and a new inventory.
+//! The agent keeps a bidirectional gRPC stream open to Devolutions Server, on the Agent Identity channel URL. It
+//! authenticates the stream with its Agent Identity: the opening request is signed with the identity key, and the first
+//! message answers the server challenge with a proof (same handshake as the Agent Identity channel). Devolutions Server
+//! asks for an inventory sync on this stream, and the agent reads the installed packages from the local UniGetUI IPC
+//! API. DVLS also sends package operations (install, update, uninstall) on this stream. The agent runs them through
+//! UniGetUI, then sends the result and a new inventory.
 
 mod unigetui;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, bail};
+use agent_identity::schedule::{self, ChannelUrl};
+use agent_identity::state::{IDENTITY_KEY_PREFIX, Store};
+use agent_identity::{client, metadata};
+use agent_identity_httpsig::{ChannelLayer, OpeningNonce, RequestSigner};
+use anyhow::{Context as _, anyhow, bail};
 use async_trait::async_trait;
 use backoff::backoff::Backoff as _;
+use device_key::{DeviceKey, KeyBackend};
 use devolutions_agent_shared::get_data_dir;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
-use tonic::transport::Endpoint;
+use tonic::transport::{Certificate, ClientTlsConfig, Endpoint};
+use tower::Layer as _;
+use url::Url;
 use uuid::Uuid;
 
-use crate::config::{ConfHandle, DeviceManagementConf};
+use crate::config::{Conf, ConfHandle};
+use crate::identity::config::IdentityKeyBackend;
 
 #[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
 pub mod protocol {
@@ -31,11 +42,11 @@ use protocol::agent_message::Payload as AgentPayload;
 use protocol::device_management_client::DeviceManagementClient;
 use protocol::server_message::Payload as ServerPayload;
 use protocol::{
-    AgentMessage, EnrollRequest, Hello, InstalledPackage, InventoryReport, PackageOperationRequest,
-    PackageOperationResult, PackageOperationType,
+    AgentMessage, Hello, InstalledPackage, InventoryReport, PackageOperationRequest, PackageOperationResult,
+    PackageOperationType,
 };
 
-const DEVICE_ID_FILE_NAME: &str = "device_management_id";
+const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
 
 pub struct DeviceManagementTask {
     conf_handle: ConfHandle,
@@ -54,32 +65,27 @@ impl Task for DeviceManagementTask {
     const NAME: &'static str = "device management";
 
     async fn run(self, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
-        let conf = self
-            .conf_handle
-            .get_conf()
-            .device_management
-            .clone()
-            .context("device management task started but device management is disabled")?;
-        let agent = DeviceManagementAgent::new(conf)?;
-        agent.run(shutdown_signal).await
+        let conf = self.conf_handle.get_conf();
+        if conf.device_management.is_none() {
+            bail!("device management task started but device management is disabled");
+        }
+        DeviceManagementAgent { conf }.run(shutdown_signal).await
     }
+}
+
+/// The enrolled Agent Identity that authenticates one device management session.
+struct SessionIdentity {
+    identity_id: Uuid,
+    url: Url,
+    key: Arc<dyn DeviceKey>,
+    leaf_certificate_der: Vec<u8>,
 }
 
 struct DeviceManagementAgent {
-    conf: DeviceManagementConf,
-    device_id: String,
-    machine_name: String,
+    conf: Arc<Conf>,
 }
 
 impl DeviceManagementAgent {
-    fn new(conf: DeviceManagementConf) -> anyhow::Result<Self> {
-        Ok(Self {
-            conf,
-            device_id: load_or_create_device_id()?,
-            machine_name: machine_name(),
-        })
-    }
-
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
         const RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
         const RETRY_MAX_INTERVAL: Duration = Duration::from_secs(60);
@@ -97,11 +103,7 @@ impl DeviceManagementAgent {
 
             match self.run_single_session(&mut shutdown_signal).await {
                 Ok(()) => return Ok(()),
-                Err(error) => warn!(
-                    url = %self.conf.grpc_url,
-                    error = format!("{error:#}"),
-                    "Device management session failed"
-                ),
+                Err(error) => warn!(error = format!("{error:#}"), "Device management session failed"),
             }
 
             if start.elapsed() > CONNECTED_THRESHOLD {
@@ -118,7 +120,51 @@ impl DeviceManagementAgent {
         }
     }
 
-    /// Enrolls the device, then serves the gRPC stream until it closes.
+    /// Reads the first usable Agent Identity from the store. The identity task owns enrollment and renewal.
+    fn session_identity(&self) -> anyhow::Result<SessionIdentity> {
+        let settings = self.conf.debug.identity.clone().unwrap_or_default();
+        let data_dir = get_data_dir();
+        let backend = match self.conf.identity.key_backend {
+            IdentityKeyBackend::File => Store::file_backend(&data_dir),
+            IdentityKeyBackend::WindowsSoftwareProvider => KeyBackend::WindowsSoftwareProvider,
+        };
+        let store = Store::new(
+            data_dir,
+            backend,
+            settings
+                .key_name_prefix
+                .clone()
+                .unwrap_or_else(|| IDENTITY_KEY_PREFIX.to_owned()),
+            settings.acl_grant_current_user.unwrap_or_default(),
+        )
+        .context("open Agent Identity store")?;
+
+        for identity in store.list_identities().context("list Agent Identities")? {
+            if identity.rejected.is_some() {
+                continue;
+            }
+            let ChannelUrl::Usable(url) = schedule::channel_url(&identity.config) else {
+                continue;
+            };
+            let current = &identity.keys.current;
+            let chain = current
+                .certificate_chain
+                .as_deref()
+                .context("identity key has no certificate chain")?;
+            let key = device_key::open(store.key_backend(), &current.key_name)?
+                .context("Agent Identity key is missing")?;
+            return Ok(SessionIdentity {
+                identity_id: identity.identity_id,
+                url,
+                key: Arc::from(key),
+                leaf_certificate_der: client::leaf_certificate_der(chain)?,
+            });
+        }
+
+        bail!("waiting for an enrolled Agent Identity with a channel URL")
+    }
+
+    /// Opens the authenticated stream, then serves it until it closes.
     async fn run_single_session(&self, shutdown_signal: &mut ShutdownSignal) -> anyhow::Result<()> {
         const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
         const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -126,8 +172,21 @@ impl DeviceManagementAgent {
         const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
         const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-        let grpc_url = self.conf.grpc_url.to_string();
-        let channel = Endpoint::from_shared(grpc_url.clone())?
+        let identity = self.session_identity()?;
+        let settings = self.conf.debug.identity.clone().unwrap_or_default();
+
+        let host = identity.url.host_str().context("channel URL without host")?;
+        let port = identity.url.port_or_known_default().context("channel URL without port")?;
+        let origin = format!("https://{host}:{port}");
+
+        let mut tls = ClientTlsConfig::new().with_native_roots();
+        if let Some(path) = &settings.extra_trusted_root {
+            let pem = std::fs::read(path).with_context(|| format!("failed to read {path}"))?;
+            tls = tls.ca_certificate(Certificate::from_pem(pem));
+        }
+
+        let channel = Endpoint::from_shared(origin.clone())?
+            .tls_config(tls)?
             .connect_timeout(CONNECT_TIMEOUT)
             .tcp_keepalive(Some(KEEP_ALIVE_INTERVAL))
             .http2_keep_alive_interval(KEEP_ALIVE_INTERVAL)
@@ -135,41 +194,55 @@ impl DeviceManagementAgent {
             .keep_alive_while_idle(true)
             .connect()
             .await
-            .with_context(|| format!("failed to connect device management gRPC endpoint at {grpc_url}"))?;
-        let mut client = DeviceManagementClient::new(channel);
-
-        tokio::time::timeout(
-            CALL_TIMEOUT,
-            client.enroll(EnrollRequest {
-                device_id: self.device_id.clone(),
-                machine_name: self.machine_name.clone(),
-                operating_system: operating_system(),
-                agent_version: env!("CARGO_PKG_VERSION").to_owned(),
-            }),
-        )
-        .await
-        .context("enroll timed out")?
-        .context("enroll rejected")?;
-        info!(device_id = %self.device_id, "Device enrolled in Devolutions Server");
+            .with_context(|| format!("failed to connect device management endpoint at {origin}"))?;
+        let signer = RequestSigner::new(Arc::clone(&identity.key), &identity.leaf_certificate_der);
+        let mut client = DeviceManagementClient::new(ChannelLayer::new(signer, &identity.url).layer(channel));
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(16);
+        let (handoff, nonce_rx) = OpeningNonce::new();
+        let mut request = Request::new(ReceiverStream::new(outgoing_rx));
+        request.extensions_mut().insert(handoff);
+
+        let (mut response_stream, challenge) = tokio::time::timeout(CALL_TIMEOUT, async {
+            let mut response_stream = client
+                .connect(request)
+                .await
+                .context("failed to open device management stream")?
+                .into_inner();
+            loop {
+                let message = response_stream
+                    .message()
+                    .await
+                    .context("failed to read device management challenge")?
+                    .context("Devolutions Server closed the stream before the challenge")?;
+                if let Some(ServerPayload::Challenge(challenge)) = message.payload {
+                    return anyhow::Ok((response_stream, challenge));
+                }
+            }
+        })
+        .await
+        .context("opening the device management stream timed out")??;
+        let nonce = nonce_rx.await.context("opening signed without a nonce")?;
+
+        let proof = identity
+            .key
+            .try_sign(&channel_proof_input(&challenge.challenge, &nonce))
+            .map_err(|error| anyhow!("sign channel proof: {error}"))?;
+        let hello = Hello {
+            correlation_id: challenge.challenge_id,
+            proof: proof.to_bytes().to_vec(),
+            metadata: metadata::collect(env!("CARGO_PKG_VERSION"), settings.metadata_override_path.as_deref())
+                .into_iter()
+                .collect(),
+        };
         outgoing_tx
             .send(AgentMessage {
-                payload: Some(AgentPayload::Hello(self.hello())),
+                payload: Some(AgentPayload::Hello(hello)),
             })
             .await
             .context("failed to queue hello")?;
 
-        let mut response_stream = tokio::time::timeout(
-            CALL_TIMEOUT,
-            client.connect(Request::new(ReceiverStream::new(outgoing_rx))),
-        )
-        .await
-        .context("opening the device management stream timed out")?
-        .context("failed to open device management stream")?
-        .into_inner();
-
-        info!(device_id = %self.device_id, url = %grpc_url, "Device management stream connected");
+        info!(identity_id = %identity.identity_id, url = %identity.url, "Device management stream connected");
 
         loop {
             tokio::select! {
@@ -222,18 +295,22 @@ impl DeviceManagementAgent {
                                 }
                             });
                         }
-                        None => {}
+                        Some(ServerPayload::Challenge(_)) | None => {}
                     }
                 }
             }
         }
     }
+}
 
-    fn hello(&self) -> Hello {
-        Hello {
-            device_id: self.device_id.clone(),
-        }
-    }
+/// Returns the bytes that the channel proof signs: the domain, a separator, the challenge and the signed opening nonce.
+fn channel_proof_input(challenge: &[u8], connect_nonce: &str) -> Vec<u8> {
+    let mut input = Vec::with_capacity(CHANNEL_PROOF_DOMAIN.len() + 1 + challenge.len() + connect_nonce.len());
+    input.extend_from_slice(CHANNEL_PROOF_DOMAIN);
+    input.push(0x00);
+    input.extend_from_slice(challenge);
+    input.extend_from_slice(connect_nonce.as_bytes());
+    input
 }
 
 const PACKAGE_STATE_POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -408,33 +485,4 @@ async fn run_package_operation(request: PackageOperationRequest) -> PackageOpera
             }
         }
     }
-}
-
-fn load_or_create_device_id() -> anyhow::Result<String> {
-    let path = get_data_dir().join(DEVICE_ID_FILE_NAME);
-
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        let existing = existing.trim();
-        if Uuid::parse_str(existing).is_ok() {
-            return Ok(existing.to_owned());
-        }
-    }
-
-    let device_id = Uuid::new_v4().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("failed to create {parent}"))?;
-    }
-    std::fs::write(&path, &device_id).with_context(|| format!("failed to write {path}"))?;
-    Ok(device_id)
-}
-
-fn machine_name() -> String {
-    hostname::get()
-        .ok()
-        .and_then(|name| name.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_owned())
-}
-
-fn operating_system() -> String {
-    format!("{} ({})", std::env::consts::OS, std::env::consts::ARCH)
 }

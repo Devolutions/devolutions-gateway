@@ -340,45 +340,5 @@ namespace DevolutionsAgent.Resources
 		/// Could not reach the PowerShell Universal server ({0}).Do you want to continue anyway?
 		/// </summary>
 		public const string PsuDlgServerUnreachable = "PsuDlgServerUnreachable";		
-		/// <summary>
-		/// Device management
-		/// </summary>
-		public const string DeviceManagementDlgTitle = "DeviceManagementDlgTitle";		
-		/// <summary>
-		/// The agent enrolls this machine in Devolutions Server for device management.
-		/// </summary>
-		public const string DeviceManagementDlgDescription = "DeviceManagementDlgDescription";		
-		/// <summary>
-		/// Devolutions Server gRPC URL:
-		/// </summary>
-		public const string DeviceManagementDlgGrpcUrlLabel = "DeviceManagementDlgGrpcUrlLabel";		
-		/// <summary>
-		/// Required. e.g. http://dvls-host:5002
-		/// </summary>
-		public const string DeviceManagementDlgGrpcUrlHint = "DeviceManagementDlgGrpcUrlHint";		
-		/// <summary>
-		/// Test connection
-		/// </summary>
-		public const string DeviceManagementDlgTestConnection = "DeviceManagementDlgTestConnection";		
-		/// <summary>
-		/// Testing connection...
-		/// </summary>
-		public const string DeviceManagementDlgTestingConnection = "DeviceManagementDlgTestingConnection";		
-		/// <summary>
-		/// Connection successful
-		/// </summary>
-		public const string DeviceManagementDlgConnectionSuccessful = "DeviceManagementDlgConnectionSuccessful";		
-		/// <summary>
-		/// Connection failed: {0}
-		/// </summary>
-		public const string DeviceManagementDlgConnectionFailed = "DeviceManagementDlgConnectionFailed";		
-		/// <summary>
-		/// The gRPC URL must be an absolute http or https URL, for example http://dvls-host:5002.
-		/// </summary>
-		public const string DeviceManagementDlgGrpcUrlInvalid = "DeviceManagementDlgGrpcUrlInvalid";		
-		/// <summary>
-		/// A gRPC URL is required. Enter the Devolutions Server gRPC URL, or go back and deselect the PEDM feature.
-		/// </summary>
-		public const string DeviceManagementDlgGrpcUrlRequired = "DeviceManagementDlgGrpcUrlRequired";		
 	}
 }

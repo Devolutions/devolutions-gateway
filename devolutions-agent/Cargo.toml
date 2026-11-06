@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 agent-channel-client = { path = "../crates/agent-channel-client" }
 agent-identity = { path = "../crates/agent-identity" }
+agent-identity-httpsig = { path = "../crates/agent-identity-httpsig" }
 agent-sysevent-codes = { path = "../crates/agent-sysevent-codes" }
 device-key = { path = "../crates/device-key" }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto" }
@@ -52,6 +53,7 @@ tempfile = "3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tokio-stream = "0.1"
 tonic = { version = "0.12", features = ["transport", "tls-native-roots"] }
+tower = "0.5"
 tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
 x509-parser = "0.16"

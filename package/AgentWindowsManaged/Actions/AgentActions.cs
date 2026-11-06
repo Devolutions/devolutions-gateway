@@ -1,4 +1,4 @@
-using DevolutionsAgent.Properties;
+﻿using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using System;
 using System.Collections.Generic;
@@ -536,22 +536,6 @@ internal static class AgentActions
         UsesProperties = UseProperties(new[] { AgentProperties.installId }),
     };
 
-    private static readonly ElevatedManagedAction configureDeviceManagement = new(
-        new Id($"CA.{nameof(configureDeviceManagement)}"),
-        CustomActions.ConfigureDeviceManagement,
-        Return.check,
-        When.Before, new Step(configureFeatures.Id),
-        Features.PEDM_FEATURE.BeingInstall(),
-        Sequence.InstallExecuteSequence)
-    {
-        Execute = Execute.deferred,
-        Impersonate = false,
-        UsesProperties = UseProperties(new IWixProperty[]
-        {
-            AgentProperties.deviceManagementGrpcUrl,
-        }),
-    };
-
     private static readonly ElevatedManagedAction registerExplorerCommand = new(
         CustomActions.RegisterExplorerCommand
     )
@@ -634,7 +618,6 @@ internal static class AgentActions
         rollbackConfigurePsuAgent,
         commitConfigurePsuAgent,
         checkProgramDataDirectory,
-        configureDeviceManagement,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

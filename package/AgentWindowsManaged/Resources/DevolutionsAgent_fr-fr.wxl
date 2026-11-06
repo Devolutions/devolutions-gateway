@@ -97,17 +97,6 @@ Voulez-vous continuer quand même ?</String>
                 <String Id="PsuDlgServerUrlLabel">URL du serveur :</String>
                 <String Id="PsuDlgServerUrlRequired">Une URL de serveur est requise. Saisissez le point de terminaison PowerShell Universal, ou revenez en arrière et désélectionnez la fonctionnalité Agent PowerShell Universal.</String>
                 <String Id="PsuDlgTitle">Agent PowerShell Universal</String>
-                    <!-- dialogs.deviceManagement -->
-                <String Id="DeviceManagementDlgConnectionFailed">Échec de la connexion : {0}</String>
-                <String Id="DeviceManagementDlgConnectionSuccessful">Connexion réussie</String>
-                <String Id="DeviceManagementDlgDescription">L'agent inscrit cette machine dans Devolutions Server pour la gestion des appareils.</String>
-                <String Id="DeviceManagementDlgGrpcUrlHint">Requis. p. ex. http://dvls-host:5002</String>
-                <String Id="DeviceManagementDlgGrpcUrlInvalid">L'URL gRPC doit être une URL http ou https absolue, par exemple http://dvls-host:5002.</String>
-                <String Id="DeviceManagementDlgGrpcUrlLabel">URL gRPC de Devolutions Server :</String>
-                <String Id="DeviceManagementDlgGrpcUrlRequired">Une URL gRPC est requise. Saisissez l'URL gRPC de Devolutions Server, ou revenez en arrière et désélectionnez la fonctionnalité PEDM.</String>
-                <String Id="DeviceManagementDlgTestConnection">Tester la connexion</String>
-                <String Id="DeviceManagementDlgTestingConnection">Test de la connexion...</String>
-                <String Id="DeviceManagementDlgTitle">Gestion des appareils</String>
                     <!-- dialogs.firewall -->
                 <String Id="msierrFirewallCannotConnect">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
                 <String Id="WixExecFirewallExceptionsInstall">Installation de la configuration du Pare-feu Windows</String>

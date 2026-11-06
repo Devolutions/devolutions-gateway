@@ -1,4 +1,4 @@
-﻿using DevolutionsAgent.Helpers;
+using DevolutionsAgent.Helpers;
 using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
@@ -1881,100 +1881,6 @@ namespace DevolutionsAgent.Actions
 
             // Best effort, always return success.
             return ActionResult.Success;
-        }
-
-        /// <summary>
-        /// Whether agent.json already holds a complete <c>DeviceManagement</c> section. Used to preserve an
-        /// existing configuration on a silent upgrade that re-runs <see cref="ConfigureDeviceManagement"/>
-        /// without passing device management properties. Any read/parse failure is treated as "not complete".
-        /// </summary>
-        private static bool DeviceManagementConfigIsComplete(string configPath)
-        {
-            try
-            {
-                if (!File.Exists(configPath))
-                {
-                    return false;
-                }
-
-                if (JObject.Parse(File.ReadAllText(configPath))["DeviceManagement"] is not JObject section)
-                {
-                    return false;
-                }
-
-                return IsValidHttpUrl((string)section["GrpcUrl"]);
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Persist the device management configuration collected in <c>DeviceManagementDialog</c> into
-        /// agent.json's <c>DeviceManagement</c> section. Device management is part of the PEDM feature;
-        /// <see cref="ConfigureFeatures"/> runs after this action and also sets <c>DeviceManagement.Enabled</c>
-        /// from the PEDM feature state.
-        /// </summary>
-        [CustomAction]
-        public static ActionResult ConfigureDeviceManagement(Session session)
-        {
-            string grpcUrl = WixProperties.Decode(session, AgentProperties.deviceManagementGrpcUrl)?.Trim() ?? string.Empty;
-
-            ActionResult Fail(string msg)
-            {
-                session.Log(msg);
-                using Record record = new(0) { FormatString = msg };
-                session.Message(InstallMessage.Error, record);
-                return ActionResult.Failure;
-            }
-
-            string configPath = Path.Combine(ProgramDataDirectory, "agent.json");
-
-            // The agent self-updater runs `msiexec /quiet` without these properties: keep the existing config.
-            if (grpcUrl.Length == 0 && DeviceManagementConfigIsComplete(configPath))
-            {
-                session.Log("No device management properties supplied; preserving the existing configuration in agent.json");
-                return ActionResult.Success;
-            }
-
-            if (!IsValidHttpUrl(grpcUrl))
-            {
-                return Fail("A valid Devolutions Server gRPC URL is required (P.DEVICEMANAGEMENTGRPCURL), or deselect the PEDM feature.");
-            }
-
-            try
-            {
-                JObject config = File.Exists(configPath) ? JObject.Parse(File.ReadAllText(configPath)) : new JObject();
-
-                if (config["DeviceManagement"] is not JObject section)
-                {
-                    section = new JObject();
-                    config["DeviceManagement"] = section;
-                }
-
-                section["Enabled"] = true;
-                section["GrpcUrl"] = grpcUrl;
-                section.Remove("ServerUrl");
-                section.Remove("AppKey");
-                section.Remove("AppSecret");
-
-                // Two-argument ToString(Formatting, JsonConverter[]): see the Newtonsoft GAC note in ToggleAgentFeature.
-                WriteFileAtomic(configPath, config.ToString(Formatting.None, Array.Empty<JsonConverter>()));
-
-                session.Log("Wrote device management configuration to agent.json");
-                return ActionResult.Success;
-            }
-            catch (Exception e)
-            {
-                return Fail($"Failed to configure device management: {e.Message}");
-            }
-        }
-
-        public static bool IsValidHttpUrl(string value)
-        {
-            return Uri.TryCreate(value, UriKind.Absolute, out Uri uri)
-                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
         }
 
         [CustomAction]

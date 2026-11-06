@@ -290,25 +290,13 @@ impl TryFrom<dto::PsuConf> for Option<PsuConf> {
 
 /// Validated device management configuration.
 ///
-/// A disabled device management is `None`. An enabled one has the Devolutions Server gRPC endpoint.
+/// A disabled device management is `None`. The stream goes to the Agent Identity channel URL of the enrolled identity.
 #[derive(Debug, Clone)]
-pub struct DeviceManagementConf {
-    pub grpc_url: Url,
-}
+pub struct DeviceManagementConf;
 
-impl TryFrom<dto::DeviceManagementConf> for Option<DeviceManagementConf> {
-    type Error = anyhow::Error;
-
-    fn try_from(conf: dto::DeviceManagementConf) -> anyhow::Result<Self> {
-        if !conf.enabled {
-            return Ok(None);
-        }
-
-        let grpc_url = conf
-            .grpc_url
-            .context("device management enabled but GrpcUrl is not configured")?;
-
-        Ok(Some(DeviceManagementConf { grpc_url }))
+impl From<dto::DeviceManagementConf> for Option<DeviceManagementConf> {
+    fn from(conf: dto::DeviceManagementConf) -> Self {
+        conf.enabled.then_some(DeviceManagementConf)
     }
 }
 
@@ -352,8 +340,8 @@ impl Conf {
                 .device_management
                 .clone()
                 .unwrap_or_default()
-                .pipe(Option::<DeviceManagementConf>::try_from)
-                .context("invalid device management config")?,
+                .pipe(Option::<DeviceManagementConf>::from),
+
             package_broker: conf_file.package_broker.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
@@ -813,13 +801,10 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct DeviceManagementConf {
-        /// Enable device management.
+        /// Enable device management. It needs an enrolled Agent Identity.
         pub enabled: bool,
-
-        /// Devolutions Server gRPC endpoint, for example http://dvls.contoso.com:5002.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub grpc_url: Option<Url>,
     }
+
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]

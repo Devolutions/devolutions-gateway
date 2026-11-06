@@ -1933,6 +1933,7 @@ version = "2026.3.3"
 dependencies = [
  "agent-channel-client",
  "agent-identity",
+ "agent-identity-httpsig",
  "agent-sysevent-codes",
  "agent-tunnel-proto",
  "anyhow",
@@ -1987,6 +1988,7 @@ dependencies = [
  "tokio-stream",
  "tonic 0.12.3",
  "tonic-build",
+ "tower 0.5.3",
  "tracing",
  "url",
  "uuid",

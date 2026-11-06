@@ -182,7 +182,5 @@ namespace DevolutionsAgent.Properties
     new PropertyDefinition<bool>("PsuAppTokenIsSecretReference", false, secure: true, comment: "`true` when PsuAppToken holds a SecretManagement secret name to inject as $secret:<name>"),
     new PropertyDefinition<string>("PsuAgentId", "", secure: true, encode: true, comment: "Optional stable agent identifier presented to PSU"),
     new PropertyDefinition<string>("PsuDisplayName", "", secure: true, encode: true, comment: "Optional friendly display name shown in PSU"),
-
-    new PropertyDefinition<string>("DeviceManagementGrpcUrl", "", secure: true, encode: true, comment: "Devolutions Server gRPC URL used by the agent to enroll in device management (e.g. http://dvls-host:5002)"),
   };             
 #>

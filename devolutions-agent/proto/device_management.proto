@@ -1,30 +1,16 @@
 syntax = "proto3";
 
 // Prototype contract between the Devolutions Agent and DVLS for device management.
-// Keep in sync with devolutions-agent/proto/device_management.proto.
-// Prototype only: no call is authenticated. The agent identity contract replaces this later.
+// Keep in sync with DVLS/Server/server/Website/Protos/device_management.proto.
+// The stream authenticates with Agent Identity: the opening request is signed with the identity key
+// (ChannelLayer), DVLS sends a Challenge, and the agent answers with a Hello that proves it holds the key.
 package devolutions.device_management.v1;
 
 option csharp_namespace = "Devolutions.Server.DeviceManagement.Grpc";
 
 service DeviceManagement {
-  // Registers the machine of the agent, or updates it when it is already registered.
-  rpc Enroll(EnrollRequest) returns (EnrollResponse);
-
   // The agent opens one long-lived stream. DVLS pushes requests on it, the agent pushes reports.
   rpc Connect(stream AgentMessage) returns (stream ServerMessage);
-}
-
-message EnrollRequest {
-  string device_id = 1;
-  string machine_name = 2;
-  string operating_system = 3;
-  string agent_version = 4;
-}
-
-message EnrollResponse {
-  string device_id = 1;
-  string name = 2;
 }
 
 message AgentMessage {
@@ -36,11 +22,16 @@ message AgentMessage {
   }
 }
 
-// First message on the stream. The device must be enrolled.
+// First agent message on the stream: the answer to the Challenge.
 message Hello {
-  string device_id = 1;
+  reserved 1;
+  // The challenge_id of the Challenge.
+  string correlation_id = 2;
+  // Agent Identity channel proof over the challenge and the opening nonce.
+  bytes proof = 3;
+  // Agent Identity metadata (hostname, os_name, os_version, arch, agent_version, ...).
+  map<string, string> metadata = 4;
 }
-
 message InventoryReport {
   repeated InstalledPackage packages = 1;
   // Package managers and sources that UniGetUI has on the machine. Each report replaces the previous ones.
@@ -76,7 +67,14 @@ message ServerMessage {
   oneof payload {
     SyncInventoryRequest sync_inventory = 1;
     PackageOperationRequest package_operation = 3;
+    Challenge challenge = 4;
   }
+}
+
+// First server message on the stream.
+message Challenge {
+  string challenge_id = 1;
+  bytes challenge = 2;
 }
 
 message SyncInventoryRequest {}

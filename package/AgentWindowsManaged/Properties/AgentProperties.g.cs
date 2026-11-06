@@ -528,61 +528,6 @@ namespace DevolutionsAgent.Properties
             }
         }
  
-        internal static readonly WixProperty<String> deviceManagementGrpcUrl = new()
-        {
-            Id = "P.DEVICEMANAGEMENTGRPCURL",
-            Default = "",
-            Name = "DeviceManagementGrpcUrl",
-            Secure = true,
-            Hidden = false,
-            Encode = true,
-            Public = true
-        };
-
-        /// <summary>Devolutions Server gRPC URL used by the agent to enroll in device management (e.g. http://dvls-host:5002)</summary>
-        public String DeviceManagementGrpcUrl
-        {
-            get
-            {
-                string stringValue = this.FnGetPropValue(deviceManagementGrpcUrl.Id);
-                return WixProperties.GetPropertyValue<String>(stringValue);
-            }
-            set 
-            { 
-                if (this.runtimeSession is not null)
-                {
-                    this.runtimeSession.Set(deviceManagementGrpcUrl, value); 
-                }
-            }
-        }
-
-        internal static readonly WixProperty<String> deviceManagementGrpcUrlEncoded = new()
-        {
-            Id = "P.DEVICEMANAGEMENTGRPCURL_ENCODED",
-            Default = string.Empty,
-            Name = "DeviceManagementGrpcUrlEncoded",
-            Secure = true,
-            Hidden = true,
-            Encode = false,
-            Public = true /* Secure properties must be public */
-        };
-
-        public string DeviceManagementGrpcUrlEncoded
-        {
-            get
-            {
-                string stringValue = this.FnGetPropValue(deviceManagementGrpcUrlEncoded.Id);
-                return WixProperties.GetPropertyValue<string>(stringValue);
-            }
-            set 
-            { 
-                if (this.runtimeSession is not null)
-                {
-                    this.runtimeSession.Set(deviceManagementGrpcUrlEncoded, value); 
-                }
-            }
-        }
- 
 
         public static IWixProperty[] Properties =
         {
@@ -634,10 +579,6 @@ namespace DevolutionsAgent.Properties
  
             psuDisplayName,
             psuDisplayNameEncoded,
- 
- 
-            deviceManagementGrpcUrl,
-            deviceManagementGrpcUrlEncoded,
  
  
         };
