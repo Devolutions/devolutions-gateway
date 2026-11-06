@@ -441,6 +441,32 @@ public sealed class DataFolderTests
         Assert.Equal(expected, writers);
     }
 
+    [Theory]
+    // oracle: mutant an entry that lets Users or another account read the data folder or what it passes on
+    [InlineData("the data folder")]
+    // oracle: mutant an entry that lets Users or another account read the users database
+    [InlineData("the users database")]
+    public void OnlySystemAdministratorsAndTheServiceAccountCanReadTheData(string template)
+    {
+        SecurityIdentifier service = new("S-1-5-80-1-2-3-4-5");
+        RawSecurityDescriptor descriptor = new(Templates[template](service));
+        // Reading a file's content, including through a generic right.
+        const int reading = 0x1 | 0x10000000 | unchecked((int)0x80000000);
+
+        string[] readers = descriptor.DiscretionaryAcl
+            .Cast<CommonAce>()
+            .Where(ace => ace.AceQualifier == AceQualifier.AccessAllowed && (ace.AccessMask & reading) != 0)
+            .Select(ace => ace.SecurityIdentifier.Value)
+            .Distinct()
+            .OrderBy(sid => sid, StringComparer.Ordinal)
+            .ToArray();
+        string[] expected = new[] { "S-1-5-18", "S-1-5-32-544", service.Value }
+            .OrderBy(sid => sid, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, readers);
+    }
+
     // A service account that is LOCAL SERVICE gets its rights through the service account's entries.
     // oracle: mutant an entry of its own for LOCAL SERVICE, such as read access
     [Theory]
