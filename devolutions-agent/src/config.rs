@@ -28,6 +28,7 @@ pub struct Conf {
     pub package_broker: dto::PackageBrokerConf,
     pub tunnel: TunnelConf,
     pub psu_agent: Option<PsuConf>,
+    pub device_management: Option<DeviceManagementConf>,
     pub proxy: dto::ProxyConf,
     pub debug: dto::DebugConf,
 }
@@ -287,6 +288,30 @@ impl TryFrom<dto::PsuConf> for Option<PsuConf> {
     }
 }
 
+/// Validated device management configuration.
+///
+/// A disabled device management is `None`. An enabled one has the Devolutions Server gRPC endpoint.
+#[derive(Debug, Clone)]
+pub struct DeviceManagementConf {
+    pub grpc_url: Url,
+}
+
+impl TryFrom<dto::DeviceManagementConf> for Option<DeviceManagementConf> {
+    type Error = anyhow::Error;
+
+    fn try_from(conf: dto::DeviceManagementConf) -> anyhow::Result<Self> {
+        if !conf.enabled {
+            return Ok(None);
+        }
+
+        let grpc_url = conf
+            .grpc_url
+            .context("device management enabled but GrpcUrl is not configured")?;
+
+        Ok(Some(DeviceManagementConf { grpc_url }))
+    }
+}
+
 impl Conf {
     pub fn from_conf_file(conf_file: &dto::ConfFile) -> anyhow::Result<Self> {
         let data_dir = get_data_dir();
@@ -323,6 +348,12 @@ impl Conf {
                 .unwrap_or_default()
                 .pipe(Option::<PsuConf>::try_from)
                 .context("invalid PSU agent config")?,
+            device_management: conf_file
+                .device_management
+                .clone()
+                .unwrap_or_default()
+                .pipe(Option::<DeviceManagementConf>::try_from)
+                .context("invalid device management config")?,
             package_broker: conf_file.package_broker.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
@@ -778,6 +809,18 @@ pub mod dto {
         }
     }
 
+    /// Device management configuration (Devolutions Server package inventory).
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct DeviceManagementConf {
+        /// Enable device management.
+        pub enabled: bool,
+
+        /// Devolutions Server gRPC endpoint, for example http://dvls.contoso.com:5002.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub grpc_url: Option<Url>,
+    }
+
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct PsuPowerShellConf {
@@ -895,6 +938,10 @@ pub mod dto {
         #[serde(alias = "PsuGrpcAgent", skip_serializing_if = "Option::is_none")]
         pub psu_agent: Option<PsuConf>,
 
+        /// Device management (Devolutions Server package inventory).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub device_management: Option<DeviceManagementConf>,
+
         /// HTTP/SOCKS proxy configuration for outbound requests
         #[serde(skip_serializing_if = "Option::is_none")]
         pub proxy: Option<ProxyConf>,
@@ -928,6 +975,7 @@ pub mod dto {
                 package_broker: None,
                 tunnel: None,
                 psu_agent: None,
+                device_management: None,
                 rest: serde_json::Map::new(),
             }
         }

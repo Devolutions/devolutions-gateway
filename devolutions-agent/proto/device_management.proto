@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+// Prototype contract between the Devolutions Agent and DVLS for device management.
+// Keep in sync with devolutions-agent/proto/device_management.proto.
+// Prototype only: no call is authenticated. The agent identity contract replaces this later.
+package devolutions.device_management.v1;
+
+option csharp_namespace = "Devolutions.Server.DeviceManagement.Grpc";
+
+service DeviceManagement {
+  // Registers the machine of the agent, or updates it when it is already registered.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // The agent opens one long-lived stream. DVLS pushes requests on it, the agent pushes reports.
+  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+}
+
+message EnrollRequest {
+  string device_id = 1;
+  string machine_name = 2;
+  string operating_system = 3;
+  string agent_version = 4;
+}
+
+message EnrollResponse {
+  string device_id = 1;
+  string name = 2;
+}
+
+message AgentMessage {
+  reserved 3;
+  oneof payload {
+    Hello hello = 1;
+    InventoryReport inventory = 2;
+    PackageOperationResult operation_result = 4;
+  }
+}
+
+// First message on the stream. The device must be enrolled.
+message Hello {
+  string device_id = 1;
+}
+
+message InventoryReport {
+  repeated InstalledPackage packages = 1;
+  // Package managers and sources that UniGetUI has on the machine. Each report replaces the previous ones.
+  repeated PackageManager managers = 2;
+  repeated PackageSource sources = 3;
+}
+
+message InstalledPackage {
+  string manager = 1;
+  string source = 2;
+  string id = 3;
+  string name = 4;
+  string version = 5;
+  // Newer version reported by the package manager. Empty when the package is up to date.
+  string available_version = 6;
+}
+
+message PackageManager {
+  string name = 1;
+  bool installed = 2;
+  bool enabled = 3;
+  string version = 4;
+}
+
+message PackageSource {
+  string manager = 1;
+  string name = 2;
+  string url = 3;
+}
+
+message ServerMessage {
+  reserved 2;
+  oneof payload {
+    SyncInventoryRequest sync_inventory = 1;
+    PackageOperationRequest package_operation = 3;
+  }
+}
+
+message SyncInventoryRequest {}
+
+enum PackageOperationType {
+  PACKAGE_OPERATION_TYPE_INSTALL = 0;
+  PACKAGE_OPERATION_TYPE_UPDATE = 1;
+  PACKAGE_OPERATION_TYPE_UNINSTALL = 2;
+}
+
+// Installs, updates or uninstalls one package through UniGetUI. An empty version means the latest version.
+message PackageOperationRequest {
+  string operation_id = 1;
+  PackageOperationType type = 2;
+  string manager = 3;
+  string source = 4;
+  string package_id = 5;
+  string version = 6;
+}
+
+// Answer to PackageOperationRequest. Error is set when success is false.
+message PackageOperationResult {
+  string operation_id = 1;
+  bool success = 2;
+  string error = 3;
+}

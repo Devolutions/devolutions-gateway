@@ -15,8 +15,8 @@ fn generate_psu_agent_proto() {
 
     tonic_build::configure()
         .build_transport(false)
-        .compile_protos(&["proto/psu_agent.proto"], &["proto"])
-        .expect("failed to compile PSU agent proto");
+        .compile_protos(&["proto/psu_agent.proto", "proto/device_management.proto"], &["proto"])
+        .expect("failed to compile agent protos");
 }
 
 #[cfg(target_os = "windows")]

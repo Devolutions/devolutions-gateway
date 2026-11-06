@@ -103,4 +103,15 @@ Do you want to continue anyway?</String>
                 <String Id="PsuDlgServerUrlLabel">Server URL:</String>
                 <String Id="PsuDlgServerUrlRequired">A server URL is required. Enter the PowerShell Universal endpoint, or go back and deselect the PowerShell Universal Agent feature.</String>
                 <String Id="PsuDlgTitle">PowerShell Universal Agent</String>
+                    <!-- dialogs.deviceManagement -->
+                <String Id="DeviceManagementDlgConnectionFailed">Connection failed: {0}</String>
+                <String Id="DeviceManagementDlgConnectionSuccessful">Connection successful</String>
+                <String Id="DeviceManagementDlgDescription">The agent enrolls this machine in Devolutions Server for device management.</String>
+                <String Id="DeviceManagementDlgGrpcUrlHint">Required. e.g. http://dvls-host:5002</String>
+                <String Id="DeviceManagementDlgGrpcUrlInvalid">The gRPC URL must be an absolute http or https URL, for example http://dvls-host:5002.</String>
+                <String Id="DeviceManagementDlgGrpcUrlLabel">Devolutions Server gRPC URL:</String>
+                <String Id="DeviceManagementDlgGrpcUrlRequired">A gRPC URL is required. Enter the Devolutions Server gRPC URL, or go back and deselect the PEDM feature.</String>
+                <String Id="DeviceManagementDlgTestConnection">Test connection</String>
+                <String Id="DeviceManagementDlgTestingConnection">Testing connection...</String>
+                <String Id="DeviceManagementDlgTitle">Device management</String>
                     </WixLocalization>

@@ -364,6 +364,48 @@
             "id": "PsuDlgServerUnreachable",
             "text": "Could not reach the PowerShell Universal server ({0}).\n\nDo you want to continue anyway?"
           }
+        ],
+        "deviceManagement": [
+          {
+            "id": "DeviceManagementDlgTitle",
+            "text": "Device management"
+          },
+          {
+            "id": "DeviceManagementDlgDescription",
+            "text": "The agent enrolls this machine in Devolutions Server for device management."
+          },
+          {
+            "id": "DeviceManagementDlgGrpcUrlLabel",
+            "text": "Devolutions Server gRPC URL:"
+          },
+          {
+            "id": "DeviceManagementDlgGrpcUrlHint",
+            "text": "Required. e.g. http://dvls-host:5002"
+          },
+          {
+            "id": "DeviceManagementDlgTestConnection",
+            "text": "Test connection"
+          },
+          {
+            "id": "DeviceManagementDlgTestingConnection",
+            "text": "Testing connection..."
+          },
+          {
+            "id": "DeviceManagementDlgConnectionSuccessful",
+            "text": "Connection successful"
+          },
+          {
+            "id": "DeviceManagementDlgConnectionFailed",
+            "text": "Connection failed: {0}"
+          },
+          {
+            "id": "DeviceManagementDlgGrpcUrlInvalid",
+            "text": "The gRPC URL must be an absolute http or https URL, for example http://dvls-host:5002."
+          },
+          {
+            "id": "DeviceManagementDlgGrpcUrlRequired",
+            "text": "A gRPC URL is required. Enter the Devolutions Server gRPC URL, or go back and deselect the PEDM feature."
+          }
         ]
       }
     }

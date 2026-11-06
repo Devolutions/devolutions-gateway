@@ -24,6 +24,7 @@ internal static class Wizard
             typeof(FeaturesDialog),
             typeof(AgentTunnelDialog),
             typeof(PsuDialog),
+            typeof(DeviceManagementDialog),
             typeof(InstallDirDialog),
         };
 
@@ -61,6 +62,11 @@ internal static class Wizard
         {
             string addlocal = (current as WixSharp.UI.Forms.ManagedForm)?.MsiRuntime?.Session?["ADDLOCAL"] ?? string.Empty;
             return !addlocal.Split(',').Select(s => s.Trim()).Contains(Features.PSU_FEATURE.Id);
+        }
+        if (dialogType == typeof(DeviceManagementDialog))
+        {
+            string addlocal = (current as WixSharp.UI.Forms.ManagedForm)?.MsiRuntime?.Session?["ADDLOCAL"] ?? string.Empty;
+            return !addlocal.Split(',').Select(s => s.Trim()).Contains(Features.PEDM_FEATURE.Id);
         }
         return false;
     }
