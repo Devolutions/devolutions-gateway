@@ -34,15 +34,14 @@ namespace DevolutionsGateway.Resources
             /// Local System (SY)	Full Access (FA)
             /// Service account	Read, Execute, Write, Delete Subfolders and Files on the folder; also Delete on everything below it
             /// Administrators (BA)	Full Access (FA)
-            /// Users (BU)	Read, Execute
-        /// Only SYSTEM, administrators and the service account can change what the Gateway stores there, so no other
-        /// account gets more than read access.
+        /// Only SYSTEM, administrators and the service account can read or change what the Gateway stores there, because
+        /// it holds session recordings and private keys.
         /// LOCAL SERVICE, which earlier installers gave write access, has no entry, and the installer doesn't accept it as
         /// the service account.
         /// The service account gets no Delete on the folder itself, so that only SYSTEM and administrators can rename or
         /// replace it, while an inherit-only entry gives it Delete on the files and subfolders it manages below.
         /// </remarks>
-        private const string PROGRAM_DATA_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201ff;;;{0})(A;OICIIO;0x1301ff;;;{0})(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+        private const string PROGRAM_DATA_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201ff;;;{0})(A;OICIIO;0x1301ff;;;{0})(A;OICI;FA;;;BA)";
 
         /// <summary>
         /// SDDL template for the desired %programdata%\devolutions\gateway\users.txt owner and ACL. `{0}` is the SID of the service account.
