@@ -57,7 +57,20 @@ The workflow will display a notice if `run` was not built from the main branch. 
 
 - The `Codesign` job uses a matrix to code-sign and repackage in parallel. It's important to ensure that individual matrix jobs do not upload the same artifacts; otherwise the result may be unexpected. For example: each platform downloads the `jetsocat` artifact, which contains builds for several operating systems. The Windows job must only sign and upload the Windows builds. If it were allowed to upload the macOS builds, they will be unsigned and *may* overwrite the signed builds uploaded by the macOS job.
 - The workflow makes a checkout of the repository at the commit that `run` was built from. This ensures consistency with the [CI](#ci) workflow when repackaging. Remember that tools invoked by the workflow (e.g. [tlk.ps1](../../ci/tlk.ps1)) will be from that commit too.
-- The Devolutions Agent macOS installer is signed with the `APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE` secret, a base64 Developer ID Installer PKCS #12, and its `APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE_PASSWORD`, then notarized with `APPLE_BOT_PASSWORD`. Without them, the package stays unsigned, the job warns, and `publish-prod` fails.
+
+For macOS, make these GitHub Actions secrets available to the `publish-prod` environment:
+
+| Secret | Purpose |
+| --- | --- |
+| `APPLE_APP_DEV_ID_APP_CERTIFICATE` | Developer ID Application certificate |
+| `APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD` | Application certificate export password |
+| `APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE` | Developer ID Installer certificate for the Agent package |
+| `APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE_PASSWORD` | Installer certificate export password |
+| `APPLE_BOT_PASSWORD` | App-specific Apple ID password for notarization |
+
+Both certificates must be base64-encoded PKCS #12 bundles containing their private keys.
+The Agent package requires a separate Developer ID Installer certificate.
+Production packaging fails if the Installer certificate or notarization password is missing.
 
 ##### TODO
 
