@@ -29,13 +29,13 @@ use windows::Win32::System::ProcessStatus::K32GetMappedFileNameW;
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
-    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, INFINITE,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessId, GetProcessTimes, INFINITE,
     LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS,
     PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_SYNCHRONIZE,
     PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
     WaitForSingleObject,
 };
-use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, SHOW_WINDOW_CMD,
 };
@@ -316,6 +316,17 @@ impl Process {
         Ok(exit_code)
     }
 
+    pub fn process_id(&self) -> Result<u32> {
+        // SAFETY: The process handle is valid for this call.
+        let process_id = unsafe { GetProcessId(self.handle.raw()) };
+
+        if process_id == 0 {
+            bail!(Error::last_error());
+        }
+
+        Ok(process_id)
+    }
+
     pub fn query_basic_information(&self) -> Result<PROCESS_BASIC_INFORMATION> {
         let mut basic_info = PROCESS_BASIC_INFORMATION::default();
 
@@ -431,19 +442,23 @@ impl HandleWrapper for Process {
 
 pub fn shell_execute(
     path: &Path,
-    command_line: &CommandLine,
+    command_line: &str,
     working_directory: &Path,
     verb: &str,
     show_cmd: SHOW_WINDOW_CMD,
 ) -> Result<Process> {
     let path = WideString::from(path);
-    let command_line = WideString::from(command_line.to_command_line());
-    let working_directory = WideString::from(working_directory);
+    let command_line = WideString::from(command_line);
+    let working_directory = if working_directory.as_os_str().is_empty() {
+        WideString::default()
+    } else {
+        WideString::from(working_directory)
+    };
     let verb = WideString::from(verb);
 
     let mut exec_info = SHELLEXECUTEINFOW {
         cbSize: u32size_of::<SHELLEXECUTEINFOW>(),
-        fMask: SEE_MASK_NOCLOSEPROCESS,
+        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
         lpFile: path.as_pcwstr(),
         lpParameters: command_line.as_pcwstr(),
         lpDirectory: working_directory.as_pcwstr(),

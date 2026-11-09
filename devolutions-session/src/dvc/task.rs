@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
@@ -419,9 +419,16 @@ async fn process_messages(
                 match task_rx {
                     Some(notification) => {
                         match notification {
-                            ServerChannelEvent::SessionStarted { session_id } => {
+                            ServerChannelEvent::SessionStarted {
+                                session_id,
+                                no_io_redirection,
+                            } => {
                                 info!(session_id, "Session started");
-                                let message = NowExecStartedMsg::new(session_id);
+                                let message = if no_io_redirection {
+                                    NowExecStartedMsg::new(session_id).with_no_io_redirection()
+                                } else {
+                                    NowExecStartedMsg::new(session_id)
+                                };
                                 dvc_tx.send(message.into()).await?;
                             }
                             ServerChannelEvent::SessionDataOut { session_id, stream, last, data } => {
@@ -441,6 +448,7 @@ async fn process_messages(
                             ServerChannelEvent::SessionExited { session_id, exit_code } => {
                                 info!(session_id, %exit_code, "Session exited");
                                 processor.remove_session(session_id);
+                                processor.pending_sessions.remove(&session_id);
                                 discard_pending_stdin(&mut pending_stdin, session_id);
 
                                 let message = NowExecResultMsg::new_success(session_id, exit_code);
@@ -449,6 +457,7 @@ async fn process_messages(
                             ServerChannelEvent::SessionFailed { session_id, error } => {
                                 error!(session_id, %error, "Session error");
                                 processor.remove_session(session_id);
+                                processor.pending_sessions.remove(&session_id);
                                 discard_pending_stdin(&mut pending_stdin, session_id);
 
                                 handle_exec_error(&dvc_tx, session_id, error).await;
@@ -539,7 +548,8 @@ fn default_server_caps(pwsh_available: bool) -> NowChannelCapsetMsg {
         | NowExecCapsetFlags::STYLE_BATCH
         | NowExecCapsetFlags::STYLE_WINPS
         | NowExecCapsetFlags::IO_REDIRECTION
-        | NowExecCapsetFlags::UNICODE_CONSOLE;
+        | NowExecCapsetFlags::UNICODE_CONSOLE
+        | NowExecCapsetFlags::ELEVATION;
 
     if pwsh_available {
         exec_flags |= NowExecCapsetFlags::STYLE_PWSH;
@@ -624,9 +634,11 @@ struct MessageProcessor {
     capabilities: NowChannelCapsetMsg,
     /// Attached execution sessions of this channel.
     ///
-    /// Ending the channel or renegotiating capabilities drops this processor, which stops their IO and kills them with
-    /// `process_job`; no later channel or negotiation could reach them, because each starts with no sessions.
+    /// Ending the channel or renegotiating capabilities drops this processor, which stops its IO and kills
+    /// non-elevated sessions with `process_job`; elevated sessions may outlive their channel.
     sessions: HashMap<u32, WinApiProcess>,
+    /// Elevated launch requests that are waiting for user consent and have no process handle yet.
+    pending_sessions: HashSet<u32>,
     /// Job of the attached executions and the processes they start; created by the first attached execution.
     ///
     /// Processes left running by an attached execution that already exited are killed with it too.
@@ -653,6 +665,7 @@ impl MessageProcessor {
             io_notification_tx,
             capabilities,
             sessions: HashMap::new(),
+            pending_sessions: HashSet::new(),
             process_job: None,
             rdm_handler,
             pwsh_executable,
@@ -669,12 +682,22 @@ impl MessageProcessor {
     }
 
     async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), ExecError> {
-        if self.sessions.contains_key(&session_id) {
+        if self.sessions.contains_key(&session_id) || self.pending_sessions.contains(&session_id) {
             warn!(session_id, "Session ID is in use");
             return Err(ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::InUse)));
         }
 
         warn!(session_id, "Session ID is free for use");
+
+        Ok(())
+    }
+
+    fn ensure_elevation_supported(&self, elevated: bool) -> Result<(), ExecError> {
+        if elevated && !self.capabilities.exec_capset().contains(NowExecCapsetFlags::ELEVATION) {
+            return Err(ExecError::NowStatus(NowStatusError::new_proto(
+                NowProtoError::NotImplemented,
+            )));
+        }
 
         Ok(())
     }
@@ -687,6 +710,43 @@ impl MessageProcessor {
             })
             .await?;
         Ok(())
+    }
+
+    async fn run_detached_exec(
+        &mut self,
+        process: WinApiProcessBuilder,
+        session_id: u32,
+        elevated: bool,
+    ) -> Result<(), ExecError> {
+        if elevated {
+            self.pending_sessions.insert(session_id);
+        }
+
+        if let Err(error) = process.run_detached_with_notifications(session_id, self.io_notification_tx.clone()) {
+            self.pending_sessions.remove(&session_id);
+            return Err(error);
+        }
+
+        if !elevated {
+            self.send_detached_process_success(session_id).await?;
+        }
+
+        Ok(())
+    }
+
+    fn run_attached_exec(
+        &mut self,
+        process: WinApiProcessBuilder,
+        session_id: u32,
+        io_redirection: bool,
+        elevated: bool,
+    ) -> Result<WinApiProcess, ExecError> {
+        let io_notification_tx = self.io_notification_tx.clone();
+        let job = if elevated { None } else { Some(self.process_job()?) };
+
+        process
+            .with_io_redirection(io_redirection)
+            .run(session_id, io_notification_tx, job)
     }
 
     pub(crate) async fn process_message(&mut self, message: OwnedNowMessage) -> anyhow::Result<ProcessMessageAction> {
@@ -717,6 +777,18 @@ impl MessageProcessor {
                         handle_exec_error(&self.dvc_tx, session_id, error).await;
                     }
                 }
+            }
+            NowMessage::Exec(NowExecMessage::Shell(exec_msg)) => {
+                let session_id = exec_msg.session_id();
+                let error = match self.ensure_elevation_supported(exec_msg.is_elevated()) {
+                    Err(error) => error,
+                    Ok(()) => ExecError::NowStatus(NowStatusError::new_proto(if exec_msg.is_elevated() {
+                        NowProtoError::ElevationUnavailable
+                    } else {
+                        NowProtoError::NotImplemented
+                    })),
+                };
+                handle_exec_error(&self.dvc_tx, session_id, error).await;
             }
             NowMessage::Exec(NowExecMessage::Batch(batch_msg)) => {
                 let session_id = batch_msg.session_id();
@@ -919,10 +991,20 @@ impl MessageProcessor {
         Ok(ProcessMessageAction::Continue)
     }
 
-    async fn process_exec_run(&self, params: NowExecRunMsg<'_>) -> Result<(), ExecError> {
+    async fn process_exec_run(&mut self, params: NowExecRunMsg<'_>) -> Result<(), ExecError> {
+        self.ensure_elevation_supported(params.is_elevated())?;
         self.ensure_session_id_free(params.session_id()).await?;
 
         let session_id = params.session_id();
+
+        if params.is_elevated() {
+            let mut run_process = WinApiProcessBuilder::new(params.command()).with_elevated_execution();
+            if let Some(directory) = params.directory() {
+                run_process = run_process.with_current_directory(directory);
+            }
+
+            return self.run_detached_exec(run_process, session_id, true).await;
+        }
 
         // Empty null-terminated string.
         let parameters = WideString::from("");
@@ -965,6 +1047,7 @@ impl MessageProcessor {
     }
 
     async fn process_exec_process(&mut self, exec_msg: NowExecProcessMsg<'_>) -> Result<(), ExecError> {
+        self.ensure_elevation_supported(exec_msg.is_elevated())?;
         self.ensure_session_id_free(exec_msg.session_id()).await?;
 
         // Process exec: no assumptions about encoding by default (raw passthrough).
@@ -985,17 +1068,21 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        if exec_msg.is_detached() {
-            // Detached mode: fire-and-forget, no IO redirection
-            run_process.run_detached(exec_msg.session_id())?;
-            self.send_detached_process_success(exec_msg.session_id()).await?;
-            return Ok(());
+        if exec_msg.is_elevated() {
+            run_process = run_process.with_elevated_execution();
         }
 
-        let process = run_process.with_io_redirection(exec_msg.is_with_io_redirection()).run(
+        if exec_msg.is_detached() {
+            return self
+                .run_detached_exec(run_process, exec_msg.session_id(), exec_msg.is_elevated())
+                .await;
+        }
+
+        let process = self.run_attached_exec(
+            run_process,
             exec_msg.session_id(),
-            self.io_notification_tx.clone(),
-            self.process_job()?,
+            exec_msg.is_with_io_redirection(),
+            exec_msg.is_elevated(),
         )?;
 
         self.sessions.insert(exec_msg.session_id(), process);
@@ -1004,6 +1091,7 @@ impl MessageProcessor {
     }
 
     async fn process_exec_batch(&mut self, batch_msg: NowExecBatchMsg<'_>) -> Result<(), ExecError> {
+        self.ensure_elevation_supported(batch_msg.is_elevated())?;
         self.ensure_session_id_free(batch_msg.session_id()).await?;
 
         let mut script = batch_msg.command().to_owned();
@@ -1024,7 +1112,12 @@ impl MessageProcessor {
         let tmp_file = TmpFileGuard::new("bat")?;
         tmp_file.write_bytes(&file_encoding.encode_str(&script))?;
 
-        let parameters = format!("/Q /C \"{}\"", tmp_file.path_string());
+        let command_kind = batch_command_kind(
+            batch_msg.is_no_exit(),
+            batch_msg.is_with_io_redirection(),
+            batch_msg.is_elevated(),
+        );
+        let parameters = format!("/Q {command_kind} \"{}\"", tmp_file.path_string());
 
         let mut run_batch = WinApiProcessBuilder::new("cmd.exe")
             .with_temp_file(tmp_file)
@@ -1035,16 +1128,21 @@ impl MessageProcessor {
             run_batch = run_batch.with_current_directory(directory);
         }
 
-        if batch_msg.is_detached() {
-            run_batch.run_detached(batch_msg.session_id())?;
-            self.send_detached_process_success(batch_msg.session_id()).await?;
-            return Ok(());
+        if batch_msg.is_elevated() {
+            run_batch = run_batch.with_elevated_execution();
         }
 
-        let process = run_batch.with_io_redirection(batch_msg.is_with_io_redirection()).run(
+        if batch_msg.is_detached() {
+            return self
+                .run_detached_exec(run_batch, batch_msg.session_id(), batch_msg.is_elevated())
+                .await;
+        }
+
+        let process = self.run_attached_exec(
+            run_batch,
             batch_msg.session_id(),
-            self.io_notification_tx.clone(),
-            self.process_job()?,
+            batch_msg.is_with_io_redirection(),
+            batch_msg.is_elevated(),
         )?;
 
         self.sessions.insert(batch_msg.session_id(), process);
@@ -1053,6 +1151,7 @@ impl MessageProcessor {
     }
 
     async fn process_exec_winps(&mut self, winps_msg: NowExecWinPsMsg<'_>) -> Result<(), ExecError> {
+        self.ensure_elevation_supported(winps_msg.is_elevated())?;
         self.ensure_session_id_free(winps_msg.session_id()).await?;
 
         let mut params = Vec::new();
@@ -1097,19 +1196,22 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        if winps_msg.is_detached() {
-            run_process.run_detached(winps_msg.session_id())?;
-            self.send_detached_process_success(winps_msg.session_id()).await?;
-            return Ok(());
+        if winps_msg.is_elevated() {
+            run_process = run_process.with_elevated_execution();
         }
 
-        let process = run_process
-            .with_io_redirection(winps_msg.is_with_io_redirection())
-            .run(
-                winps_msg.session_id(),
-                self.io_notification_tx.clone(),
-                self.process_job()?,
-            )?;
+        if winps_msg.is_detached() {
+            return self
+                .run_detached_exec(run_process, winps_msg.session_id(), winps_msg.is_elevated())
+                .await;
+        }
+
+        let process = self.run_attached_exec(
+            run_process,
+            winps_msg.session_id(),
+            winps_msg.is_with_io_redirection(),
+            winps_msg.is_elevated(),
+        )?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
@@ -1117,9 +1219,14 @@ impl MessageProcessor {
     }
 
     async fn process_exec_pwsh(&mut self, pwsh_msg: NowExecPwshMsg<'_>) -> Result<(), ExecError> {
+        self.ensure_elevation_supported(pwsh_msg.is_elevated())?;
         let Some(pwsh_executable) = self.pwsh_executable.clone() else {
             return Err(ExecError::NowStatus(NowStatusError::new_proto(
-                NowProtoError::NotImplemented,
+                if pwsh_msg.is_elevated() {
+                    NowProtoError::ElevationUnavailable
+                } else {
+                    NowProtoError::NotImplemented
+                },
             )));
         };
 
@@ -1168,16 +1275,21 @@ impl MessageProcessor {
             run_process = run_process.with_current_directory(directory);
         }
 
-        if pwsh_msg.is_detached() {
-            run_process.run_detached(pwsh_msg.session_id())?;
-            self.send_detached_process_success(pwsh_msg.session_id()).await?;
-            return Ok(());
+        if pwsh_msg.is_elevated() {
+            run_process = run_process.with_elevated_execution();
         }
 
-        let process = run_process.with_io_redirection(pwsh_msg.is_with_io_redirection()).run(
+        if pwsh_msg.is_detached() {
+            return self
+                .run_detached_exec(run_process, pwsh_msg.session_id(), pwsh_msg.is_elevated())
+                .await;
+        }
+
+        let process = self.run_attached_exec(
+            run_process,
             pwsh_msg.session_id(),
-            self.io_notification_tx.clone(),
-            self.process_job()?,
+            pwsh_msg.is_with_io_redirection(),
+            pwsh_msg.is_elevated(),
         )?;
 
         self.sessions.insert(pwsh_msg.session_id(), process);
@@ -1245,6 +1357,14 @@ impl MessageProcessor {
                 error!(%error, "Window monitor task panicked");
             }
         }
+    }
+}
+
+fn batch_command_kind(no_exit: bool, io_redirection: bool, elevated: bool) -> &'static str {
+    if no_exit && (!io_redirection || elevated) {
+        "/K"
+    } else {
+        "/C"
     }
 }
 
@@ -1570,10 +1690,17 @@ mod tests {
 
     use super::{
         ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, REOPEN_DELAY_CAP,
-        REOPEN_DELAY_FLOOR, heartbeat_timer, process_messages, process_until_io_ends, serve_dvc, spawn_heartbeat,
+        REOPEN_DELAY_FLOOR, batch_command_kind, heartbeat_timer, process_messages, process_until_io_ends, serve_dvc,
+        spawn_heartbeat,
     };
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_EXEC_BATCH_MSG §Elevated Execution
+    #[test]
+    fn elevated_batch_no_exit_keeps_console_open_when_redirection_is_unavailable() {
+        assert_eq!(batch_command_kind(true, true, true), "/K");
+    }
 
     // oracle: regression #2156 detached Process must leave the channel alive for subsequent execution.
     #[tokio::test]
@@ -1993,14 +2120,17 @@ mod tests {
         let client_caps = NowChannelCapsetMsg::default()
             .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
             .with_session_capset(NowSessionCapsetFlags::LOCK | NowSessionCapsetFlags::MSGBOX)
-            .with_exec_capset(NowExecCapsetFlags::STYLE_RUN | NowExecCapsetFlags::STYLE_SHELL)
+            .with_exec_capset(
+                NowExecCapsetFlags::STYLE_RUN | NowExecCapsetFlags::STYLE_SHELL | NowExecCapsetFlags::ELEVATION,
+            )
             .with_heartbeat_interval(Duration::from_secs(30))
             .expect("30 s is a valid heartbeat interval");
 
+        // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_CHANNEL_CAPSET_MSG §Elevated Execution
         let expected_caps = NowChannelCapsetMsg::default()
             .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
             .with_session_capset(NowSessionCapsetFlags::LOCK | NowSessionCapsetFlags::MSGBOX)
-            .with_exec_capset(NowExecCapsetFlags::STYLE_RUN)
+            .with_exec_capset(NowExecCapsetFlags::STYLE_RUN | NowExecCapsetFlags::ELEVATION)
             .with_heartbeat_interval(Duration::from_secs(30))
             .expect("30 s is a valid heartbeat interval");
 
