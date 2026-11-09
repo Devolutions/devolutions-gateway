@@ -196,17 +196,18 @@ async fn list_log_files(
     params(("name" = String, Path, description = "Name returned by ListLogFiles")),
     responses(
         (status = 200, description = "Log file contents", body = String, content_type = "text/plain"),
+        (status = 400, description = "Invalid log file name"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "Log file is no longer available"),
+        (status = 404, description = "Log file not found"),
         (status = 500, description = "Failed to read log file"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
 async fn get_log_file(
     State(DgwState { conf_handle, .. }): State<DgwState>,
-    Path(name): Path<String>,
     _scope: DiagnosticsReadScope,
+    Path(name): Path<String>,
 ) -> Result<Response, HttpError> {
     let conf = conf_handle.get_conf();
     let files = devolutions_log::list_log_files::<GatewayLog>(conf.log_file.as_path())

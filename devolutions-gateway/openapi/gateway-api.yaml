@@ -151,12 +151,14 @@ paths:
             text/plain:
               schema:
                 type: string
+        '400':
+          description: Invalid log file name
         '401':
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
         '404':
-          description: Log file is no longer available
+          description: Log file not found
         '500':
           description: Failed to read log file
       security:
