@@ -107,6 +107,63 @@ paths:
       security:
       - scope_token:
         - gateway.diagnostics.read
+  /jet/diagnostics/logs/files:
+    get:
+      tags:
+      - Diagnostics
+      summary: Lists the log files retained by this Gateway.
+      operationId: ListLogFiles
+      responses:
+        '200':
+          description: Retained log files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogFileInfo'
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to list log files
+      security:
+      - scope_token:
+        - gateway.diagnostics.read
+  /jet/diagnostics/logs/files/{name}:
+    get:
+      tags:
+      - Diagnostics
+      summary: Retrieves one retained log file by its listed name.
+      operationId: GetLogFile
+      parameters:
+      - name: name
+        in: path
+        description: Name returned by ListLogFiles
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Log file contents
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid log file name
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Log file not found
+        '500':
+          description: Failed to read log file
+      security:
+      - scope_token:
+        - gateway.diagnostics.read
   /jet/health:
     get:
       tags:
@@ -2223,6 +2280,22 @@ components:
         internal_url:
           type: string
           description: URL to use on local network
+    LogFileInfo:
+      type: object
+      required:
+      - name
+      - size
+      - modifiedUnixMillis
+      properties:
+        modifiedUnixMillis:
+          type: integer
+          format: int64
+        name:
+          type: string
+        size:
+          type: integer
+          format: int64
+          minimum: 0
     MonitorDefinition:
       type: object
       required:
