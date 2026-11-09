@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 agent-channel-proto = { path = "../agent-channel-proto" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 der = "0.8"
 futures = "0.3"
 http = "1"
