@@ -64,8 +64,8 @@ For macOS, make these GitHub Actions secrets available to the `publish-prod` env
 | --- | --- |
 | `APPLE_APP_DEV_ID_APP_CERTIFICATE` | Developer ID Application certificate |
 | `APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD` | Application certificate export password |
-| `APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE` | Developer ID Installer certificate for the Agent package |
-| `APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE_PASSWORD` | Installer certificate export password |
+| `APPLE_DEV_ID_INSTALLER_CERTIFICATE` | Developer ID Installer certificate for the Agent package |
+| `APPLE_DEV_ID_INSTALLER_CERTIFICATE_PASSWORD` | Installer certificate export password |
 | `APPLE_BOT_PASSWORD` | App-specific Apple ID password for notarization |
 
 Both certificates must be base64-encoded PKCS #12 bundles containing their private keys.
