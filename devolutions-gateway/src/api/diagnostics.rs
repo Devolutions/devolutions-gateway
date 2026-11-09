@@ -1,6 +1,5 @@
 use std::io;
 use std::path::Path as FsPath;
-use std::time::UNIX_EPOCH;
 
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse as _, Response};
@@ -134,7 +133,7 @@ async fn get_logs(
         .await
         .map_err(HttpError::internal().with_msg("latest log file not found").err())?;
 
-    let file = File::open(&latest_log_file_path)
+    let file = open_regular_log_file(&latest_log_file_path)
         .await
         .map_err(HttpError::internal().err())?;
 
@@ -147,7 +146,7 @@ async fn get_logs(
 pub(crate) struct LogFileInfo {
     name: String,
     size: u64,
-    modified_unix_millis: u64,
+    modified_unix_millis: i64,
 }
 
 /// Lists the log files retained by this Gateway.
@@ -179,13 +178,10 @@ async fn list_log_files(
             .map(|file| LogFileInfo {
                 name: file.name,
                 size: file.size,
-                modified_unix_millis: file
-                    .modified
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()
-                    .try_into()
-                    .unwrap_or(u64::MAX),
+                modified_unix_millis: i64::try_from(
+                    time::OffsetDateTime::from(file.modified).unix_timestamp_nanos() / 1_000_000,
+                )
+                .expect("log timestamp fits in i64 milliseconds"),
             })
             .collect(),
     ))
@@ -202,7 +198,7 @@ async fn list_log_files(
         (status = 200, description = "Log file contents", body = String, content_type = "text/plain"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "Log file no longer exists"),
+        (status = 404, description = "Log file is no longer available"),
         (status = 500, description = "Failed to read log file"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
@@ -221,7 +217,10 @@ async fn get_log_file(
         .find(|file| file.name == name)
         .ok_or_else(|| HttpError::not_found().msg("log file not found"))?;
     let file = open_regular_log_file(&file.path).await.map_err(|error| {
-        if error.kind() == io::ErrorKind::NotFound {
+        let unavailable = matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::InvalidData);
+        #[cfg(unix)]
+        let unavailable = unavailable || error.raw_os_error() == Some(libc::ELOOP);
+        if unavailable {
             HttpError::not_found().build(error)
         } else {
             HttpError::internal().build(error)
@@ -240,6 +239,8 @@ async fn open_regular_log_file(path: &FsPath) -> io::Result<File> {
     options.read(true);
 
     #[cfg(unix)]
+    // UNTESTED: A FIFO swapped in after listing must not block this open, so diagnostics stays responsive.
+    // Check a FIFO replacement before changing O_NONBLOCK.
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
 
     #[cfg(windows)]
@@ -261,6 +262,8 @@ async fn open_regular_log_file(path: &FsPath) -> io::Result<File> {
         use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
         if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            // UNTESTED: A reparse-point file must not be streamed, but the test skips on hosts without symlink privilege.
+            // Exercise a file symlink on a Windows host that can create one before changing this check.
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "log path is a reparse point",
@@ -321,8 +324,67 @@ async fn get_clock() -> Json<ClockDiagnostic> {
 #[cfg(test)]
 mod tests {
     use super::open_regular_log_file;
+    use crate::log::GatewayLog;
 
-    // oracle: regression Devolutions/devolutions-gateway#2185 review comment 4473309953.
+    // oracle: mutant selecting a log-like file without the .log suffix.
+    #[tokio::test]
+    async fn latest_log_file_uses_retained_log_filter() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let retained = dir.path().join("gateway.2026-11-09.0.log");
+        let other = dir.path().join("gateway.2026-11-09.1.log.tmp");
+        std::fs::write(&retained, b"log data").expect("create retained log");
+        std::fs::write(&other, b"other data").expect("create other file");
+        let older = std::fs::FileTimes::new()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000));
+        let newer = std::fs::FileTimes::new()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_060));
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&retained)
+            .expect("open retained log")
+            .set_times(older)
+            .expect("set retained log time");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&other)
+            .expect("open other file")
+            .set_times(newer)
+            .expect("set other file time");
+
+        let log_path = camino::Utf8Path::from_path(dir.path()).expect("UTF-8 log path");
+        let latest = devolutions_log::find_latest_log_file::<GatewayLog>(log_path)
+            .await
+            .expect("find latest log");
+        assert_eq!(latest, retained);
+    }
+
+    // oracle: mutant sorting rotation numbers as strings when modification times match.
+    #[tokio::test]
+    async fn latest_log_file_orders_numeric_rotations() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let older_rotation = dir.path().join("gateway.2026-11-09.9.log");
+        let newer_rotation = dir.path().join("gateway.2026-11-09.10.log");
+        std::fs::write(&older_rotation, b"older rotation").expect("create older rotation");
+        std::fs::write(&newer_rotation, b"newer rotation").expect("create newer rotation");
+        let modified = std::fs::FileTimes::new()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000));
+        for path in [&older_rotation, &newer_rotation] {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .expect("open rotation")
+                .set_times(modified)
+                .expect("set rotation time");
+        }
+
+        let log_path = camino::Utf8Path::from_path(dir.path()).expect("UTF-8 log path");
+        let latest = devolutions_log::find_latest_log_file::<GatewayLog>(log_path)
+            .await
+            .expect("find latest log");
+        assert_eq!(latest, newer_rotation);
+    }
+
+    // oracle: mutant following a symlink outside the configured log directory.
     #[tokio::test]
     async fn replaced_log_file_symlink_is_rejected() {
         let dir = tempfile::tempdir().expect("create temporary directory");
@@ -338,7 +400,9 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &selected_log).expect("replace log with symlink");
         #[cfg(windows)]
         if let Err(error) = std::os::windows::fs::symlink_file(&outside, &selected_log) {
-            if error.raw_os_error() == Some(1314) {
+            if error.raw_os_error().and_then(|code| u32::try_from(code).ok())
+                == Some(windows_sys::Win32::Foundation::ERROR_PRIVILEGE_NOT_HELD)
+            {
                 return;
             }
             panic!("replace log with symlink: {error}");
@@ -347,7 +411,7 @@ mod tests {
         assert!(open_regular_log_file(&selected_log).await.is_err());
     }
 
-    // oracle: regression Devolutions/devolutions-gateway#2185 review comment 4473309953.
+    // oracle: mutant accepting a directory or rejecting a regular log file.
     #[tokio::test]
     async fn opened_log_handle_must_be_a_regular_file() {
         let dir = tempfile::tempdir().expect("create temporary directory");

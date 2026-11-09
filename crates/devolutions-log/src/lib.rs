@@ -21,6 +21,7 @@ pub trait StaticLogConfig {
     const LOG_FILE_PREFIX: &'static str;
 }
 
+/// Metadata for a retained log file in the configured log directory.
 pub struct LogFile {
     pub path: std::path::PathBuf,
     pub name: String,
@@ -98,38 +99,17 @@ pub fn init<C: StaticLogConfig>(
     })
 }
 
-/// Find latest log file (by age)
+/// Finds the newest retained regular log file by modification time.
 ///
-/// Given path is used to filter out by file name prefix.
+/// Uses the same file filter and order as [`list_log_files`].
 #[instrument]
 pub async fn find_latest_log_file<C: StaticLogConfig>(prefix: &Utf8Path) -> anyhow::Result<std::path::PathBuf> {
-    let cfg = LogPathCfg::<C>::from_path(prefix)?;
-
-    let mut read_dir = fs::read_dir(cfg.folder).await.context("couldn't read directory")?;
-
-    let mut most_recent_time = SystemTime::UNIX_EPOCH;
-    let mut most_recent = None;
-
-    while let Ok(Some(entry)) = read_dir.next_entry().await {
-        match entry.file_name().to_str() {
-            Some(file_name) if file_name.starts_with(cfg.prefix) && file_name.contains("log") => {
-                debug!(file_name, "Found a log file");
-                match entry.metadata().await.and_then(|metadata| metadata.modified()) {
-                    Ok(modified) if modified > most_recent_time => {
-                        most_recent_time = modified;
-                        most_recent = Some(entry.path());
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        warn!(%error, file_name, "Couldn't retrieve metadata for file");
-                    }
-                }
-            }
-            _ => continue,
-        }
-    }
-
-    most_recent.context("no file found")
+    list_log_files::<C>(prefix)
+        .await?
+        .into_iter()
+        .next()
+        .map(|file| file.path)
+        .context("no file found")
 }
 
 /// Lists the regular log files retained under the configured log path.
@@ -184,9 +164,25 @@ pub async fn list_log_files<C: StaticLogConfig>(path: &Utf8Path) -> anyhow::Resu
         right
             .modified
             .cmp(&left.modified)
-            .then_with(|| right.name.cmp(&left.name))
+            .then_with(|| compare_log_file_names(&right.name, &left.name))
     });
     Ok(files)
+}
+
+fn compare_log_file_names(left: &str, right: &str) -> std::cmp::Ordering {
+    let rotations = left
+        .strip_suffix(".log")
+        .and_then(|name| name.rsplit_once('.'))
+        .zip(right.strip_suffix(".log").and_then(|name| name.rsplit_once('.')));
+
+    if let Some(((left_base, left_rotation), (right_base, right_rotation))) = rotations
+        && left_base == right_base
+        && let (Ok(left_rotation), Ok(right_rotation)) = (left_rotation.parse::<u64>(), right_rotation.parse::<u64>())
+    {
+        return left_rotation.cmp(&right_rotation).then_with(|| left.cmp(right));
+    }
+
+    left.cmp(right)
 }
 
 /// File deletion task (by age)

@@ -156,7 +156,7 @@ paths:
         '403':
           description: Insufficient permissions
         '404':
-          description: Log file no longer exists
+          description: Log file is no longer available
         '500':
           description: Failed to read log file
       security:
@@ -2285,13 +2285,12 @@ components:
       - size
       - modifiedUnixMillis
       properties:
+        modifiedUnixMillis:
+          type: integer
+          format: int64
         name:
           type: string
         size:
-          type: integer
-          format: int64
-          minimum: 0
-        modifiedUnixMillis:
           type: integer
           format: int64
           minimum: 0
