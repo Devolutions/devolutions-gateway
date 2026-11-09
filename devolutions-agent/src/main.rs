@@ -58,6 +58,9 @@ fn agent_service_main(
     _args: Vec<String>,
     _standalone_mode: bool,
 ) -> u8 {
+    // Both ring and aws-lc-rs are in the dependency graph, so rustls cannot pick a process default by itself.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let Ok(conf_handle) = ConfHandle::init() else {
         // At this point, the logger is not yet initialized.
         return BAD_CONFIG_ERR_CODE;
