@@ -43,7 +43,7 @@ use self::package::{install_package, uninstall_package, validate_package};
 pub(crate) use self::product::Product;
 use self::product_actions::{ProductUpdateActions, build_product_actions};
 use self::productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
-use self::security::set_file_dacl;
+pub(crate) use self::security::set_file_dacl;
 use self::service_account::{GatewayServiceAccount, NETWORK_SERVICE_SID};
 use crate::config::ConfHandle;
 use crate::config::dto::UpdaterSchedule;

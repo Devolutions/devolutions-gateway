@@ -7,6 +7,7 @@
 //! API. DVLS also sends package operations (install, update, uninstall) on this stream. The agent runs them through
 //! UniGetUI, then sends the result and a new inventory.
 
+mod software_catalog;
 mod unigetui;
 
 use std::sync::Arc;
@@ -294,6 +295,31 @@ impl DeviceManagementAgent {
                                     debug!("Device management stream closed before the inventory report was sent");
                                 }
                             });
+                        }
+                        Some(ServerPayload::CatalogSync(request)) => {
+                            let revision = request.revision;
+                            let identity_id = identity.identity_id;
+                            let result = tokio::task::spawn_blocking(move || software_catalog::apply(identity_id, request))
+                                .await
+                                .context("catalog synchronization worker failed")
+                                .and_then(std::convert::identity);
+                            let error = match &result {
+                                Ok(()) => String::new(),
+                                Err(error) => {
+                                    warn!(revision, error = format!("{error:#}"), "Software catalog synchronization failed");
+                                    format!("{error:#}")
+                                }
+                            };
+                            outgoing_tx
+                                .send(AgentMessage {
+                                    payload: Some(AgentPayload::CatalogSyncResult(protocol::CatalogSyncResult {
+                                        revision,
+                                        ok: result.is_ok(),
+                                        error,
+                                    })),
+                                })
+                                .await
+                                .context("failed to queue catalog synchronization result")?;
                         }
                         Some(ServerPayload::Challenge(_)) | None => {}
                     }

@@ -19,6 +19,7 @@ message AgentMessage {
     Hello hello = 1;
     InventoryReport inventory = 2;
     PackageOperationResult operation_result = 4;
+    CatalogSyncResult catalog_sync_result = 5;
   }
 }
 
@@ -68,6 +69,7 @@ message ServerMessage {
     SyncInventoryRequest sync_inventory = 1;
     PackageOperationRequest package_operation = 3;
     Challenge challenge = 4;
+    CatalogSync catalog_sync = 5;
   }
 }
 
@@ -99,5 +101,19 @@ message PackageOperationRequest {
 message PackageOperationResult {
   string operation_id = 1;
   bool success = 2;
+  string error = 3;
+}
+
+message CatalogSync {
+  int64 revision = 1;
+  oneof content {
+    string document = 2;
+    bool delete = 3;
+  }
+}
+
+message CatalogSyncResult {
+  int64 revision = 1;
+  bool ok = 2;
   string error = 3;
 }

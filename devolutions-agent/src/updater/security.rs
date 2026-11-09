@@ -41,7 +41,10 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
     use windows::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
     };
-    use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR};
+    use windows::Win32::Security::{
+        ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR,
+    };
 
     struct OwnedPSecurityDescriptor(PSECURITY_DESCRIPTOR);
 
@@ -104,7 +107,7 @@ pub(crate) fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), Updat
         SetNamedSecurityInfoW(
             wide_file_path.as_pcwstr(),
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             None,
             None,
             Some(dacl),
