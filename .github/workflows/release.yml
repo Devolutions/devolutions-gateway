@@ -370,6 +370,11 @@ jobs:
             Move-Item "$Dl/devolutions-agent/linux/${Arch}/devolutions-agent.changes" "$Release/devolutions-agent-${Version}-${Arch}.changes"
           }
 
+          # Agent macOS PKG
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item "$Dl/devolutions-agent/macos/${Arch}/devolutions-agent.pkg" "$Release/devolutions-agent-${Version}-${Arch}.pkg"
+          }
+
           # Jetsocat archives: .tar.xz for Linux, .zip for Windows and macOS
           foreach ($P in @(
             @{ OS = "windows"; Arch = "x64";       Ext = ".exe"; Archive = "zip" },
@@ -657,6 +662,10 @@ jobs:
             Move-Item -Path "./devolutions-agent/linux/${Arch}/devolutions-agent.deb" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.deb"
             Move-Item -Path "./devolutions-agent/linux/${Arch}/devolutions-agent.rpm" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.rpm"
             Move-Item -Path "./devolutions-agent/linux/${Arch}/devolutions-agent.changes" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.changes"
+          }
+
+          foreach ($Arch in @('x64', 'arm64')) {
+            Move-Item -Path "./devolutions-agent/macos/${Arch}/devolutions-agent.pkg" -Destination "$destinationFolder/devolutions-agent-${versionFull}-${Arch}.pkg"
           }
         shell: pwsh
 

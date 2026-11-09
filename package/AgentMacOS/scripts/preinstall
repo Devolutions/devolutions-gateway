@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Stops a running Agent so the payload can replace its binary.
+
+LABEL="com.devolutions.agent"
+
+if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+	/bin/launchctl bootout "system/$LABEL" || true
+
+	# postinstall cannot bootstrap the label again until launchd has fully unloaded it.
+	i=0
+	while /bin/launchctl print "system/$LABEL" >/dev/null 2>&1 && [ "$i" -lt 60 ]; do
+		/bin/sleep 1
+		i=$((i + 1))
+	done
+fi
+
+exit 0

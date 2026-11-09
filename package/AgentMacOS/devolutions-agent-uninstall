@@ -1,0 +1,39 @@
+#!/bin/sh
+
+# Removes Devolutions Agent.
+# The configuration, credentials, and logs are kept unless --purge is given.
+
+set -eu
+
+LABEL="com.devolutions.agent"
+PLIST="/Library/LaunchDaemons/$LABEL.plist"
+DATA_DIR="/Library/Application Support/Devolutions Agent"
+LOG_DIR="/Library/Logs/Devolutions Agent"
+
+PURGE=0
+case "${1:-}" in
+	"") ;;
+	--purge) PURGE=1 ;;
+	*)
+		echo "usage: $0 [--purge]" >&2
+		exit 2
+		;;
+esac
+
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
+	echo "$0 must run as root, for example with sudo" >&2
+	exit 1
+fi
+
+if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+	/bin/launchctl bootout "system/$LABEL"
+fi
+
+/bin/rm -f "$PLIST" /usr/local/bin/devolutions-agent
+/usr/sbin/pkgutil --forget "$LABEL" >/dev/null 2>&1 || true
+
+if [ "$PURGE" -eq 1 ]; then
+	/bin/rm -rf "$DATA_DIR" "$LOG_DIR"
+fi
+
+/bin/rm -f /usr/local/bin/devolutions-agent-uninstall

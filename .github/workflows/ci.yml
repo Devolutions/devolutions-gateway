@@ -65,8 +65,8 @@ jobs:
 
           $Jobs = @()
 
-          $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'linux' { 'ubuntu-22.04' } }
+          $Platforms + 'macos' | ForEach-Object {
+              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-15' } 'linux' { 'ubuntu-22.04' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
@@ -1136,6 +1136,17 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      # See the jetsocat job: the macos-15 image's ~/.cargo/bin shims are broken.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
+
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
         with:
@@ -1280,6 +1291,10 @@ jobs:
           rustup target add aarch64-pc-windows-msvc
         shell: pwsh
 
+      - name: Configure macOS (intel) runner
+        if: ${{ matrix.os == 'macos' && matrix.arch == 'x64' }}
+        run: rustup target add x86_64-apple-darwin
+
       - name: Add msbuild to PATH
         if: ${{ matrix.os == 'windows' }}
         uses: microsoft/setup-msbuild@v3
@@ -1376,6 +1391,11 @@ jobs:
           DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
 
+      # The macos-15 runner is arm64, so it can only install the arm64 package.
+      - name: Test macOS package installation
+        if: ${{ matrix.os == 'macos' && matrix.arch == 'arm64' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        run: ./package/AgentMacOS/Test-Package.sh "${{ steps.load-variables.outputs.target-output-path }}/devolutions-agent.pkg"
+        shell: bash
 
       - name: Clean up architecture-agnostic files before upload
         run: |

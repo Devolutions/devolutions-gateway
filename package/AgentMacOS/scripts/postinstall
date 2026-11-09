@@ -1,0 +1,24 @@
+#!/bin/sh
+
+set -e
+
+LABEL="com.devolutions.agent"
+PLIST="/Library/LaunchDaemons/$LABEL.plist"
+DATA_DIR="/Library/Application Support/Devolutions Agent"
+LOG_DIR="/Library/Logs/Devolutions Agent"
+
+# The data directory holds the configuration and credentials, so only root may read it.
+if [ ! -d "$DATA_DIR" ]; then
+	/bin/mkdir -p "$DATA_DIR"
+	/bin/chmod 700 "$DATA_DIR"
+fi
+
+/bin/mkdir -p "$LOG_DIR"
+
+# A broken existing configuration must not block the upgrade that may fix it.
+/usr/local/bin/devolutions-agent config init >/dev/null || echo "devolutions-agent: failed to initialize the configuration" >&2
+
+/bin/launchctl enable "system/$LABEL"
+/bin/launchctl bootstrap system "$PLIST"
+
+exit 0

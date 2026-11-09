@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Devolutions Agent</title>
+    <organization>com.devolutions</organization>
+    <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="{{ host_arch }}"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <allowed-os-versions>
+        <os-version min="11.0"/>
+    </allowed-os-versions>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.devolutions.agent"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.devolutions.agent" visible="false">
+        <pkg-ref id="com.devolutions.agent"/>
+    </choice>
+    <pkg-ref id="com.devolutions.agent" version="{{ version }}" onConclusion="none">{{ component_pkg }}</pkg-ref>
+</installer-gui-script>

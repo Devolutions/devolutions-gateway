@@ -919,6 +919,89 @@ class TlkRecipe
         Pop-Location
     }
 
+    [void] Package_MacOS() {
+        if ($this.Product -Ne 'agent') {
+            throw "macOS packaging for $($this.Product) is not supported"
+        }
+
+        if (Test-Path Env:DAGENT_EXECUTABLE) {
+            $Executable = $Env:DAGENT_EXECUTABLE
+        } else {
+            throw ("Specify DAGENT_EXECUTABLE environment variable")
+        }
+
+        $HostArchitecture = switch ($this.Target.Architecture) {
+            "x64" { "x86_64" }
+            "arm64" { "arm64" }
+            default { throw "unsupported macOS architecture: $($this.Target.Architecture)" }
+        }
+
+        $Identifier = "com.devolutions.agent"
+        $InputPackagePath = Join-Path $this.SourcePath "package/AgentMacOS"
+        $OutputPath = Join-Path $this.SourcePath "output/agent-macos-$($this.Target.Architecture)"
+        $PayloadPath = Join-Path $OutputPath "payload"
+        $ScriptsPath = Join-Path $OutputPath "scripts"
+        $BinPath = Join-Path $PayloadPath "usr/local/bin"
+        $LaunchDaemonsPath = Join-Path $PayloadPath "Library/LaunchDaemons"
+
+        Remove-Item -Path $OutputPath -Recurse -Force -ErrorAction SilentlyContinue
+        @($BinPath, $LaunchDaemonsPath, $ScriptsPath) | % {
+            New-Item -Path $_ -ItemType 'Directory' -Force | Out-Null
+        }
+
+        Copy-Item $Executable "$BinPath/devolutions-agent"
+        Copy-Item "$InputPackagePath/devolutions-agent-uninstall" "$BinPath/devolutions-agent-uninstall"
+        Copy-Item "$InputPackagePath/$Identifier.plist" "$LaunchDaemonsPath/$Identifier.plist"
+        Copy-Item "$InputPackagePath/scripts/*" $ScriptsPath
+
+        & 'chmod' '755' "$BinPath/devolutions-agent" "$BinPath/devolutions-agent-uninstall" "$ScriptsPath/preinstall" "$ScriptsPath/postinstall"
+        & 'chmod' '644' "$LaunchDaemonsPath/$Identifier.plist"
+
+        & 'plutil' '-lint' "$LaunchDaemonsPath/$Identifier.plist" | Out-Host
+        if ($LASTEXITCODE -Ne 0) {
+            throw "invalid launchd plist"
+        }
+
+        $ComponentPackageName = "devolutions-agent-component.pkg"
+
+        & 'pkgbuild' '--root' $PayloadPath `
+            '--scripts' $ScriptsPath `
+            '--identifier' $Identifier `
+            '--version' $this.Version `
+            '--install-location' '/' `
+            '--ownership' 'recommended' `
+            "$OutputPath/$ComponentPackageName" | Out-Host
+        if ($LASTEXITCODE -Ne 0) {
+            throw "pkgbuild failed"
+        }
+
+        $DistributionFile = Join-Path $OutputPath "distribution.xml"
+        Merge-Tokens -TemplateFile "$InputPackagePath/distribution.xml" -Tokens @{
+            host_arch = $HostArchitecture
+            version = $this.Version
+            component_pkg = $ComponentPackageName
+        } -OutputFile $DistributionFile
+
+        $ProductBuildArgs = @('--distribution', $DistributionFile, '--package-path', $OutputPath)
+
+        # The installer is signed here because a signature cannot be added to a built product archive.
+        if (Test-Path Env:DAGENT_PKG_SIGNING_IDENTITY) {
+            $ProductBuildArgs += @('--sign', $Env:DAGENT_PKG_SIGNING_IDENTITY, '--timestamp')
+        }
+
+        $PackageFile = Join-Path $OutputPath "devolutions-agent.pkg"
+        & 'productbuild' @ProductBuildArgs $PackageFile | Out-Host
+        if ($LASTEXITCODE -Ne 0) {
+            throw "productbuild failed"
+        }
+
+        if (Test-Path Env:TARGET_OUTPUT_PATH) {
+            $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
+            New-Item -Path $TargetOutputPath -ItemType 'Directory' -Force | Out-Null
+            Copy-Item $PackageFile "$TargetOutputPath/devolutions-agent.pkg" -Force
+        }
+    }
+
     [void] Package([string]$PackageOption) {
         if ($this.Product -Eq 'jetsocat') {
             throw "Packaging for $($this.Product) is not supported"
@@ -943,6 +1026,8 @@ class TlkRecipe
             }
         } elseif ($this.Target.IsLinux()) {
             $this.Package_Linux()
+        } elseif ($this.Target.IsMacOS()) {
+            $this.Package_MacOS()
         }
     }
 

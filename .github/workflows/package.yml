@@ -193,8 +193,6 @@ jobs:
         exclude:
           - project: devolutions-gateway
             os: macos
-          - project: devolutions-agent
-            os: macos
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -238,11 +236,21 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
           security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+
+          # Installer packages need a separate Developer ID Installer identity.
+          if [ -n "$DEVELOPER_ID_INSTALLER_CERTIFICATE" ]; then
+            DEVELOPER_ID_INSTALLER_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_installer_cert.p12
+            echo -n "$DEVELOPER_ID_INSTALLER_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_INSTALLER_CERTIFICATE_PATH
+            security import $DEVELOPER_ID_INSTALLER_CERTIFICATE_PATH -P "$DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          fi
+
           security list-keychain -d user -s $KEYCHAIN_PATH
         shell: bash
         env:
           DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
           DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
+          DEVELOPER_ID_INSTALLER_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE }}
+          DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE_PASSWORD }}
 
       - name: Configure runner (Windows)
         if: ${{ matrix.os == 'windows' }}
@@ -333,11 +341,11 @@ jobs:
         run: |
           $IncludePattern = @(switch ('${{ matrix.project }}') {
             'devolutions-gateway' { @('DevolutionsGateway.exe') }
-            'devolutions-agent' { @('DevolutionsAgent.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe') }
+            'devolutions-agent' { @('DevolutionsAgent.exe', 'DevolutionsAgentUpdater.exe', 'DevolutionsPedmShellExt.dll', 'DevolutionsPedmShellExt.msix', 'DevolutionsDesktopAgent.exe', 'devolutions-agent') }
             'jetsocat' { @('jetsocat.exe', 'jetsocat') }
           })
           $ExcludePattern = "*.pdb"
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -File -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
               if ($_.Name -Eq 'DevolutionsPedmShellExt.msix') {
                 $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
@@ -604,6 +612,52 @@ jobs:
           }
         shell: pwsh
 
+      - name: Repackage and notarize Agent (macOS)
+        if: ${{ matrix.project == 'devolutions-agent' && matrix.os == 'macos' }}
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-agent macos
+          $IsProduction = '${{ needs.preflight.outputs.package-env }}' -Eq 'publish-prod'
+          $CanSign = -Not [string]::IsNullOrEmpty($Env:DEVELOPER_ID_INSTALLER_CERTIFICATE)
+          $CanNotarize = $CanSign -And -Not [string]::IsNullOrEmpty($Env:APPLE_BOT_PASSWORD)
+
+          if (-Not $CanNotarize) {
+            $Message = 'the Developer ID Installer certificate or the notarization credentials are missing; the Agent macOS package is not notarized'
+            if ($IsProduction) { throw $Message }
+            echo "::warning::$Message"
+          }
+
+          if ($CanSign) {
+            $Env:DAGENT_PKG_SIGNING_IDENTITY = 'Developer ID Installer: Devolutions inc. (N592S9ASDB)'
+          }
+
+          if ($CanNotarize) {
+            xcrun notarytool store-credentials 'notarytool-profile' --apple-id "$Env:APPLE_BOT_ID" --team-id "$Env:APPLE_BOT_TEAM_ID" --password "$Env:APPLE_BOT_PASSWORD"
+            if ($LastExitCode -Ne 0) { throw 'notarytool store-credentials failed' }
+          }
+
+          foreach ($Arch in @('x64', 'arm64')) {
+            $ArchRoot = Join-Path $PackageRoot $Arch
+            $Env:DAGENT_EXECUTABLE = Join-Path $ArchRoot 'devolutions-agent'
+            $Env:TARGET_OUTPUT_PATH = $ArchRoot
+
+            Write-Host "=== Repackage Agent ($Arch) ==="
+            ./ci/tlk.ps1 package -Product agent -Platform macos -Architecture $Arch
+
+            if ($CanNotarize) {
+              $PackageFile = Join-Path $ArchRoot 'devolutions-agent.pkg'
+              xcrun notarytool submit $PackageFile --keychain-profile 'notarytool-profile' --wait
+              if ($LastExitCode -Ne 0) { throw "notarization failed for $PackageFile" }
+              xcrun stapler staple $PackageFile
+              if ($LastExitCode -Ne 0) { throw "stapling failed for $PackageFile" }
+            }
+          }
+        shell: pwsh
+        env:
+          DEVELOPER_ID_INSTALLER_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_INSTALLER_CERTIFICATE }}
+          APPLE_BOT_PASSWORD: ${{ secrets.APPLE_BOT_PASSWORD }}
+          APPLE_BOT_ID: bot@devolutions.net
+          APPLE_BOT_TEAM_ID: N592S9ASDB
+
       - name: Verification
         if: ${{ (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod' }}
         run: |
@@ -617,10 +671,22 @@ jobs:
               }
             }
           } elseif ('${{ matrix.os }}' -Eq 'macos') {
-            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat' | % {
+            Get-ChildItem -Path $RootPath -Recurse -File -Include ('jetsocat', 'devolutions-agent') | % {
               codesign -dvvv "$($_.FullName)"
               if ($LastExitCode -Ne 0) {
                 echo "::error::failed to verify the signature of $($_.FullName)"
+                exit 1
+              }
+            }
+            Get-ChildItem -Path $RootPath -Recurse -File -Include '*.pkg' | % {
+              pkgutil --check-signature "$($_.FullName)"
+              if ($LastExitCode -Ne 0) {
+                echo "::error::failed to verify the signature of $($_.FullName)"
+                exit 1
+              }
+              xcrun stapler validate "$($_.FullName)"
+              if ($LastExitCode -Ne 0) {
+                echo "::error::failed to validate the notarization ticket of $($_.FullName)"
                 exit 1
               }
             }
