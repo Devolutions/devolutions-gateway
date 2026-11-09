@@ -339,7 +339,6 @@ mod tests {
         #[cfg(windows)]
         if let Err(error) = std::os::windows::fs::symlink_file(&outside, &selected_log) {
             if error.raw_os_error() == Some(1314) {
-                eprintln!("Windows symlink privilege is unavailable; skipping symlink check");
                 return;
             }
             panic!("replace log with symlink: {error}");
