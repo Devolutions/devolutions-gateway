@@ -42,7 +42,7 @@ win-api-wrappers = { path = "../crates/win-api-wrappers", optional = true }
 
 [dependencies.now-proto-pdu]
 optional = true
-version = "0.4.3"
+version = "0.5.0"
 features = ["std"]
 
 [dev-dependencies]

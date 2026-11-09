@@ -3,7 +3,7 @@ use std::os::windows::io::AsRawHandle as _;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
+use now_proto_pdu::{NowExecDataStreamKind, NowProtoError, NowStatusError};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error, info, trace, warn};
 use win_api_wrappers::event::Event;
@@ -13,8 +13,8 @@ use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::thread::Thread;
 use win_api_wrappers::utils::{Pipe, WideString};
 use windows::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_NOT_FOUND, GetLastError, HANDLE, LPARAM, WAIT_EVENT, WAIT_OBJECT_0,
-    WPARAM,
+    ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_HANDLE_EOF, ERROR_NOT_FOUND, GetLastError, HANDLE, LPARAM, WAIT_EVENT,
+    WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{CancelSynchronousIo, GetOverlappedResult, OVERLAPPED};
@@ -27,7 +27,7 @@ use windows::Win32::System::Threading::{
     INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESHOWWINDOW,
     STARTF_USESTDHANDLES, STARTUPINFOW, WaitForMultipleObjects,
 };
-use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
+use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_RESTORE, WM_QUIT};
 use windows::core::PCWSTR;
 
 use crate::dvc::channel::{
@@ -90,6 +90,7 @@ pub enum ServerChannelEvent {
     CloseChannel,
     SessionStarted {
         session_id: u32,
+        no_io_redirection: bool,
     },
     SessionDataOut {
         session_id: u32,
@@ -127,6 +128,9 @@ pub struct WinApiProcessCtx {
     encoding: DataEncoding,
 
     pid: u32,
+    started_no_io_redirection: bool,
+    elevated: bool,
+    _temp_files: Vec<TmpFileGuard>,
 
     // NOTE: Order of fields is important, as process_handle must be dropped last in automatically
     // generated destructor, after all pipes were closed.
@@ -178,7 +182,10 @@ impl WinApiProcessCtx {
         const WAIT_OBJECT_INPUT_MESSAGE: WAIT_EVENT = WAIT_OBJECT_0;
         const WAIT_OBJECT_PROCESS_EXIT: WAIT_EVENT = WAIT_EVENT(WAIT_OBJECT_0.0 + 1);
 
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted {
+            session_id,
+            no_io_redirection: self.started_no_io_redirection,
+        })?;
 
         loop {
             // SAFETY: No preconditions.
@@ -210,6 +217,10 @@ impl WinApiProcessCtx {
                         }
                         ProcessIoInputEvent::TerminateIo => {
                             info!(session_id, "Terminating IO loop");
+
+                            if self.elevated {
+                                self.process.wait(None)?;
+                            }
 
                             // Terminate IO loop
                             return Err(ExecError::Aborted);
@@ -303,7 +314,10 @@ impl WinApiProcessCtx {
 
         // Signal client side about started execution
 
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted { session_id })?;
+        io_notification_tx.blocking_send(ServerChannelEvent::SessionStarted {
+            session_id,
+            no_io_redirection: false,
+        })?;
 
         info!(session_id, "Process IO is ready for async loop execution");
         loop {
@@ -614,6 +628,7 @@ pub struct WinApiProcessBuilder {
     command_line: String,
     current_directory: String,
     enable_io_redirection: bool,
+    elevated: bool,
     encoding: DataEncoding,
     env: HashMap<String, String>,
     temp_files: Vec<TmpFileGuard>,
@@ -626,6 +641,7 @@ impl WinApiProcessBuilder {
             command_line: String::new(),
             current_directory: String::new(),
             enable_io_redirection: false,
+            elevated: false,
             encoding: DataEncoding::from_oem_codepage(),
             env: HashMap::new(),
             temp_files: Vec::new(),
@@ -653,6 +669,12 @@ impl WinApiProcessBuilder {
     #[must_use]
     pub fn with_io_redirection(mut self, enable: bool) -> Self {
         self.enable_io_redirection = enable;
+        self
+    }
+
+    #[must_use]
+    pub fn with_elevated_execution(mut self) -> Self {
+        self.elevated = true;
         self
     }
 
@@ -698,6 +720,22 @@ impl WinApiProcessBuilder {
 
         let io_redirection = self.enable_io_redirection;
         let encoding = self.encoding;
+        if self.elevated {
+            let io_notification_tx = io_notification_tx.ok_or_else(|| {
+                ExecError::Other(anyhow::anyhow!("elevated execution requires a notification sender"))
+            })?;
+
+            return Self::run_elevated_impl(
+                session_id,
+                self.executable,
+                self.command_line,
+                self.current_directory,
+                io_redirection,
+                io_notification_tx,
+                detached,
+                temp_files,
+            );
+        }
 
         let process_ctx = if io_redirection {
             prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env, encoding, job)?
@@ -775,17 +813,97 @@ impl WinApiProcessBuilder {
         }))
     }
 
+    fn run_elevated_impl(
+        session_id: u32,
+        executable: String,
+        command_line: String,
+        current_directory: String,
+        requested_io_redirection: bool,
+        io_notification_tx: Sender<ServerChannelEvent>,
+        detached: bool,
+        temp_files: Vec<TmpFileGuard>,
+    ) -> Result<Option<WinApiProcess>, ExecError> {
+        if detached {
+            std::thread::Builder::new()
+                .name(format!("process-{session_id}-elevation"))
+                .spawn(move || {
+                    let process_ctx = match prepare_elevated_process(
+                        session_id,
+                        &executable,
+                        &command_line,
+                        &current_directory,
+                        requested_io_redirection,
+                        temp_files,
+                    ) {
+                        Ok(process_ctx) => process_ctx,
+                        Err(error) => {
+                            let notification = ServerChannelEvent::SessionFailed { session_id, error };
+                            if let Err(error) = io_notification_tx.blocking_send(notification) {
+                                error!(%error, session_id, "Failed to send elevated launch error");
+                            }
+                            return;
+                        }
+                    };
+
+                    if let Err(error) = io_notification_tx.blocking_send(ServerChannelEvent::SessionExited {
+                        session_id,
+                        exit_code: 0,
+                    }) {
+                        error!(%error, session_id, "Failed to send elevated launch result");
+                    }
+
+                    if let Err(error) = process_ctx.process.wait(None) {
+                        error!(%error, session_id, "Failed to wait for elevated detached process");
+                    }
+                })
+                .map_err(anyhow::Error::from)?;
+
+            return Ok(None);
+        }
+
+        let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
+        let join_handle = std::thread::Builder::new()
+            .name(format!("process-{session_id}-elevation"))
+            .spawn(move || {
+                let run_result = prepare_elevated_process(
+                    session_id,
+                    &executable,
+                    &command_line,
+                    &current_directory,
+                    requested_io_redirection,
+                    temp_files,
+                )
+                .and_then(|process_ctx| process_ctx.wait(input_event_rx, io_notification_tx.clone()));
+
+                let notification = match run_result {
+                    Ok(exit_code) => ServerChannelEvent::SessionExited { session_id, exit_code },
+                    Err(error) => ServerChannelEvent::SessionFailed { session_id, error },
+                };
+
+                if let Err(error) = io_notification_tx.blocking_send(notification) {
+                    error!(%error, session_id, "Failed to send elevated process result");
+                }
+            })?;
+
+        Ok(Some(WinApiProcess {
+            input_event_tx,
+            stdin_writer: None,
+            join_handle,
+            _temp_files: Vec::new(),
+        }))
+    }
+
     /// Starts process execution and spawns IO thread to redirect stdio to/from dvc.
     ///
-    /// The process joins `job` before it runs, so it and every process it starts are killed when the job is dropped.
+    /// Standard launches join `job` when provided, so their process trees are killed when the job is dropped.
     pub fn run(
         self,
         session_id: u32,
         io_notification_tx: Sender<ServerChannelEvent>,
-        job: &ProcessJob,
+        job: Option<&ProcessJob>,
     ) -> Result<WinApiProcess, ExecError> {
         Ok(self
-            .run_impl(session_id, Some(io_notification_tx), Some(job), false)?
+            .run_impl(session_id, Some(io_notification_tx), job, false)?
             .expect("result should be non-optional when running in non-detached mode"))
     }
 
@@ -793,8 +911,18 @@ impl WinApiProcessBuilder {
     /// No IO redirection. Process exit is monitored in a background thread to manage temp file cleanup.
     /// Returns immediately after spawning.
     pub fn run_detached(self, session_id: u32) -> Result<(), ExecError> {
-        // Result always empty and therefore ignored in detached mode.
         self.run_impl(session_id, None, None, true)?;
+        Ok(())
+    }
+
+    pub fn run_detached_with_notifications(
+        self,
+        session_id: u32,
+        io_notification_tx: Sender<ServerChannelEvent>,
+    ) -> Result<(), ExecError> {
+        // Result always empty and therefore ignored in detached mode.
+        let sender = self.elevated.then_some(io_notification_tx);
+        self.run_impl(session_id, sender, None, true)?;
         Ok(())
     }
 }
@@ -927,6 +1055,9 @@ fn prepare_process(
         stdin_write_pipe: None,
         encoding,
         pid,
+        started_no_io_redirection: false,
+        elevated: false,
+        _temp_files: Vec::new(),
         process: process_handle,
     })
 }
@@ -1001,10 +1132,55 @@ fn prepare_process_with_io_redirection(
         stdin_write_pipe: Some(stdin_write_pipe),
         encoding,
         pid,
+        started_no_io_redirection: false,
+        elevated: false,
+        _temp_files: Vec::new(),
         process: process_handle,
     };
 
     Ok(process_ctx)
+}
+
+fn prepare_elevated_process(
+    session_id: u32,
+    executable: &str,
+    command_line: &str,
+    current_directory: &str,
+    requested_io_redirection: bool,
+    temp_files: Vec<TmpFileGuard>,
+) -> Result<WinApiProcessCtx, ExecError> {
+    let process = win_api_wrappers::process::shell_execute(
+        std::path::Path::new(executable),
+        command_line,
+        std::path::Path::new(current_directory),
+        "runas",
+        SW_RESTORE,
+    )
+    .map_err(map_elevated_launch_error)?;
+    let pid = process.process_id()?;
+
+    Ok(WinApiProcessCtx {
+        session_id,
+        stdout_read_pipe: None,
+        stderr_read_pipe: None,
+        stdin_write_pipe: None,
+        encoding: DataEncoding::Raw,
+        pid,
+        started_no_io_redirection: requested_io_redirection,
+        elevated: true,
+        _temp_files: temp_files,
+        process,
+    })
+}
+
+fn map_elevated_launch_error(error: anyhow::Error) -> ExecError {
+    match error.downcast::<windows::core::Error>() {
+        Ok(error) if error.code() == ERROR_CANCELLED.to_hresult() => {
+            ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::ElevationDenied))
+        }
+        Ok(error) => ExecError::from(error),
+        Err(error) => ExecError::Other(error),
+    }
 }
 
 /// Represents spawned process with IO redirection.
@@ -1072,7 +1248,25 @@ impl WinApiProcess {
 mod tests {
     use std::time::Duration;
 
+    use now_proto_pdu::NowExecResultMsg;
+
     use super::*;
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
+    #[test]
+    fn elevation_consent_cancellation_reports_elevation_denied() {
+        let error = windows::core::Error::from(ERROR_CANCELLED);
+
+        let ExecError::NowStatus(actual) = map_elevated_launch_error(error.into()) else {
+            panic!("elevation cancellation must use a NOW status error");
+        };
+        let expected = NowStatusError::new_proto(NowProtoError::ElevationDenied);
+
+        assert_eq!(
+            NowExecResultMsg::new_error(1, actual).expect("valid status error"),
+            NowExecResultMsg::new_error(1, expected).expect("valid expected status error")
+        );
+    }
 
     // oracle: regression #2156 detached Process without temporary files must not panic after launch.
     #[test]
@@ -1101,7 +1295,7 @@ mod tests {
             ))
             .with_io_redirection(true)
             .with_encoding(DataEncoding::Raw)
-            .run(SESSION_ID, io_notification_tx, &job)
+            .run(SESSION_ID, io_notification_tx, Some(&job))
             .expect("start cmd.exe");
 
         let input: String = (0..INPUT_LINES).map(|i| format!("input-line-{i:05}\r\n")).collect();
@@ -1148,7 +1342,7 @@ mod tests {
         let process = WinApiProcessBuilder::new("cmd.exe")
             .with_command_line("/d /c ping -n 600 127.0.0.1 > nul")
             .with_io_redirection(true)
-            .run(SESSION_ID, io_notification_tx, &job)
+            .run(SESSION_ID, io_notification_tx, Some(&job))
             .expect("start cmd.exe");
 
         process.send_stdin(vec![b'x'; 1024 * 1024], false).await;

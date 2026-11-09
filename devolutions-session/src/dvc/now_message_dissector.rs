@@ -1,6 +1,6 @@
 use anyhow::Context;
 use now_proto_pdu::NowMessage;
-use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf};
+use now_proto_pdu::ironrdp_core::{Decode, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf};
 
 /// Reconstructs Now messages from a stream of bytes.
 #[derive(Default)]
@@ -38,10 +38,7 @@ impl NowMessageDissector {
                     // Remove the read bytes from the buffer
                     self.start_pos += pos;
                 }
-                Err(DecodeError {
-                    kind: DecodeErrorKind::NotEnoughBytes { .. },
-                    ..
-                }) => {
+                Err(err) if matches!(err.kind(), DecodeErrorKind::NotEnoughBytes { .. }) => {
                     // Need more data to read the message
                     break;
                 }
