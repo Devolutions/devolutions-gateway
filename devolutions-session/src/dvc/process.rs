@@ -13,8 +13,8 @@ use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::thread::Thread;
 use win_api_wrappers::utils::{Pipe, WideString};
 use windows::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_HANDLE_EOF, ERROR_NOT_FOUND, GetLastError, HANDLE, LPARAM, WAIT_EVENT,
-    WAIT_OBJECT_0, WPARAM,
+    ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_ELEVATION_REQUIRED, ERROR_HANDLE_EOF,
+    ERROR_NOT_FOUND, ERROR_PRIVILEGE_NOT_HELD, GetLastError, HANDLE, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{CancelSynchronousIo, GetOverlappedResult, OVERLAPPED};
@@ -137,6 +137,17 @@ pub struct WinApiProcessCtx {
     process: Process,
 }
 
+impl Drop for WinApiProcessCtx {
+    fn drop(&mut self) {
+        // Elevated processes can outlive their channel; keep scripts until the interpreter exits, even after errors.
+        if self.elevated
+            && let Err(error) = self.process.wait(None)
+        {
+            error!(%error, session_id = self.session_id, "Failed to wait for elevated process cleanup");
+        }
+    }
+}
+
 impl WinApiProcessCtx {
     pub fn process_abort(&mut self, exit_code: u32) -> Result<(), ExecError> {
         info!(
@@ -155,15 +166,24 @@ impl WinApiProcessCtx {
             "Cancelling process execution by user request"
         );
 
-        post_message_for_pid(self.pid, WM_QUIT, WPARAM(0), LPARAM(0))?;
-
         // TODO(DGW-301): Figure out how to correctly send CTRL+C to console applications.
 
-        // Acknowledge client that cancel request has been processed
-        // successfully.
-        io_notification_tx.blocking_send(ServerChannelEvent::SessionCancelSuccess {
-            session_id: self.session_id,
-        })?;
+        let notification = match post_message_for_pid(self.pid, WM_QUIT, WPARAM(0), LPARAM(0)) {
+            Ok(()) => ServerChannelEvent::SessionCancelSuccess {
+                session_id: self.session_id,
+            },
+            Err(error) => {
+                let error = match error.downcast::<windows::core::Error>() {
+                    Ok(error) => NowStatusError::new_winapi(error.code().0.cast_unsigned()),
+                    Err(error) => return Err(error.into()),
+                };
+                ServerChannelEvent::SessionCancelFailed {
+                    session_id: self.session_id,
+                    error,
+                }
+            }
+        };
+        io_notification_tx.blocking_send(notification)?;
 
         Ok(())
     }
@@ -217,10 +237,6 @@ impl WinApiProcessCtx {
                         }
                         ProcessIoInputEvent::TerminateIo => {
                             info!(session_id, "Terminating IO loop");
-
-                            if self.elevated {
-                                self.process.wait(None)?;
-                            }
 
                             // Terminate IO loop
                             return Err(ExecError::Aborted);
@@ -845,9 +861,8 @@ impl WinApiProcessBuilder {
                         error!(%error, session_id, "Failed to send elevated launch result");
                     }
 
-                    if let Err(error) = process_ctx.process.wait(None) {
-                        error!(%error, session_id, "Failed to wait for elevated detached process");
-                    }
+                    // Dropping the context waits for exit before releasing temporary scripts.
+                    drop(process_ctx);
                 })
                 .map_err(anyhow::Error::from)?;
 
@@ -1150,26 +1165,37 @@ fn prepare_elevated_process(
         SW_RESTORE,
     )
     .map_err(map_elevated_launch_error)?;
-    let pid = process.process_id()?;
-
-    Ok(WinApiProcessCtx {
+    let mut process_ctx = WinApiProcessCtx {
         session_id,
         stdout_read_pipe: None,
         stderr_read_pipe: None,
         stdin_write_pipe: None,
         encoding: DataEncoding::Raw,
-        pid,
+        pid: 0,
         started_no_io_redirection: requested_io_redirection,
         elevated: true,
         _temp_files: temp_files,
         process,
-    })
+    };
+    process_ctx.pid = process_ctx.process.process_id()?;
+    Ok(process_ctx)
 }
 
 fn map_elevated_launch_error(error: anyhow::Error) -> ExecError {
     match error.downcast::<windows::core::Error>() {
-        Ok(error) if error.code() == ERROR_CANCELLED.to_hresult() => {
+        Ok(error)
+            if [ERROR_CANCELLED, ERROR_ACCESS_DISABLED_BY_POLICY]
+                .iter()
+                .any(|code| error.code() == code.to_hresult()) =>
+        {
             ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::ElevationDenied))
+        }
+        Ok(error)
+            if [ERROR_ELEVATION_REQUIRED, ERROR_PRIVILEGE_NOT_HELD]
+                .iter()
+                .any(|code| error.code() == code.to_hresult()) =>
+        {
+            ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::ElevationUnavailable))
         }
         Ok(error) => ExecError::from(error),
         Err(error) => ExecError::Other(error),
@@ -1244,6 +1270,142 @@ mod tests {
     use now_proto_pdu::NowExecResultMsg;
 
     use super::*;
+
+    // oracle: regression #2191 channel loss during consent must not delete an elevated process's script before exit.
+    #[test]
+    fn closed_notification_channel_retains_elevated_script_until_exit() {
+        let job = ProcessJob::new().expect("create job");
+        let mut context = running_process(&job);
+        let process = Process::from(context.process.handle.clone());
+        let script = TmpFileGuard::new("cmd").expect("create script");
+        let script_path = script.path().to_owned();
+        context.elevated = true;
+        context._temp_files.push(script);
+
+        let (_input_tx, input_rx) = winapi_signaled_mpsc_channel().expect("create input channel");
+        let (notification_tx, notification_rx) = tokio::sync::mpsc::channel(10);
+        drop(notification_rx);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = context.wait(input_rx, notification_tx);
+            done_tx.send(result).expect("report worker result");
+        });
+
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(script_path.exists(), "script must survive notification failure");
+
+        process.terminate(7).expect("stop child");
+        done_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("worker finishes after exit")
+            .expect_err("the notification receiver was closed");
+        worker.join().expect("worker completes");
+        assert!(!script_path.exists(), "script is removed after process exit");
+    }
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_failure_keeps_process_tracked_until_exit() {
+        let job = ProcessJob::new().expect("create job");
+        let mut context = running_process(&job);
+        let process = Process::from(context.process.handle.clone());
+        // An absent window target deterministically exercises the same failure path as UIPI denial.
+        context.pid = u32::MAX;
+        context.elevated = true;
+
+        let (input_tx, input_rx) = winapi_signaled_mpsc_channel().expect("create input channel");
+        let (notification_tx, mut notification_rx) = tokio::sync::mpsc::channel(10);
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let worker = std::thread::spawn(move || {
+            let result = context.wait(input_rx, notification_tx);
+            done_tx.send(result).expect("report exit");
+        });
+        assert!(matches!(
+            next_process_event(&mut notification_rx).await,
+            ServerChannelEvent::SessionStarted { session_id: 1, .. }
+        ));
+        input_tx
+            .send(ProcessIoInputEvent::CancelExecution)
+            .await
+            .expect("request cancel");
+        assert!(matches!(
+            next_process_event(&mut notification_rx).await,
+            ServerChannelEvent::SessionCancelFailed { session_id: 1, .. }
+        ));
+
+        process.terminate(7).expect("stop child");
+        let exit_code = tokio::time::timeout(Duration::from_secs(10), done_rx)
+            .await
+            .expect("worker completes")
+            .expect("worker reports result")
+            .expect("cancel failure does not end monitoring");
+        assert_eq!(exit_code, 7);
+        worker.join().expect("worker completes");
+    }
+
+    fn running_process(job: &ProcessJob) -> WinApiProcessCtx {
+        prepare_process(
+            1,
+            WideString::from("cmd.exe /d /c ping -n 600 127.0.0.1 >nul"),
+            WideString::default(),
+            HashMap::new(),
+            DataEncoding::Raw,
+            Some(job),
+        )
+        .expect("start child")
+    }
+
+    async fn next_process_event(receiver: &mut Receiver<ServerChannelEvent>) -> ServerChannelEvent {
+        tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .expect("event arrives")
+            .expect("notification channel is open")
+    }
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
+    #[test]
+    fn elevation_policy_failure_reports_denied() {
+        assert_elevation_status(ERROR_ACCESS_DISABLED_BY_POLICY, NowProtoError::ElevationDenied);
+    }
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
+    #[test]
+    fn missing_elevated_token_reports_unavailable() {
+        assert_elevation_status(ERROR_ELEVATION_REQUIRED, NowProtoError::ElevationUnavailable);
+    }
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
+    #[test]
+    fn missing_elevation_privilege_reports_unavailable() {
+        assert_elevation_status(ERROR_PRIVILEGE_NOT_HELD, NowProtoError::ElevationUnavailable);
+    }
+
+    fn assert_elevation_status(code: windows::Win32::Foundation::WIN32_ERROR, expected: NowProtoError) {
+        let ExecError::NowStatus(actual) = map_elevated_launch_error(windows::core::Error::from(code).into()) else {
+            panic!("elevation failure must use a NOW status error");
+        };
+        assert_eq!(
+            NowExecResultMsg::new_error(1, actual).expect("valid status"),
+            NowExecResultMsg::new_error(1, NowStatusError::new_proto(expected)).expect("valid expected status")
+        );
+    }
+
+    // oracle: spec ShellExecuteExW §Remarks
+    #[test]
+    fn missing_elevated_executable_preserves_platform_error() {
+        let error = windows::core::Error::from(windows::Win32::Foundation::ERROR_FILE_NOT_FOUND);
+        let expected = NowStatusError::new_winapi(error.code().0.cast_unsigned());
+        let ExecError::NowStatus(actual) = map_elevated_launch_error(error.into()) else {
+            panic!("missing executable must use a platform status");
+        };
+        assert_eq!(
+            NowExecResultMsg::new_error(1, actual).expect("valid status"),
+            NowExecResultMsg::new_error(1, expected).expect("valid expected status")
+        );
+    }
 
     // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
     #[test]
