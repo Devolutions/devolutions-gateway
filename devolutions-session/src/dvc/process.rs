@@ -714,29 +714,17 @@ impl WinApiProcessBuilder {
             WideString::from(current_directory)
         };
 
-        // Move out temp files guard from builder to transfer over `WinApiProcess` instance
-        // later.
-        let temp_files = std::mem::take(&mut self.temp_files);
-
-        let io_redirection = self.enable_io_redirection;
-        let encoding = self.encoding;
         if self.elevated {
             let io_notification_tx = io_notification_tx.ok_or_else(|| {
                 ExecError::Other(anyhow::anyhow!("elevated execution requires a notification sender"))
             })?;
 
-            return Self::run_elevated_impl(
-                session_id,
-                self.executable,
-                self.command_line,
-                self.current_directory,
-                io_redirection,
-                io_notification_tx,
-                detached,
-                temp_files,
-            );
+            return self.run_elevated_impl(session_id, io_notification_tx, detached);
         }
 
+        let temp_files = std::mem::take(&mut self.temp_files);
+        let io_redirection = self.enable_io_redirection;
+        let encoding = self.encoding;
         let process_ctx = if io_redirection {
             prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env, encoding, job)?
         } else {
@@ -814,15 +802,20 @@ impl WinApiProcessBuilder {
     }
 
     fn run_elevated_impl(
+        self,
         session_id: u32,
-        executable: String,
-        command_line: String,
-        current_directory: String,
-        requested_io_redirection: bool,
         io_notification_tx: Sender<ServerChannelEvent>,
         detached: bool,
-        temp_files: Vec<TmpFileGuard>,
     ) -> Result<Option<WinApiProcess>, ExecError> {
+        let Self {
+            executable,
+            command_line,
+            current_directory,
+            enable_io_redirection: requested_io_redirection,
+            temp_files,
+            ..
+        } = self;
+
         if detached {
             std::thread::Builder::new()
                 .name(format!("process-{session_id}-elevation"))
