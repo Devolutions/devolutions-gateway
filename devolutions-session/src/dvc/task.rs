@@ -1696,7 +1696,7 @@ mod tests {
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
 
-    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_EXEC_BATCH_MSG §Elevated Execution
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
     #[test]
     fn elevated_batch_no_exit_keeps_console_open_when_redirection_is_unavailable() {
         assert_eq!(batch_command_kind(true, true, true), "/K");
@@ -2126,7 +2126,7 @@ mod tests {
             .with_heartbeat_interval(Duration::from_secs(30))
             .expect("30 s is a valid heartbeat interval");
 
-        // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_CHANNEL_CAPSET_MSG §Elevated Execution
+        // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_CHANNEL_CAPSET_MSG
         let expected_caps = NowChannelCapsetMsg::default()
             .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
             .with_session_capset(NowSessionCapsetFlags::LOCK | NowSessionCapsetFlags::MSGBOX)
