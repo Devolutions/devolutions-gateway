@@ -35,7 +35,9 @@ use windows::Win32::System::Threading::{
     PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
     WaitForSingleObject,
 };
-use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+use windows::Win32::UI::Shell::{
+    SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowThreadProcessId, PostThreadMessageW, SHOW_WINDOW_CMD,
 };
@@ -458,7 +460,9 @@ pub fn shell_execute(
 
     let mut exec_info = SHELLEXECUTEINFOW {
         cbSize: u32size_of::<SHELLEXECUTEINFOW>(),
-        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+        // UNTESTED: Launch errors must return without modal dialogs while UAC security prompts remain enabled.
+        // Verify both on an interactive Windows desktop when changing these flags.
+        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
         lpFile: path.as_pcwstr(),
         lpParameters: command_line.as_pcwstr(),
         lpDirectory: working_directory.as_pcwstr(),
