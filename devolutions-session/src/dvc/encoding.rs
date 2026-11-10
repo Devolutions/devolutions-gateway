@@ -1,9 +1,7 @@
 //! Console encoding transcoding for IO redirection.
 //!
-//! When IO redirection is enabled, the child process writes its stdout/stderr using
-//! the console's OEM codepage (e.g., `cmd.exe`, `powershell.exe`, `pwsh.exe`). This module
-//! provides transcoding between the process's native encoding and UTF-8, which is
-//! the encoding used on the wire (NowProto).
+//! Transcodes OEM console streams to and from UTF-8 when requested by NOW execution flags.
+//! Raw mode preserves bytes for UTF-8 applications such as `pwsh.exe` and for callers managing their own encoding.
 
 use std::borrow::Cow;
 
@@ -25,9 +23,6 @@ const CP_UTF8: u32 = 65001;
 
 impl DataEncoding {
     /// Determine the OEM codepage encoding for the current system.
-    ///
-    /// Console applications (`cmd.exe`, `powershell.exe` 5.x, `pwsh.exe`) use the OEM
-    /// codepage for piped/redirected output.
     pub fn from_oem_codepage() -> Self {
         // SAFETY: FFI call without outstanding preconditions.
         let cp = unsafe { windows::Win32::Globalization::GetOEMCP() };

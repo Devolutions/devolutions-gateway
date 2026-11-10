@@ -1189,7 +1189,7 @@ impl MessageProcessor {
             }
             let tmp_file = TmpFileGuard::new("ps1")?;
             tmp_file.write_content_utf8_bom(&script)?;
-            params.push("-Command".to_owned());
+            params.push("-File".to_owned());
             params.push(format!("\"{}\"", tmp_file.path_string()));
             Some(tmp_file)
         };
@@ -1246,16 +1246,6 @@ impl MessageProcessor {
         let mut params = Vec::new();
         append_pwsh_args(&mut params, &pwsh_msg);
 
-        // Pwsh exec encoding logic (mirrors winps behavior):
-        // - Script file is written as plain UTF-8 (pwsh reads UTF-8 natively, no BOM needed).
-        // - Default IO: transcode OEM ↔ UTF-8 (pwsh still uses OEM encoding for console).
-        // - RAW_ENCODING or UNICODE_CONSOLE: pass through raw bytes (UTF-8 passthrough).
-        let io_encoding = if pwsh_msg.is_unicode_console() || pwsh_msg.is_raw_encoding() {
-            DataEncoding::Raw
-        } else {
-            DataEncoding::from_oem_codepage()
-        };
-
         let tmp_file = if pwsh_msg.is_server_mode() {
             params.push("-s".to_owned());
             None
@@ -1267,7 +1257,7 @@ impl MessageProcessor {
             }
             let tmp_file = TmpFileGuard::new("ps1")?;
             tmp_file.write_content(&script)?;
-            params.push("-Command".to_owned());
+            params.push("-File".to_owned());
             params.push(format!("\"{}\"", tmp_file.path_string()));
             Some(tmp_file)
         };
@@ -1275,7 +1265,7 @@ impl MessageProcessor {
         let params_str = params.join(" ");
         let mut run_process = WinApiProcessBuilder::new(&pwsh_executable)
             .with_command_line(&params_str)
-            .with_encoding(io_encoding)
+            .with_encoding(DataEncoding::Raw)
             .with_env("NO_COLOR", "1");
 
         if let Some(tmp_file) = tmp_file {
@@ -1693,8 +1683,9 @@ mod tests {
     use devolutions_gateway_task::{ShutdownHandle, ShutdownSignal};
     use futures::poll;
     use now_proto_pdu::{
-        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowExecMessage,
-        NowExecProcessMsg, NowExecResultMsg, NowMessage, NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
+        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowExecDataMsg,
+        NowExecDataStreamKind, NowExecMessage, NowExecProcessMsg, NowExecPwshMsg, NowExecResultMsg, NowExecWinPsMsg,
+        NowMessage, NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowExecResultMsg, OwnedNowMessage,
     };
     use tokio::time::Instant;
     use win_api_wrappers::process::Process;
@@ -1709,6 +1700,141 @@ mod tests {
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
     use crate::dvc::process::ServerChannelEvent;
+
+    // oracle: spec about_PowerShell_exe §-File - | <filePath> <args>
+    #[tokio::test]
+    async fn winps_preserves_explicit_script_exit_code() {
+        let request = NowExecWinPsMsg::new(1, "exit 17")
+            .expect("valid script")
+            .set_no_profile()
+            .with_execution_policy("Bypass")
+            .expect("valid policy");
+
+        let (_, _, result) = collect_execution(request.into(), None).await;
+        assert_eq!(result, NowExecResultMsg::new_success(1, 17));
+    }
+
+    // oracle: spec about_Pwsh §-File | -f
+    #[tokio::test]
+    async fn pwsh_preserves_explicit_script_exit_code() {
+        let request = NowExecPwshMsg::new(1, "exit 17")
+            .expect("valid script")
+            .set_no_profile()
+            .with_execution_policy("Bypass")
+            .expect("valid policy");
+
+        let (_, _, result) = collect_execution(request.into(), None).await;
+        assert_eq!(result, NowExecResultMsg::new_success(1, 17));
+    }
+
+    // oracle: spec about_PowerShell_exe §-File - | <filePath> <args>
+    #[tokio::test]
+    async fn winps_reports_terminating_script_error() {
+        let request = NowExecWinPsMsg::new(1, "throw 'test failure'")
+            .expect("valid script")
+            .set_no_profile()
+            .with_execution_policy("Bypass")
+            .expect("valid policy")
+            .with_io_redirection();
+
+        let (_, _, result) = collect_execution(request.into(), None).await;
+        assert_eq!(result, NowExecResultMsg::new_success(1, 1));
+    }
+
+    // oracle: spec about_Pwsh §-File | -f
+    #[tokio::test]
+    async fn pwsh_reports_terminating_script_error() {
+        let request = NowExecPwshMsg::new(1, "throw 'test failure'")
+            .expect("valid script")
+            .set_no_profile()
+            .with_execution_policy("Bypass")
+            .expect("valid policy")
+            .with_io_redirection();
+
+        let (_, _, result) = collect_execution(request.into(), None).await;
+        assert_eq!(result, NowExecResultMsg::new_success(1, 1));
+    }
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_EXEC_WINPS_MSG
+    #[tokio::test]
+    async fn pwsh_default_streams_preserve_utf8_bytes() {
+        let request = NowExecPwshMsg::new(
+            1,
+            "$inputBytes = [IO.MemoryStream]::new(); \
+             [Console]::OpenStandardInput().CopyTo($inputBytes); \
+             $bytes = [byte[]](0xce, 0xbb, 0xe9, 0x9b, 0xaa) + $inputBytes.ToArray(); \
+             [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length); \
+             [Console]::OpenStandardError().Write($bytes, 0, $bytes.Length)",
+        )
+        .expect("valid script")
+        .set_no_profile()
+        .with_execution_policy("Bypass")
+        .expect("valid policy")
+        .with_io_redirection();
+
+        let (stdout, stderr, result) = collect_execution(request.into(), Some(b"\xe9\x9b\xaa\xce\xbb")).await;
+        assert_eq!(result, NowExecResultMsg::new_success(1, 0));
+        assert_eq!(stdout, b"\xce\xbb\xe9\x9b\xaa\xe9\x9b\xaa\xce\xbb");
+        assert_eq!(stderr, b"\xce\xbb\xe9\x9b\xaa\xe9\x9b\xaa\xce\xbb");
+    }
+
+    async fn collect_execution(
+        request: OwnedNowMessage,
+        stdin: Option<&[u8]>,
+    ) -> (Vec<u8>, Vec<u8>, OwnedNowExecResultMsg) {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx.send(request).await.expect("queue execution");
+        if let Some(stdin) = stdin {
+            read_tx
+                .send(
+                    NowExecDataMsg::new(1, NowExecDataStreamKind::Stdin, true, stdin.to_vec())
+                        .expect("valid stdin")
+                        .into(),
+                )
+                .await
+                .expect("queue stdin");
+        }
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let result = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before execution result: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+                while let Ok(message) = write_rx.try_recv() {
+                    match message {
+                        NowMessage::Exec(NowExecMessage::Data(data)) => match data.stream_kind().expect("valid stream")
+                        {
+                            NowExecDataStreamKind::Stdout => stdout.extend_from_slice(data.data()),
+                            NowExecDataStreamKind::Stderr => stderr.extend_from_slice(data.data()),
+                            _ => panic!("unexpected output stream"),
+                        },
+                        NowMessage::Exec(NowExecMessage::Result(result)) => return result,
+                        _ => {}
+                    }
+                }
+            }
+        })
+        .await
+        .expect("execution completes");
+
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+        processing.await.expect("close channel");
+        (stdout, stderr, result)
+    }
 
     // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_EXEC_ABORT_MSG
     #[tokio::test]
