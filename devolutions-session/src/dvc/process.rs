@@ -750,11 +750,10 @@ impl WinApiProcessBuilder {
     fn run_impl(
         mut self,
         session_id: u32,
-        io_notification_tx: Option<Sender<ServerChannelEvent>>,
+        io_notification_tx: Option<ProcessNotifications>,
         job: Option<&ProcessJob>,
         detached: bool,
     ) -> Result<Option<WinApiProcess>, ExecError> {
-        let io_notification_tx = io_notification_tx.map(ProcessNotifications::new);
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
             .trim_end()
             .to_owned();
@@ -957,7 +956,12 @@ impl WinApiProcessBuilder {
         job: Option<&ProcessJob>,
     ) -> Result<WinApiProcess, ExecError> {
         Ok(self
-            .run_impl(session_id, Some(io_notification_tx), job, false)?
+            .run_impl(
+                session_id,
+                Some(ProcessNotifications::new(io_notification_tx)),
+                job,
+                false,
+            )?
             .expect("result should be non-optional when running in non-detached mode"))
     }
 
@@ -973,11 +977,13 @@ impl WinApiProcessBuilder {
         self,
         session_id: u32,
         io_notification_tx: Sender<ServerChannelEvent>,
-    ) -> Result<(), ExecError> {
+    ) -> Result<Arc<AtomicBool>, ExecError> {
         // Result always empty and therefore ignored in detached mode.
-        let sender = self.elevated.then_some(io_notification_tx);
+        let notifications = ProcessNotifications::new(io_notification_tx);
+        let active = Arc::clone(&notifications.active);
+        let sender = self.elevated.then_some(notifications);
         self.run_impl(session_id, sender, None, true)?;
-        Ok(())
+        Ok(active)
     }
 }
 

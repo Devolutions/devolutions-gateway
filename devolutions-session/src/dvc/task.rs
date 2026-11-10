@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
@@ -636,7 +637,7 @@ struct MessageProcessor {
     /// non-elevated sessions with `process_job`; elevated sessions may outlive their channel.
     sessions: HashMap<u32, WinApiProcess>,
     /// Elevated launch requests that are waiting for user consent and have no process handle yet.
-    pending_sessions: HashSet<u32>,
+    pending_sessions: HashMap<u32, Arc<AtomicBool>>,
     /// Job of the attached executions and the processes they start; created by the first attached execution.
     ///
     /// Processes left running by an attached execution that already exited are killed with it too.
@@ -663,7 +664,7 @@ impl MessageProcessor {
             io_notification_tx,
             capabilities,
             sessions: HashMap::new(),
-            pending_sessions: HashSet::new(),
+            pending_sessions: HashMap::new(),
             process_job: None,
             rdm_handler,
             pwsh_executable,
@@ -681,7 +682,7 @@ impl MessageProcessor {
     }
 
     async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), ExecError> {
-        if self.sessions.contains_key(&session_id) || self.pending_sessions.contains(&session_id) {
+        if self.sessions.contains_key(&session_id) || self.pending_sessions.contains_key(&session_id) {
             warn!(session_id, "Session ID is in use");
             return Err(ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::InUse)));
         }
@@ -717,16 +718,12 @@ impl MessageProcessor {
         session_id: u32,
         elevated: bool,
     ) -> Result<(), ExecError> {
+        let notifications_active =
+            process.run_detached_with_notifications(session_id, self.io_notification_tx.clone())?;
+
         if elevated {
-            self.pending_sessions.insert(session_id);
-        }
-
-        if let Err(error) = process.run_detached_with_notifications(session_id, self.io_notification_tx.clone()) {
-            self.pending_sessions.remove(&session_id);
-            return Err(error);
-        }
-
-        if !elevated {
+            self.pending_sessions.insert(session_id, notifications_active);
+        } else {
             self.send_detached_process_success(session_id).await?;
         }
 
@@ -818,6 +815,11 @@ impl MessageProcessor {
             }
             NowMessage::Exec(NowExecMessage::Abort(abort_msg)) => {
                 let session_id = abort_msg.session_id();
+
+                if let Some(active) = self.pending_sessions.remove(&session_id) {
+                    active.store(false, Ordering::Release);
+                    return Ok(ProcessMessageAction::Continue);
+                }
 
                 let process = match self.sessions.get_mut(&session_id) {
                     Some(process) => process,
@@ -1675,6 +1677,8 @@ mod tests {
     use core::task::Poll;
     use core::time::Duration;
     use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     use anyhow::anyhow;
     use devolutions_gateway_task::{ShutdownHandle, ShutdownSignal};
@@ -1697,6 +1701,49 @@ mod tests {
     use crate::dvc::io::DvcInitializationProgress;
     use crate::dvc::process::ServerChannelEvent;
 
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_EXEC_ABORT_MSG
+    #[tokio::test]
+    async fn aborting_pending_detached_launch_releases_id_and_discards_late_result() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (mut processor, mut notifications) = MessageProcessor::new(NowChannelCapsetMsg::default(), write_tx, None);
+        let old_launch = Arc::new(AtomicBool::new(true));
+        processor.pending_sessions.insert(1, Arc::clone(&old_launch));
+
+        processor
+            .process_message(now_proto_pdu::NowExecAbortMsg::new(1, 7).into())
+            .await
+            .expect("abort pending launch");
+        processor
+            .ensure_session_id_free(1)
+            .await
+            .expect("aborted ID is reusable");
+
+        processor.pending_sessions.insert(1, Arc::new(AtomicBool::new(true)));
+        processor
+            .io_notification_tx
+            .send(ServerChannelEvent::ProcessNotification {
+                active: old_launch,
+                event: Box::new(ServerChannelEvent::SessionExited {
+                    session_id: 1,
+                    exit_code: 0,
+                }),
+            })
+            .await
+            .expect("queue late launch result");
+        assert!(
+            notifications
+                .recv()
+                .await
+                .expect("late result")
+                .into_active_event()
+                .is_none()
+        );
+        assert!(
+            processor.pending_sessions.contains_key(&1),
+            "replacement stays reserved"
+        );
+    }
+
     // oracle: regression #2191 renegotiation must isolate queued and future old-worker events from reused session IDs.
     #[tokio::test]
     async fn renegotiation_isolates_worker_notifications() {
@@ -1704,7 +1751,7 @@ mod tests {
         let (mut processor, mut notifications) =
             MessageProcessor::new(NowChannelCapsetMsg::default(), write_tx.clone(), None);
         let old_sender = processor.io_notification_tx.clone();
-        processor.pending_sessions.insert(1);
+        processor.pending_sessions.insert(1, Arc::new(AtomicBool::new(true)));
         old_sender
             .send(ServerChannelEvent::SessionExited {
                 session_id: 1,
@@ -1715,7 +1762,7 @@ mod tests {
         assert!(!notifications.is_empty(), "old result is queued before renegotiation");
 
         (processor, notifications) = MessageProcessor::new(NowChannelCapsetMsg::default(), write_tx, None);
-        processor.pending_sessions.insert(1);
+        processor.pending_sessions.insert(1, Arc::new(AtomicBool::new(true)));
         assert!(
             old_sender
                 .send(ServerChannelEvent::SessionExited {
