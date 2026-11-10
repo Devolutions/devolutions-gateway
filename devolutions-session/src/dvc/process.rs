@@ -181,6 +181,7 @@ impl Drop for WinApiProcessCtx {
     fn drop(&mut self) {
         // Elevated processes can outlive their channel; keep scripts until the interpreter exits, even after errors.
         if self.elevated
+            && !self._temp_files.is_empty()
             && let Err(error) = self.process.wait(None)
         {
             error!(%error, session_id = self.session_id, "Failed to wait for elevated process cleanup");
@@ -1318,6 +1319,24 @@ mod tests {
     use now_proto_pdu::NowExecResultMsg;
 
     use super::*;
+
+    // oracle: regression #2191 elevated fire-and-forget launches without scripts must release their worker on launch.
+    #[test]
+    fn elevated_cleanup_without_scripts_does_not_wait_for_exit() {
+        let job = ProcessJob::new().expect("create job");
+        let mut context = running_process(&job);
+        context.elevated = true;
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            drop(context);
+            done_tx.send(()).expect("report cleanup");
+        });
+
+        let completed = done_rx.recv_timeout(Duration::from_secs(2));
+        drop(job);
+        worker.join().expect("cleanup worker completes");
+        completed.expect("cleanup must finish while the child is still running");
+    }
 
     // oracle: regression #2191 aborting an execution must invalidate queued and future events before its ID is reused.
     #[test]
