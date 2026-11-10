@@ -33,11 +33,12 @@ install_pkg() {
 	sudo /usr/sbin/installer -pkg "$PKG" -target / || fail "installer failed"
 }
 
-# oracle: regression #2192 (pre-existing data-directory permissions finding)
+# oracle: regression #2192 (pre-existing data-directory permissions and ACLs)
 echo "Preparing an existing data directory with broad permissions"
 sudo mkdir -p "$DATA_DIR"
 sudo chown "$(id -un)" "$DATA_DIR"
 sudo chmod 755 "$DATA_DIR"
+sudo chmod +a "everyone allow list,search,readattr" "$DATA_DIR"
 
 echo "Installing $PKG"
 install_pkg
@@ -48,6 +49,9 @@ install_pkg
 # oracle: regression #2192 (the root daemon must not search a user-writable prefix)
 [ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PATH' "$PLIST")" = "/usr/local/microsoft/powershell/7:/usr/bin:/bin:/usr/sbin:/sbin" ] || fail "unexpected daemon PATH"
 [ "$(sudo stat -f '%Su:%Sg %Lp' "$DATA_DIR")" = "root:wheel 700" ] || fail "unexpected data directory ownership or mode"
+if sudo /bin/ls -lde "$DATA_DIR" | /usr/bin/grep -q 'group:everyone'; then
+	fail "data directory still has a broad ACL"
+fi
 sudo test -f "$DATA_DIR/agent.json" || fail "configuration not initialized"
 wait_for_state running
 

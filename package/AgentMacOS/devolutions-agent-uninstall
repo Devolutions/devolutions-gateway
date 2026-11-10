@@ -25,6 +25,8 @@ if [ "$(/usr/bin/id -u)" -ne 0 ]; then
 	exit 1
 fi
 
+# UNTESTED: Keep payload files while launchd has the service loaded to avoid
+# removing a live daemon's binary; test the timeout path when changing it.
 if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
 	/bin/launchctl bootout "system/$LABEL"
 

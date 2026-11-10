@@ -7,6 +7,8 @@ PLIST="/Library/LaunchDaemons/$LABEL.plist"
 DATA_DIR="/Library/Application Support/Devolutions Agent"
 LOG_DIR="/Library/Logs/Devolutions Agent"
 
+# UNTESTED: Reject symlinks so permission changes cannot follow the data path elsewhere;
+# test this guard when changing the install path.
 if [ -L "$DATA_DIR" ]; then
 	echo "refusing to use a symbolic link for the Agent data directory" >&2
 	exit 1
