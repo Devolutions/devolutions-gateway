@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::os::windows::io::AsRawHandle as _;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -87,6 +89,10 @@ pub struct StdinChunk {
 /// Message, sent from Process IO thread to task to finalize process execution.
 #[derive(Debug)]
 pub enum ServerChannelEvent {
+    ProcessNotification {
+        active: Arc<AtomicBool>,
+        event: Box<ServerChannelEvent>,
+    },
     CloseChannel,
     SessionStarted {
         session_id: u32,
@@ -116,6 +122,40 @@ pub enum ServerChannelEvent {
     WindowRecordingEvent {
         message: now_proto_pdu::OwnedNowSessionWindowRecEventMsg,
     },
+}
+
+#[derive(Clone)]
+struct ProcessNotifications {
+    sender: Sender<ServerChannelEvent>,
+    active: Arc<AtomicBool>,
+}
+
+impl ProcessNotifications {
+    fn new(sender: Sender<ServerChannelEvent>) -> Self {
+        Self {
+            sender,
+            active: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    fn blocking_send(
+        &self,
+        event: ServerChannelEvent,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ServerChannelEvent>> {
+        self.sender.blocking_send(ServerChannelEvent::ProcessNotification {
+            active: Arc::clone(&self.active),
+            event: Box::new(event),
+        })
+    }
+}
+
+impl ServerChannelEvent {
+    pub fn into_active_event(self) -> Option<Self> {
+        match self {
+            Self::ProcessNotification { active, event } => active.load(Ordering::Acquire).then_some(*event),
+            event => Some(event),
+        }
+    }
 }
 
 pub struct WinApiProcessCtx {
@@ -160,7 +200,7 @@ impl WinApiProcessCtx {
         Ok(())
     }
 
-    pub fn process_cancel(&mut self, io_notification_tx: Sender<ServerChannelEvent>) -> Result<(), ExecError> {
+    fn process_cancel(&mut self, io_notification_tx: ProcessNotifications) -> Result<(), ExecError> {
         info!(
             session_id = self.session_id,
             "Cancelling process execution by user request"
@@ -188,10 +228,10 @@ impl WinApiProcessCtx {
         Ok(())
     }
 
-    pub fn wait(
+    fn wait(
         mut self,
         mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
-        io_notification_tx: Sender<ServerChannelEvent>,
+        io_notification_tx: ProcessNotifications,
     ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
@@ -254,10 +294,10 @@ impl WinApiProcessCtx {
     /// Starts IO redirection loop for a launched process.
     ///
     /// Returns process exit code.
-    pub fn wait_with_io_redirection(
+    fn wait_with_io_redirection(
         mut self,
         mut input_event_rx: WinapiSignaledReceiver<ProcessIoInputEvent>,
-        io_notification_tx: Sender<ServerChannelEvent>,
+        io_notification_tx: ProcessNotifications,
     ) -> Result<u32, ExecError> {
         let session_id = self.session_id;
 
@@ -713,6 +753,7 @@ impl WinApiProcessBuilder {
         job: Option<&ProcessJob>,
         detached: bool,
     ) -> Result<Option<WinApiProcess>, ExecError> {
+        let io_notification_tx = io_notification_tx.map(ProcessNotifications::new);
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
             .trim_end()
             .to_owned();
@@ -791,6 +832,7 @@ impl WinApiProcessBuilder {
 
         let io_notification_tx =
             io_notification_tx.expect("BUG: io_notification_tx must be Some for non-detached mode");
+        let notifications_active = Arc::clone(&io_notification_tx.active);
 
         let join_handle = std::thread::spawn(move || {
             let run_result = if io_redirection {
@@ -810,6 +852,7 @@ impl WinApiProcessBuilder {
         });
 
         Ok(Some(WinApiProcess {
+            notifications_active,
             input_event_tx,
             stdin_writer,
             join_handle,
@@ -820,7 +863,7 @@ impl WinApiProcessBuilder {
     fn run_elevated_impl(
         self,
         session_id: u32,
-        io_notification_tx: Sender<ServerChannelEvent>,
+        io_notification_tx: ProcessNotifications,
         detached: bool,
     ) -> Result<Option<WinApiProcess>, ExecError> {
         let Self {
@@ -870,6 +913,7 @@ impl WinApiProcessBuilder {
         }
 
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
+        let notifications_active = Arc::clone(&io_notification_tx.active);
         let join_handle = std::thread::Builder::new()
             .name(format!("process-{session_id}-elevation"))
             .spawn(move || {
@@ -894,6 +938,7 @@ impl WinApiProcessBuilder {
             })?;
 
         Ok(Some(WinApiProcess {
+            notifications_active,
             input_event_tx,
             stdin_writer: None,
             join_handle,
@@ -1204,6 +1249,7 @@ fn map_elevated_launch_error(error: anyhow::Error) -> ExecError {
 
 /// Represents spawned process with IO redirection.
 pub struct WinApiProcess {
+    notifications_active: Arc<AtomicBool>,
     input_event_tx: WinapiSignaledSender<ProcessIoInputEvent>,
     /// `None` without IO redirection.
     stdin_writer: Option<StdinWriter>,
@@ -1213,6 +1259,8 @@ pub struct WinApiProcess {
 
 impl Drop for WinApiProcess {
     fn drop(&mut self) {
+        // Invalidate queued events too, because an aborted session ID can be reused before consent completes.
+        self.notifications_active.store(false, Ordering::Release);
         // Ensure that the input event channel is closed when the process is dropped.
         // This will signal the IO thread to terminate if it is still running.
         let _ = self.input_event_tx.try_send(ProcessIoInputEvent::TerminateIo);
@@ -1271,12 +1319,54 @@ mod tests {
 
     use super::*;
 
+    // oracle: regression #2191 aborting an execution must invalidate queued and future events before its ID is reused.
+    #[test]
+    fn dropped_execution_discards_queued_and_late_worker_failures() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
+        let notifications = ProcessNotifications::new(sender.clone());
+        let (input_event_tx, _input_event_rx) = winapi_signaled_mpsc_channel().expect("create input channel");
+        let process = WinApiProcess {
+            notifications_active: Arc::clone(&notifications.active),
+            input_event_tx,
+            stdin_writer: None,
+            join_handle: std::thread::spawn(|| {}),
+            _temp_files: Vec::new(),
+        };
+        notifications
+            .blocking_send(ServerChannelEvent::SessionFailed {
+                session_id: 1,
+                error: ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::ElevationDenied)),
+            })
+            .expect("queue old failure");
+        drop(process);
+        notifications
+            .blocking_send(ServerChannelEvent::SessionFailed {
+                session_id: 1,
+                error: ExecError::NowStatus(NowStatusError::new_proto(NowProtoError::ElevationDenied)),
+            })
+            .expect("queue late old failure");
+        let replacement = ProcessNotifications::new(sender);
+        replacement
+            .blocking_send(ServerChannelEvent::SessionStarted {
+                session_id: 1,
+                no_io_redirection: true,
+            })
+            .expect("queue replacement event");
+
+        assert!(receiver.try_recv().expect("old failure").into_active_event().is_none());
+        assert!(receiver.try_recv().expect("late failure").into_active_event().is_none());
+        assert!(matches!(
+            receiver.try_recv().expect("replacement event").into_active_event(),
+            Some(ServerChannelEvent::SessionStarted { session_id: 1, .. })
+        ));
+    }
+
     // oracle: regression #2191 channel loss during consent must not delete an elevated process's script before exit.
     #[test]
     fn closed_notification_channel_retains_elevated_script_until_exit() {
         let job = ProcessJob::new().expect("create job");
         let mut context = running_process(&job);
-        let process = Process::from(context.process.handle.clone());
+        let process = Process::from(context.process.handle.try_clone().expect("duplicate process handle"));
         let script = TmpFileGuard::new("cmd").expect("create script");
         let script_path = script.path().to_owned();
         context.elevated = true;
@@ -1287,7 +1377,7 @@ mod tests {
         drop(notification_rx);
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let result = context.wait(input_rx, notification_tx);
+            let result = context.wait(input_rx, ProcessNotifications::new(notification_tx));
             done_tx.send(result).expect("report worker result");
         });
 
@@ -1311,7 +1401,7 @@ mod tests {
     async fn cancellation_failure_keeps_process_tracked_until_exit() {
         let job = ProcessJob::new().expect("create job");
         let mut context = running_process(&job);
-        let process = Process::from(context.process.handle.clone());
+        let process = Process::from(context.process.handle.try_clone().expect("duplicate process handle"));
         // An absent window target deterministically exercises the same failure path as UIPI denial.
         context.pid = u32::MAX;
         context.elevated = true;
@@ -1320,7 +1410,7 @@ mod tests {
         let (notification_tx, mut notification_rx) = tokio::sync::mpsc::channel(10);
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         let worker = std::thread::spawn(move || {
-            let result = context.wait(input_rx, notification_tx);
+            let result = context.wait(input_rx, ProcessNotifications::new(notification_tx));
             done_tx.send(result).expect("report exit");
         });
         assert!(matches!(
@@ -1363,6 +1453,8 @@ mod tests {
             .await
             .expect("event arrives")
             .expect("notification channel is open")
+            .into_active_event()
+            .expect("process is still active")
     }
 
     // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
@@ -1459,7 +1551,13 @@ mod tests {
         let mut stdout = Vec::new();
         let exit_code = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
-                match io_notification_rx.recv().await.expect("notification channel open") {
+                match io_notification_rx
+                    .recv()
+                    .await
+                    .expect("notification channel open")
+                    .into_active_event()
+                    .expect("process is still active")
+                {
                     ServerChannelEvent::SessionDataOut {
                         stream: NowExecDataStreamKind::Stdout,
                         data,
