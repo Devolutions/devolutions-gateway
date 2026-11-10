@@ -274,8 +274,6 @@ async fn process_messages(
     mut shutdown_signal: ShutdownSignal,
     init_progress: &DvcInitializationProgress,
 ) -> anyhow::Result<()> {
-    let (io_notification_tx, mut task_rx) = mpsc::channel(100);
-
     // Detect pwsh (PowerShell 7+) availability once on DVC start, so that the
     // corresponding capability flag is only advertised when it is actually installed.
     let pwsh_executable = find_pwsh_executable();
@@ -348,12 +346,7 @@ async fn process_messages(
     // the agent applies, not the server default that omits the interval.
     dvc_tx.send(downgraded_caps.clone().into()).await?;
 
-    let mut processor = MessageProcessor::new(
-        downgraded_caps,
-        dvc_tx.clone(),
-        io_notification_tx.clone(),
-        pwsh_executable.clone(),
-    );
+    let (mut processor, mut task_rx) = MessageProcessor::new(downgraded_caps, dvc_tx.clone(), pwsh_executable.clone());
 
     init_progress.mark_negotiated();
     info!("DVC negotiation completed");
@@ -394,11 +387,10 @@ async fn process_messages(
                                 _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
                                 init_progress.set_heartbeats_enabled(heartbeats_enabled(downgraded_caps.heartbeat_interval()));
 
-                                // Dropping the old processor ends its exec sessions and the processes they started.
-                                processor = MessageProcessor::new(
+                                // Each negotiation owns its notifications so old workers cannot address reused IDs.
+                                (processor, task_rx) = MessageProcessor::new(
                                     downgraded_caps.clone(),
                                     dvc_tx.clone(),
-                                    io_notification_tx.clone(),
                                     pwsh_executable.clone(),
                                 );
 
@@ -656,11 +648,11 @@ impl MessageProcessor {
     pub(crate) fn new(
         capabilities: NowChannelCapsetMsg,
         dvc_tx: WinapiSignaledSender<OwnedNowMessage>,
-        io_notification_tx: Sender<ServerChannelEvent>,
         pwsh_executable: Option<String>,
-    ) -> Self {
+    ) -> (Self, Receiver<ServerChannelEvent>) {
+        let (io_notification_tx, task_rx) = mpsc::channel(100);
         let rdm_handler = RdmMessageProcessor::new(dvc_tx.clone());
-        Self {
+        let processor = Self {
             dvc_tx,
             io_notification_tx,
             capabilities,
@@ -671,7 +663,8 @@ impl MessageProcessor {
             pwsh_executable,
             window_monitor_shutdown_tx: None,
             window_monitor_handle: None,
-        }
+        };
+        (processor, task_rx)
     }
 
     fn process_job(&mut self) -> Result<&ProcessJob, ExecError> {
@@ -1689,12 +1682,59 @@ mod tests {
     use windows::Win32::System::Threading::{PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
 
     use super::{
-        ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, REOPEN_DELAY_CAP,
+        ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, MessageProcessor, REOPEN_DELAY_CAP,
         REOPEN_DELAY_FLOOR, batch_command_kind, heartbeat_timer, process_messages, process_until_io_ends, serve_dvc,
         spawn_heartbeat,
     };
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+    use crate::dvc::process::ServerChannelEvent;
+
+    // oracle: regression #2191 renegotiation must isolate queued and future old-worker events from reused session IDs.
+    #[tokio::test]
+    async fn renegotiation_isolates_worker_notifications() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (mut processor, mut notifications) =
+            MessageProcessor::new(NowChannelCapsetMsg::default(), write_tx.clone(), None);
+        let old_sender = processor.io_notification_tx.clone();
+        processor.pending_sessions.insert(1);
+        old_sender
+            .send(ServerChannelEvent::SessionExited {
+                session_id: 1,
+                exit_code: 3,
+            })
+            .await
+            .expect("queue old result");
+        assert!(!notifications.is_empty(), "old result is queued before renegotiation");
+
+        (processor, notifications) = MessageProcessor::new(NowChannelCapsetMsg::default(), write_tx, None);
+        processor.pending_sessions.insert(1);
+        assert!(
+            old_sender
+                .send(ServerChannelEvent::SessionExited {
+                    session_id: 1,
+                    exit_code: 4
+                })
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            notifications.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        processor
+            .io_notification_tx
+            .send(ServerChannelEvent::SessionStarted {
+                session_id: 1,
+                no_io_redirection: true,
+            })
+            .await
+            .expect("send new session event");
+        assert!(matches!(
+            notifications.recv().await,
+            Some(ServerChannelEvent::SessionStarted { session_id: 1, .. })
+        ));
+    }
 
     // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
     #[test]

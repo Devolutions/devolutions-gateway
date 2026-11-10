@@ -1139,12 +1139,16 @@ pub fn post_message_for_pid(pid: u32, msg: u32, wparam: WPARAM, lparam: LPARAM) 
         )
     }?;
 
+    if windows_enum_ctx.threads.is_empty() {
+        return Err(windows::core::Error::from(windows::Win32::Foundation::ERROR_NOT_FOUND).into());
+    }
+
     // Send message to all threads.
-    if !windows_enum_ctx.threads.is_empty() {
-        for thread in windows_enum_ctx.threads {
-            // SAFETY: No outstanding preconditions.
-            let _ = unsafe { PostThreadMessageW(thread, msg, wparam, lparam) };
-        }
+    windows_enum_ctx.threads.sort_unstable();
+    windows_enum_ctx.threads.dedup();
+    for thread in windows_enum_ctx.threads {
+        // SAFETY: No outstanding preconditions.
+        unsafe { PostThreadMessageW(thread, msg, wparam, lparam) }?;
     }
 
     Ok(())
