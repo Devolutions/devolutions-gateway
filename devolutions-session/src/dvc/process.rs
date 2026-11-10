@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::os::windows::io::AsRawHandle as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -128,6 +128,7 @@ pub enum ServerChannelEvent {
 struct ProcessNotifications {
     sender: Sender<ServerChannelEvent>,
     active: Arc<AtomicBool>,
+    abort_exit_code: Arc<AtomicU64>,
 }
 
 impl ProcessNotifications {
@@ -135,6 +136,7 @@ impl ProcessNotifications {
         Self {
             sender,
             active: Arc::new(AtomicBool::new(true)),
+            abort_exit_code: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -259,6 +261,15 @@ impl WinApiProcessCtx {
                     return Ok(self.process.exit_code()?);
                 }
                 WAIT_OBJECT_INPUT_MESSAGE => {
+                    if let Some(exit_code) = io_notification_tx
+                        .abort_exit_code
+                        .load(Ordering::Acquire)
+                        .checked_sub(1)
+                    {
+                        let exit_code = u32::try_from(exit_code).expect("abort code was stored from a u32");
+                        self.process_abort(exit_code)?;
+                        return Err(ExecError::Aborted);
+                    }
                     let process_io_message = input_event_rx.try_recv()?;
 
                     trace!(session_id, ?process_io_message, "Received process IO message");
@@ -388,6 +399,15 @@ impl WinApiProcessCtx {
                     return Ok(self.process.exit_code()?);
                 }
                 WAIT_OBJECT_INPUT_MESSAGE => {
+                    if let Some(exit_code) = io_notification_tx
+                        .abort_exit_code
+                        .load(Ordering::Acquire)
+                        .checked_sub(1)
+                    {
+                        let exit_code = u32::try_from(exit_code).expect("abort code was stored from a u32");
+                        self.process_abort(exit_code)?;
+                        return Err(ExecError::Aborted);
+                    }
                     let process_io_message = input_event_rx.try_recv()?;
 
                     trace!(session_id, ?process_io_message, "Received process IO message");
@@ -833,6 +853,7 @@ impl WinApiProcessBuilder {
         let io_notification_tx =
             io_notification_tx.expect("BUG: io_notification_tx must be Some for non-detached mode");
         let notifications_active = Arc::clone(&io_notification_tx.active);
+        let abort_exit_code = Arc::clone(&io_notification_tx.abort_exit_code);
 
         let join_handle = std::thread::spawn(move || {
             let run_result = if io_redirection {
@@ -853,6 +874,7 @@ impl WinApiProcessBuilder {
 
         Ok(Some(WinApiProcess {
             notifications_active,
+            abort_exit_code,
             input_event_tx,
             stdin_writer,
             join_handle,
@@ -914,6 +936,7 @@ impl WinApiProcessBuilder {
 
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
         let notifications_active = Arc::clone(&io_notification_tx.active);
+        let abort_exit_code = Arc::clone(&io_notification_tx.abort_exit_code);
         let join_handle = std::thread::Builder::new()
             .name(format!("process-{session_id}-elevation"))
             .spawn(move || {
@@ -939,6 +962,7 @@ impl WinApiProcessBuilder {
 
         Ok(Some(WinApiProcess {
             notifications_active,
+            abort_exit_code,
             input_event_tx,
             stdin_writer: None,
             join_handle,
@@ -1257,6 +1281,7 @@ fn map_elevated_launch_error(error: anyhow::Error) -> ExecError {
 /// Represents spawned process with IO redirection.
 pub struct WinApiProcess {
     notifications_active: Arc<AtomicBool>,
+    abort_exit_code: Arc<AtomicU64>,
     input_event_tx: WinapiSignaledSender<ProcessIoInputEvent>,
     /// `None` without IO redirection.
     stdin_writer: Option<StdinWriter>,
@@ -1276,8 +1301,23 @@ impl Drop for WinApiProcess {
 
 impl WinApiProcess {
     pub async fn abort_execution(&self, exit_code: u32) -> anyhow::Result<()> {
-        self.input_event_tx
+        // A full queue is already signaled, so the worker will see this abort before draining another request.
+        self.abort_exit_code.store(u64::from(exit_code) + 1, Ordering::Release);
+        match self
+            .input_event_tx
             .try_send(ProcessIoInputEvent::AbortExecution(exit_code))
+        {
+            Ok(()) => Ok(()),
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<tokio::sync::mpsc::error::TrySendError<ProcessIoInputEvent>>(),
+                    Some(tokio::sync::mpsc::error::TrySendError::Full(_))
+                ) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn cancel_execution(&self) -> anyhow::Result<()> {
@@ -1325,6 +1365,46 @@ mod tests {
 
     use super::*;
 
+    // oracle: regression #2191 abort must terminate a standard child even when cancellation filled its control queue.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn abort_with_full_control_queue_terminates_child() {
+        let job = ProcessJob::new().expect("create job");
+        let context = running_process(&job);
+        let child = Process::from(context.process.handle.try_clone().expect("duplicate process handle"));
+        let (sender, _receiver) = tokio::sync::mpsc::channel(10);
+        let notifications = ProcessNotifications::new(sender);
+        let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel().expect("create input channel");
+        while input_event_tx.try_send(ProcessIoInputEvent::CancelExecution).is_ok() {}
+        let (start_tx, start_rx) = std::sync::mpsc::channel();
+        let notifications_active = Arc::clone(&notifications.active);
+        let abort_exit_code = Arc::clone(&notifications.abort_exit_code);
+        let join_handle = std::thread::spawn(move || {
+            start_rx.recv().expect("start monitoring");
+            let result = context.wait(input_event_rx, notifications);
+            assert!(matches!(result, Err(ExecError::Aborted)));
+        });
+        let process = WinApiProcess {
+            notifications_active,
+            abort_exit_code,
+            input_event_tx,
+            stdin_writer: None,
+            join_handle,
+            _temp_files: Vec::new(),
+        };
+
+        process
+            .abort_execution(7)
+            .await
+            .expect("record abort despite full queue");
+        start_tx.send(()).expect("start monitoring");
+        assert_eq!(
+            child.wait(Some(10_000)).expect("wait for child"),
+            WAIT_OBJECT_0,
+            "abort must terminate the child without dropping the shared job"
+        );
+        assert_eq!(child.exit_code().expect("child exit code"), 7);
+    }
+
     // oracle: regression #2191 pending consent must not let a full control queue block cancellation or shutdown.
     #[tokio::test]
     async fn full_control_queue_does_not_block_dispatcher() {
@@ -1332,6 +1412,7 @@ mod tests {
         while input_event_tx.try_send(ProcessIoInputEvent::CancelExecution).is_ok() {}
         let process = WinApiProcess {
             notifications_active: Arc::new(AtomicBool::new(true)),
+            abort_exit_code: Arc::new(AtomicU64::new(0)),
             input_event_tx,
             stdin_writer: None,
             join_handle: std::thread::spawn(|| {}),
@@ -1345,7 +1426,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), process.abort_execution(7))
             .await
             .expect("abort must not wait for consent")
-            .expect_err("full queue cannot accept abort");
+            .expect("abort does not depend on queue capacity");
         tokio::time::timeout(Duration::from_secs(1), process.shutdown())
             .await
             .expect("shutdown must not wait for consent")
@@ -1378,6 +1459,7 @@ mod tests {
         let (input_event_tx, _input_event_rx) = winapi_signaled_mpsc_channel().expect("create input channel");
         let process = WinApiProcess {
             notifications_active: Arc::clone(&notifications.active),
+            abort_exit_code: Arc::clone(&notifications.abort_exit_code),
             input_event_tx,
             stdin_writer: None,
             join_handle: std::thread::spawn(|| {}),
