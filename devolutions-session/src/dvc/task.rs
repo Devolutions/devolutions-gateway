@@ -410,7 +410,13 @@ async fn process_messages(
             task_rx = task_rx.recv() => {
                 match task_rx {
                     Some(notification) => {
+                        let Some(notification) = notification.into_active_event() else {
+                            continue;
+                        };
                         match notification {
+                            ServerChannelEvent::ProcessNotification { .. } => {
+                                unreachable!("process notifications are unwrapped before dispatch");
+                            }
                             ServerChannelEvent::SessionStarted {
                                 session_id,
                                 no_io_redirection,
@@ -1109,6 +1115,7 @@ impl MessageProcessor {
             batch_msg.is_no_exit(),
             batch_msg.is_with_io_redirection(),
             batch_msg.is_elevated(),
+            batch_msg.is_detached(),
         );
         let parameters = format!("/Q {command_kind} \"{}\"", tmp_file.path_string());
 
@@ -1353,8 +1360,8 @@ impl MessageProcessor {
     }
 }
 
-fn batch_command_kind(no_exit: bool, io_redirection: bool, elevated: bool) -> &'static str {
-    if no_exit && (!io_redirection || elevated) {
+fn batch_command_kind(no_exit: bool, io_redirection: bool, elevated: bool, detached: bool) -> &'static str {
+    if no_exit && (!io_redirection || elevated || detached) {
         "/K"
     } else {
         "/C"
@@ -1739,7 +1746,13 @@ mod tests {
     // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §Elevated Execution
     #[test]
     fn elevated_batch_no_exit_keeps_console_open_when_redirection_is_unavailable() {
-        assert_eq!(batch_command_kind(true, true, true), "/K");
+        assert_eq!(batch_command_kind(true, true, true, false), "/K");
+    }
+
+    // oracle: spec Devolutions/now-libraries@4a24d1e50d1b952ff42525c9f34478abbc82746:protocols/docs/NOW-spec.md §NOW_EXEC_BATCH_MSG
+    #[test]
+    fn detached_batch_no_exit_keeps_console_open_despite_redirection_flag() {
+        assert_eq!(batch_command_kind(true, true, false, true), "/K");
     }
 
     // oracle: regression #2156 detached Process must leave the channel alive for subsequent execution.
