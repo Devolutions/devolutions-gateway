@@ -1277,12 +1277,11 @@ impl Drop for WinApiProcess {
 impl WinApiProcess {
     pub async fn abort_execution(&self, exit_code: u32) -> anyhow::Result<()> {
         self.input_event_tx
-            .send(ProcessIoInputEvent::AbortExecution(exit_code))
-            .await
+            .try_send(ProcessIoInputEvent::AbortExecution(exit_code))
     }
 
     pub async fn cancel_execution(&self) -> anyhow::Result<()> {
-        self.input_event_tx.send(ProcessIoInputEvent::CancelExecution).await
+        self.input_event_tx.try_send(ProcessIoInputEvent::CancelExecution)
     }
 
     /// Returns a send of `data` to the process stdin that waits while the stdin queue is full.
@@ -1309,7 +1308,7 @@ impl WinApiProcess {
     }
 
     pub async fn shutdown(&self) -> anyhow::Result<()> {
-        self.input_event_tx.send(ProcessIoInputEvent::TerminateIo).await?;
+        self.input_event_tx.try_send(ProcessIoInputEvent::TerminateIo)?;
         Ok(())
     }
 
@@ -1325,6 +1324,33 @@ mod tests {
     use now_proto_pdu::NowExecResultMsg;
 
     use super::*;
+
+    // oracle: regression #2191 pending consent must not let a full control queue block cancellation or shutdown.
+    #[tokio::test]
+    async fn full_control_queue_does_not_block_dispatcher() {
+        let (input_event_tx, _input_event_rx) = winapi_signaled_mpsc_channel().expect("create input channel");
+        while input_event_tx.try_send(ProcessIoInputEvent::CancelExecution).is_ok() {}
+        let process = WinApiProcess {
+            notifications_active: Arc::new(AtomicBool::new(true)),
+            input_event_tx,
+            stdin_writer: None,
+            join_handle: std::thread::spawn(|| {}),
+            _temp_files: Vec::new(),
+        };
+
+        tokio::time::timeout(Duration::from_secs(1), process.cancel_execution())
+            .await
+            .expect("cancel must not wait for consent")
+            .expect_err("full queue cannot accept cancel");
+        tokio::time::timeout(Duration::from_secs(1), process.abort_execution(7))
+            .await
+            .expect("abort must not wait for consent")
+            .expect_err("full queue cannot accept abort");
+        tokio::time::timeout(Duration::from_secs(1), process.shutdown())
+            .await
+            .expect("shutdown must not wait for consent")
+            .expect_err("full queue cannot accept shutdown");
+    }
 
     // oracle: regression #2191 elevated fire-and-forget launches without scripts must release their worker on launch.
     #[test]
