@@ -29,7 +29,8 @@ sudo devolutions-agent start
 sudo launchctl kickstart -k system/com.devolutions.agent
 ```
 
-PowerShell Universal jobs need PowerShell 7, found through the daemon's `PATH`, which includes `/usr/local/bin` and `/opt/homebrew/bin`.
+PowerShell Universal jobs require PowerShell 7 installed with [Microsoft's macOS package][powershell-macos].
+The root daemon searches `/usr/local/microsoft/powershell/7` and system directories, not Homebrew prefixes.
 
 Uninstall the Agent and keep its configuration, or remove everything with `--purge`:
 
@@ -46,3 +47,5 @@ DAGENT_EXECUTABLE=target/release/devolutions-agent pwsh ./ci/tlk.ps1 package -Pr
 
 Set `DAGENT_PKG_SIGNING_IDENTITY` to a Developer ID Installer identity to sign the package.
 `Test-Package.sh` installs a package, checks the daemon, upgrades, and uninstalls it; run it only on a disposable machine.
+
+[powershell-macos]: https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-macos?view=powershell-7.6

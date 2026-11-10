@@ -238,8 +238,6 @@ jobs:
           security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
 
           # Installer packages need a separate Developer ID Installer identity.
-          # UNTESTED: productbuild needs prompt-free access to the Installer key for CI;
-          # verify a signed package after changing the keychain setup.
           if [ '${{ matrix.project }}' = 'devolutions-agent' ] && [ -n "$DEVELOPER_ID_INSTALLER_CERTIFICATE" ]; then
             DEVELOPER_ID_INSTALLER_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_installer_cert.p12
             echo -n "$DEVELOPER_ID_INSTALLER_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_INSTALLER_CERTIFICATE_PATH

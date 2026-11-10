@@ -13,6 +13,11 @@ if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
 		/bin/sleep 1
 		i=$((i + 1))
 	done
+
+	if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+		echo "Devolutions Agent did not unload within 60 seconds" >&2
+		exit 1
+	fi
 fi
 
 exit 0

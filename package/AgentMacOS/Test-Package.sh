@@ -33,13 +33,21 @@ install_pkg() {
 	sudo /usr/sbin/installer -pkg "$PKG" -target / || fail "installer failed"
 }
 
+# oracle: regression #2192 (pre-existing data-directory permissions finding)
+echo "Preparing an existing data directory with broad permissions"
+sudo mkdir -p "$DATA_DIR"
+sudo chown "$(id -un)" "$DATA_DIR"
+sudo chmod 755 "$DATA_DIR"
+
 echo "Installing $PKG"
 install_pkg
 
 [ -x /usr/local/bin/devolutions-agent ] || fail "binary not installed"
 [ -x /usr/local/bin/devolutions-agent-uninstall ] || fail "uninstall script not installed"
 [ "$(stat -f '%Su:%Sg %Lp' "$PLIST")" = "root:wheel 644" ] || fail "unexpected plist ownership or mode"
-[ "$(sudo stat -f '%Su %Lp' "$DATA_DIR")" = "root 700" ] || fail "unexpected data directory ownership or mode"
+# oracle: regression #2192 (the root daemon must not search a user-writable prefix)
+[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PATH' "$PLIST")" = "/usr/local/microsoft/powershell/7:/usr/bin:/bin:/usr/sbin:/sbin" ] || fail "unexpected daemon PATH"
+[ "$(sudo stat -f '%Su:%Sg %Lp' "$DATA_DIR")" = "root:wheel 700" ] || fail "unexpected data directory ownership or mode"
 sudo test -f "$DATA_DIR/agent.json" || fail "configuration not initialized"
 wait_for_state running
 
