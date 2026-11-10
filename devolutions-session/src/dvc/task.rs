@@ -829,7 +829,9 @@ impl MessageProcessor {
                     }
                 };
 
-                process.abort_execution(abort_msg.exit_code()).await?;
+                if let Err(error) = process.abort_execution(abort_msg.exit_code()).await {
+                    warn!(session_id, %error, "Failed to enqueue process abort");
+                }
 
                 // We could drop session immediately after abort as client do not expect any further
                 // communication.
@@ -854,7 +856,14 @@ impl MessageProcessor {
                     }
                 };
 
-                process.cancel_execution().await?;
+                if let Err(error) = process.cancel_execution().await {
+                    warn!(session_id, %error, "Failed to enqueue process cancellation");
+                    let message = NowExecCancelRspMsg::new_error(
+                        session_id,
+                        NowStatusError::new_generic(GENERIC_ERROR_CODE_OTHER),
+                    )?;
+                    self.dvc_tx.send(message.into_owned().into()).await?;
+                }
             }
             NowMessage::Exec(NowExecMessage::Data(data_msg)) => {
                 let session_id = data_msg.session_id();
