@@ -1,4 +1,5 @@
-﻿using Devolutions.Agent.Desktop.Properties;
+﻿using Devolutions.Agent.Desktop.Diagnostics;
+using Devolutions.Agent.Desktop.Properties;
 using Devolutions.Agent.Desktop.Service;
 using Devolutions.Pedm.Client.Model;
 using Microsoft.Toolkit.Uwp.Notifications;
@@ -181,6 +182,12 @@ namespace Devolutions.Agent.Desktop
                 this.contextMenu.MenuItems.Add(new MenuItem("Updater") { Enabled = false, Checked = config?.Updater?.Enabled ?? false });
                 this.contextMenu.MenuItems.Add(new MenuItem("Session") { Enabled = false, Checked = config?.Session?.Enabled ?? false });
                 this.contextMenu.MenuItems.Add(new MenuItem("PEDM") { Enabled = false, Checked = config?.Pedm?.Enabled ?? false });
+                this.contextMenu.MenuItems.Add(new MenuItem("-"));
+                this.contextMenu.MenuItems.Add(new MenuItem("Test virtual channels...", (_, _) =>
+                {
+                    using ChannelProbeForm probeWindow = new();
+                    probeWindow.ShowDialog();
+                }));
             }
 
             if (config?.Pedm?.Enabled ?? false)
