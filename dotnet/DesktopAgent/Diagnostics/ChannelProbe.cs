@@ -45,8 +45,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
         // Registered by the Microsoft RDP client itself, so it opens whenever dynamic channels work.
         private const string BuiltInChannel = "ECHO";
 
-        // No client registers this name, so the client refuses it. The Microsoft client reports the refusal as error 31;
-        // other clients report their own status.
+        // No client registers this name, so the client refuses it.
         private const string UnregisteredChannel = "Devolutions::Probe::Unregistered";
 
         private const string SessionHostProcess = "DevolutionsSession";
@@ -94,7 +93,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             {
                 Probe(BuiltInChannel, expectedError: 0),
                 ProbeNow(sessionId),
-                Probe(UnregisteredChannel, expectedError: ErrorGenFailure, anyFailure: true),
+                Probe(UnregisteredChannel, expectedError: ErrorGenFailure),
             };
 
             foreach (ProbeResult result in results)
@@ -130,7 +129,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             return Probe(NowChannel, expectedError: 0);
         }
 
-        private static ProbeResult Probe(string channel, int expectedError, bool anyFailure = false)
+        private static ProbeResult Probe(string channel, int expectedError)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
             IntPtr handle = WTSVirtualChannelOpenEx(WtsCurrentSession, channel, WtsChannelOptionDynamic);
@@ -146,13 +145,11 @@ namespace Devolutions.Agent.Desktop.Diagnostics
                 ? $"opened ({stopwatch.ElapsedMilliseconds} ms)"
                 : $"{DescribeError(error)} ({stopwatch.ElapsedMilliseconds} ms)";
 
-            string expected = anyFailure
-                ? $"refused ({DescribeError(expectedError)} with the Microsoft client)"
-                : DescribeExpected(expectedError);
-
-            bool pass = anyFailure ? error != 0 : error == expectedError;
-
-            return new ProbeResult(channel, expected, actual, pass ? ProbeStatus.Pass : ProbeStatus.Fail);
+            return new ProbeResult(
+                channel,
+                DescribeExpected(expectedError),
+                actual,
+                error == expectedError ? ProbeStatus.Pass : ProbeStatus.Fail);
         }
 
         private static string DescribeExpected(int expectedError)
