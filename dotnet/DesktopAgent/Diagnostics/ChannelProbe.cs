@@ -56,7 +56,11 @@ namespace Devolutions.Agent.Desktop.Diagnostics
 
         private const uint WtsChannelOptionDynamic = 1;
 
-        private const int SmRemoteSession = 0x1000;
+        private const int WtsClientProtocolType = 16;
+
+        private const ushort ProtocolTypeRdp = 2;
+
+        private static readonly IntPtr WtsCurrentServerHandle = IntPtr.Zero;
 
         [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
         private static extern IntPtr WTSVirtualChannelOpenEx(uint sessionId, string virtualName, uint flags);
@@ -65,13 +69,22 @@ namespace Devolutions.Agent.Desktop.Diagnostics
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool WTSVirtualChannelClose(IntPtr channel);
 
-        [DllImport("user32.dll")]
-        private static extern int GetSystemMetrics(int index);
+        [DllImport("wtsapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool WTSQuerySessionInformationW(
+            IntPtr server,
+            uint sessionId,
+            int infoClass,
+            out IntPtr buffer,
+            out uint bytesReturned);
+
+        [DllImport("wtsapi32.dll")]
+        private static extern void WTSFreeMemory(IntPtr memory);
 
         internal static string Run()
         {
             int sessionId = Process.GetCurrentProcess().SessionId;
-            bool remote = GetSystemMetrics(SmRemoteSession) != 0;
+            bool remote = IsRdpSession();
 
             StringBuilder report = new StringBuilder();
             report.AppendLine("Virtual channel diagnostics");
@@ -112,11 +125,32 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             return report.ToString();
         }
 
+        // The protocol type, unlike SM_REMOTESESSION, also identifies RDP sessions that use RemoteFX vGPU.
+        private static bool IsRdpSession()
+        {
+            if (!WTSQuerySessionInformationW(WtsCurrentServerHandle, WtsCurrentSession, WtsClientProtocolType, out IntPtr buffer, out _))
+            {
+                return false;
+            }
+
+            try
+            {
+                return (ushort)Marshal.ReadInt16(buffer) == ProtocolTypeRdp;
+            }
+            finally
+            {
+                WTSFreeMemory(buffer);
+            }
+        }
+
         private static ProbeResult ProbeNow(int sessionId)
         {
             // UNTESTED: opening the Now channel while the session host is connected offers RDM a second channel, which
-            // replaces the live one; this check is the only guard, so when changing it, make sure the channel is never
-            // opened while a session host runs in this session.
+            // replaces the live one; the process check is the only guard, so when changing it, make sure the channel is
+            // never opened while a session host runs in this session.
+            // The guard does not cover a host the Agent launches between the check and the open. That is accepted for
+            // this manual diagnostic, whose purpose is to run while no host is running; the result is a replaced
+            // channel.
             if (IsSessionHostRunning(sessionId))
             {
                 return new ProbeResult(
