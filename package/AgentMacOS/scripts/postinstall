@@ -1,0 +1,30 @@
+#!/bin/sh
+
+set -e
+
+LABEL="com.devolutions.agent"
+PLIST="/Library/LaunchDaemons/$LABEL.plist"
+DATA_DIR="/Library/Application Support/Devolutions Agent"
+LOG_DIR="/Library/Logs/Devolutions Agent"
+
+# UNTESTED: Reject symlinks so permission changes cannot follow the data path elsewhere;
+# test this guard when changing the install path.
+if [ -L "$DATA_DIR" ]; then
+	echo "refusing to use a symbolic link for the Agent data directory" >&2
+	exit 1
+fi
+
+/bin/mkdir -p "$DATA_DIR"
+/usr/sbin/chown root:wheel "$DATA_DIR"
+/bin/chmod -N "$DATA_DIR"
+/bin/chmod 700 "$DATA_DIR"
+
+/bin/mkdir -p "$LOG_DIR"
+
+# A broken existing configuration must not block the upgrade that may fix it.
+/usr/local/bin/devolutions-agent config init >/dev/null || echo "devolutions-agent: failed to initialize the configuration" >&2
+
+/bin/launchctl enable "system/$LABEL"
+/bin/launchctl bootstrap system "$PLIST"
+
+exit 0

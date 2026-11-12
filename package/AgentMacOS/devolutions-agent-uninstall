@@ -1,0 +1,52 @@
+#!/bin/sh
+
+# Removes Devolutions Agent.
+# The configuration, credentials, and logs are kept unless --purge is given.
+
+set -eu
+
+LABEL="com.devolutions.agent"
+PLIST="/Library/LaunchDaemons/$LABEL.plist"
+DATA_DIR="/Library/Application Support/Devolutions Agent"
+LOG_DIR="/Library/Logs/Devolutions Agent"
+
+PURGE=0
+case "${1:-}" in
+	"") ;;
+	--purge) PURGE=1 ;;
+	*)
+		echo "usage: $0 [--purge]" >&2
+		exit 2
+		;;
+esac
+
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
+	echo "$0 must run as root, for example with sudo" >&2
+	exit 1
+fi
+
+# UNTESTED: Keep payload files while launchd has the service loaded to avoid
+# removing a live daemon's binary; test the timeout path when changing it.
+if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+	/bin/launchctl bootout "system/$LABEL"
+
+	i=0
+	while /bin/launchctl print "system/$LABEL" >/dev/null 2>&1 && [ "$i" -lt 60 ]; do
+		/bin/sleep 1
+		i=$((i + 1))
+	done
+
+	if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+		echo "Devolutions Agent did not unload within 60 seconds" >&2
+		exit 1
+	fi
+fi
+
+/bin/rm -f "$PLIST" /usr/local/bin/devolutions-agent
+/usr/sbin/pkgutil --forget "$LABEL" >/dev/null 2>&1 || true
+
+if [ "$PURGE" -eq 1 ]; then
+	/bin/rm -rf "$DATA_DIR" "$LOG_DIR"
+fi
+
+/bin/rm -f /usr/local/bin/devolutions-agent-uninstall

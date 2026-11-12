@@ -13,7 +13,13 @@ use devolutions_agent::AgentServiceEvent;
 use devolutions_agent::config::ConfHandle;
 use devolutions_agent::enrollment::parse_enrollment_jwt;
 
-use crate::service::{DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
+use crate::service::{DESCRIPTION, DISPLAY_NAME};
+
+/// The launchd label, which must match the LaunchDaemon plist that the macOS package installs.
+#[cfg(target_os = "macos")]
+const CONTROLLER_NAME: &str = "com.devolutions.agent";
+#[cfg(not(target_os = "macos"))]
+const CONTROLLER_NAME: &str = crate::service::SERVICE_NAME;
 
 #[derive(Debug, PartialEq, Eq)]
 struct UpCommand {
@@ -97,7 +103,7 @@ fn parse_up_command_args_with_reader<R: BufRead>(args: &[String], mut stdin_read
 }
 
 pub(crate) fn run() {
-    let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
+    let mut controller = Controller::new(CONTROLLER_NAME, DISPLAY_NAME, DESCRIPTION);
 
     if let Some(cmd) = env::args().nth(1) {
         match cmd.as_str() {

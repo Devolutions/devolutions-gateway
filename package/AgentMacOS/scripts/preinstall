@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# Stops a running Agent so the payload can replace its binary.
+
+LABEL="com.devolutions.agent"
+
+# UNTESTED: Prevent replacement while launchd has the old service loaded;
+# test the timeout path when changing this wait.
+if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+	/bin/launchctl bootout "system/$LABEL" || true
+
+	# postinstall cannot bootstrap the label again until launchd has fully unloaded it.
+	i=0
+	while /bin/launchctl print "system/$LABEL" >/dev/null 2>&1 && [ "$i" -lt 60 ]; do
+		/bin/sleep 1
+		i=$((i + 1))
+	done
+
+	if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+		echo "Devolutions Agent did not unload within 60 seconds" >&2
+		exit 1
+	fi
+fi
+
+exit 0
