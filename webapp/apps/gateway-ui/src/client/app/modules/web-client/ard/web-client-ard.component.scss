@@ -50,6 +50,28 @@
 }
 
 
+.ard-curtain-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  input {
+    width: 100%;
+  }
+}
+
+.ard-curtain-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.form-helper-text {
+  color: var(--status-error-text-color);
+  font-size: 11px;
+}
+
 .toolbar-overlay-anchor {
   position: absolute;
   inset: 0;

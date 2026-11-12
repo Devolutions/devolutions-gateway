@@ -23,6 +23,11 @@
     <div [hidden]="!showMoreSettings" class="col-12 gateway-form-group">
 
       <div class="col-12 gateway-form-group">
+        <web-client-ard-start-mode-control [parentForm]="form"
+                                           [inputFormData]="inputFormData"></web-client-ard-start-mode-control>
+      </div>
+
+      <div class="col-12 gateway-form-group">
         <web-client-resolution-quality-control [parentForm]="form"
                                                [inputFormData]="inputFormData"></web-client-resolution-quality-control>
       </div>

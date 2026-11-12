@@ -55,6 +55,7 @@ docs/JrecApi.md
 docs/JrlApi.md
 docs/JrlInfo.md
 docs/ListenerUrls.md
+docs/LogFileInfo.md
 docs/MonitorDefinition.md
 docs/MonitorDefinitionProbeTypeError.md
 docs/MonitorResult.md
@@ -183,6 +184,7 @@ src/Devolutions.Gateway.Client/Model/Identity.cs
 src/Devolutions.Gateway.Client/Model/InterfaceInfo.cs
 src/Devolutions.Gateway.Client/Model/JrlInfo.cs
 src/Devolutions.Gateway.Client/Model/ListenerUrls.cs
+src/Devolutions.Gateway.Client/Model/LogFileInfo.cs
 src/Devolutions.Gateway.Client/Model/MonitorDefinition.cs
 src/Devolutions.Gateway.Client/Model/MonitorDefinitionProbeTypeError.cs
 src/Devolutions.Gateway.Client/Model/MonitorResult.cs

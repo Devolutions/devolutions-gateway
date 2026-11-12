@@ -2,6 +2,7 @@ mod ai_analysis;
 mod api_errors;
 mod benign_disconnect;
 mod cli_args;
+mod diagnostics;
 mod heartbeat;
 mod jrec_push;
 mod kdc_proxy;

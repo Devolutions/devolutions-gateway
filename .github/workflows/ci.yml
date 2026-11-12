@@ -400,6 +400,18 @@ jobs:
         env:
           AWS_LC_SYS_NO_ASM: true
 
+      - name: XMF tests
+        if: ${{ matrix.os != 'macos' }}
+        run: |
+          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
+          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture '${{ matrix.arch }}'
+          $Lib = @{'windows'='xmf.dll'; 'linux'='libxmf.so'}['${{ matrix.os }}']
+          $Env:DGATEWAY_LIB_XMF_PATH = Join-Path 'native-libs' $Lib | Resolve-Path
+          cargo test --locked --target ${{ matrix.target }} -p testsuite --test integration_tests video_streamer:: -- --ignored
+        shell: pwsh
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
       - name: Root-only tests
         if: ${{ matrix.os == 'linux' }}
         # Cargo builds as the runner user and runs only the test binary as root, so no build output is owned by root.
@@ -1633,7 +1645,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
+          $expectedHash = '740AC6FB1131E51E3698615388143E2A43FF45D65B8169BE20EA8A40AAA6EFB3'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1689,7 +1701,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
+          $expectedHash = '740AC6FB1131E51E3698615388143E2A43FF45D65B8169BE20EA8A40AAA6EFB3'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath

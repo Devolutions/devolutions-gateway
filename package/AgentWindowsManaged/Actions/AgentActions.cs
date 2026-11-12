@@ -107,19 +107,20 @@ internal static class AgentActions
         new Condition(AgentProperties.InstallDir, string.Empty), // If the property hasn't already been explicitly set
         Sequence.InstallExecuteSequence);
 
-    // Deferred sequence
-
     /// <summary>
     /// Fail the run, with an error naming the folder, when %ProgramData%\Devolutions or %ProgramData%\Devolutions\Agent
-    /// is a link or is controlled by an account that is not an administrator, or, naming the entry, when a file or a
-    /// folder below Agent is owned by such an account
+    /// is a link or is controlled by an account that is not an administrator
     /// </summary>
     /// <remarks>
     /// The major upgrade removes the installed product at RemoveExistingProducts, right after InstallInitialize, so
     /// running before it fails an install, an upgrade, a repair or a maintenance run before it changes anything.
     /// A full uninstall is never refused, so that a machine can always be uninstalled.
+    /// The action runs immediately rather than deferred, because RemoveExistingProducts scheduled after
+    /// InstallInitialize fails the install with error 2613 when a deferred action precedes it in the script.
+    /// It then impersonates the installing administrator, who can read the two folders but not every entry the agent
+    /// keeps below them, so <see cref="createProgramDataDirectory"/> checks those as SYSTEM.
     /// </remarks>
-    internal static readonly ElevatedManagedAction checkProgramDataDirectory = new(
+    internal static readonly ManagedAction checkProgramDataDirectory = new(
         new Id($"CA.{nameof(checkProgramDataDirectory)}"),
         CustomActions.CheckProgramDataDirectory,
         Return.check,
@@ -127,14 +128,15 @@ internal static class AgentActions
         new Condition("NOT (REMOVE=\"ALL\")"),
         Sequence.InstallExecuteSequence)
     {
-        Execute = Execute.deferred,
-        Impersonate = false,
-        UsesProperties = "ProductLanguage=[ProductLanguage]",
+        Execute = Execute.immediate,
     };
+
+    // Deferred sequence
 
     /// <summary>
     /// Create the path %ProgramData%\Devolutions\Agent if it does not exist, after checking its folders again as
-    /// <see cref="checkProgramDataDirectory"/> does
+    /// <see cref="checkProgramDataDirectory"/> does, and fail the run, with an error naming the entry, when a file or a
+    /// folder below Agent is owned by an account that is not an administrator
     /// </summary>
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,

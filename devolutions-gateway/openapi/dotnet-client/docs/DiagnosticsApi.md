@@ -6,7 +6,9 @@ All URIs are relative to *http://localhost*
 |--------|--------------|-------------|
 | [**GetClockDiagnostic**](DiagnosticsApi.md#getclockdiagnostic) | **GET** /jet/diagnostics/clock | Retrieves server&#39;s clock in order to diagnose clock drifting. |
 | [**GetConfigurationDiagnostic**](DiagnosticsApi.md#getconfigurationdiagnostic) | **GET** /jet/diagnostics/configuration | Retrieves a subset of the configuration, for diagnosis purposes. |
+| [**GetLogFile**](DiagnosticsApi.md#getlogfile) | **GET** /jet/diagnostics/logs/files/{name} | Retrieves one retained log file by its listed name. |
 | [**GetLogs**](DiagnosticsApi.md#getlogs) | **GET** /jet/diagnostics/logs | Retrieves latest logs. |
+| [**ListLogFiles**](DiagnosticsApi.md#listlogfiles) | **GET** /jet/diagnostics/logs/files | Lists the log files retained by this Gateway. |
 
 <a id="getclockdiagnostic"></a>
 # **GetClockDiagnostic**
@@ -194,6 +196,107 @@ This endpoint does not need any parameter.
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+<a id="getlogfile"></a>
+# **GetLogFile**
+> string GetLogFile (string name)
+
+Retrieves one retained log file by its listed name.
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class GetLogFileExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DiagnosticsApi(httpClient, config, httpClientHandler);
+            var name = "name_example";  // string | Name returned by ListLogFiles
+
+            try
+            {
+                // Retrieves one retained log file by its listed name.
+                string result = apiInstance.GetLogFile(name);
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling DiagnosticsApi.GetLogFile: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the GetLogFileWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Retrieves one retained log file by its listed name.
+    ApiResponse<string> response = apiInstance.GetLogFileWithHttpInfo(name);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling DiagnosticsApi.GetLogFileWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **name** | **string** | Name returned by ListLogFiles |  |
+
+### Return type
+
+**string**
+
+### Authorization
+
+[scope_token](../README.md#scope_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: text/plain
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Log file contents |  -  |
+| **400** | Invalid log file name |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
+| **404** | Log file not found |  -  |
+| **500** | Failed to read log file |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 <a id="getlogs"></a>
 # **GetLogs**
 > string GetLogs ()
@@ -286,6 +389,100 @@ This endpoint does not need any parameter.
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **500** | Failed to retrieve logs |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="listlogfiles"></a>
+# **ListLogFiles**
+> List&lt;LogFileInfo&gt; ListLogFiles ()
+
+Lists the log files retained by this Gateway.
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class ListLogFilesExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new DiagnosticsApi(httpClient, config, httpClientHandler);
+
+            try
+            {
+                // Lists the log files retained by this Gateway.
+                List<LogFileInfo> result = apiInstance.ListLogFiles();
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling DiagnosticsApi.ListLogFiles: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the ListLogFilesWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Lists the log files retained by this Gateway.
+    ApiResponse<List<LogFileInfo>> response = apiInstance.ListLogFilesWithHttpInfo();
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling DiagnosticsApi.ListLogFilesWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+This endpoint does not need any parameter.
+### Return type
+
+[**List&lt;LogFileInfo&gt;**](LogFileInfo.md)
+
+### Authorization
+
+[scope_token](../README.md#scope_token)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json, application/problem+json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Retained log files |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
+| **500** | Failed to list log files |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

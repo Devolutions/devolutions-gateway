@@ -1,4 +1,5 @@
 import { DesktopSize } from '@shared/models/desktop-size';
+import { ArdControlMode } from './ard-control.interfaces';
 
 export interface SessionTokenParameters {
   content_type: string;
@@ -54,6 +55,7 @@ export interface IronARDConnectionParameters {
   token?: string;
   resolutionQuality?: string;
   ardQualityMode?: string;
+  ardStartMode: ArdControlMode;
   wheelSpeedFactor: number;
   sessionId?: string;
   ardOnlyInputEncryption: boolean;

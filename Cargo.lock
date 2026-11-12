@@ -1142,9 +1142,9 @@ dependencies = [
 
 [[package]]
 name = "cadeau"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d436ed569e312af22175720428864c72c0cb1a64c8713da6b560777b94ac88ea"
+checksum = "780f004cd6ca69e0a17cb5d7deeb1c27f1c3184b71e51870503a807848671395"
 dependencies = [
  "xmf-sys",
 ]
@@ -8164,6 +8164,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "base64 0.23.1",
+ "cadeau",
  "camino",
  "devolutions-gateway",
  "devolutions-gateway-task",
@@ -8207,6 +8208,8 @@ dependencies = [
  "tokio-util",
  "typed-builder",
  "uuid",
+ "video-streamer",
+ "webm-iterable",
  "win-api-wrappers",
  "windows 0.61.3",
 ]
@@ -10247,9 +10250,9 @@ dependencies = [
 
 [[package]]
 name = "xmf-sys"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11fdca6c3a45724e73f61e2d2fb435df3de4bcbec0ae294b272dcdfbbc6ac115"
+checksum = "e0b089bd2e7194d55566f4d0cbeed320838822419f7bf08c4e58b1ce8ccb74c7"
 dependencies = [
  "dlib",
 ]

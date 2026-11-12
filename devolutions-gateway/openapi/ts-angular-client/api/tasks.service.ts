@@ -22,6 +22,8 @@ import { AiAnalysisConflict } from '../model/aiAnalysisConflict';
 import { AiAnalysisRequest } from '../model/aiAnalysisRequest';
 // @ts-ignore
 import { AiAnalysisTask } from '../model/aiAnalysisTask';
+// @ts-ignore
+import { ApiError } from '../model/apiError';
 
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS }                     from '../variables';
@@ -101,10 +103,10 @@ export class TasksService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public getAiAnalysis(taskId: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<AiAnalysisTask>;
-    public getAiAnalysis(taskId: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<AiAnalysisTask>>;
-    public getAiAnalysis(taskId: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<AiAnalysisTask>>;
-    public getAiAnalysis(taskId: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public getAiAnalysis(taskId: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<AiAnalysisTask>;
+    public getAiAnalysis(taskId: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<AiAnalysisTask>>;
+    public getAiAnalysis(taskId: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<AiAnalysisTask>>;
+    public getAiAnalysis(taskId: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (taskId === null || taskId === undefined) {
             throw new Error('Required parameter taskId was null or undefined when calling getAiAnalysis.');
         }
@@ -122,7 +124,8 @@ export class TasksService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -174,10 +177,10 @@ export class TasksService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<AiAnalysisTask>;
-    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<AiAnalysisTask>>;
-    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<AiAnalysisTask>>;
-    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<AiAnalysisTask>;
+    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<AiAnalysisTask>>;
+    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<AiAnalysisTask>>;
+    public startAiAnalysis(taskId: string, aiAnalysisRequest: AiAnalysisRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (taskId === null || taskId === undefined) {
             throw new Error('Required parameter taskId was null or undefined when calling startAiAnalysis.');
         }
@@ -198,7 +201,8 @@ export class TasksService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }

@@ -81,6 +81,13 @@
   &:hover { background: var(--toolbar-btn-active-hover-bg); }
 }
 
+// Selected mode-toggle option — solid background, accent icon
+.toolbar-button-selected,
+.toolbar-button-selected:hover {
+  background: var(--toolbar-btn-selected-bg);
+  color: var(--toolbar-btn-selected-color);
+}
+
 // Ctrl+Alt+Del pill — natural width, inset border
 // height comes from .toolbar-button (always co-applied); only width/padding differ
 .toolbar-button-cad {
@@ -112,12 +119,32 @@
   flex-shrink: 0;
 }
 
-// Close button — solid danger background
-.toolbar-button-close {
+// Read-only status indicator (e.g. "Curtain on") — same footprint as an icon button
+.toolbar-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--toolbar-icon-color);
+  background: var(--toolbar-btn-group-bg);
+
+  i {
+    display: block;
+    font-size: 18px;
+    line-height: 1;
+  }
+}
+
+// Close button and danger badge — solid danger background
+.toolbar-button-close,
+.toolbar-status-badge-danger {
   background: var(--toolbar-close-bg);
   color: var(--toolbar-close-color);
-
-  &:hover { background: var(--toolbar-close-hover-bg); }
 }
+
+.toolbar-button-close:hover { background: var(--toolbar-close-hover-bg); }
 
 

@@ -148,7 +148,9 @@ Class | Method | HTTP request | Description
 *ConfigApi* | [**PatchConfig**](docs/ConfigApi.md#patchconfig) | **PATCH** /jet/config | Modifies configuration
 *DiagnosticsApi* | [**GetClockDiagnostic**](docs/DiagnosticsApi.md#getclockdiagnostic) | **GET** /jet/diagnostics/clock | Retrieves server's clock in order to diagnose clock drifting.
 *DiagnosticsApi* | [**GetConfigurationDiagnostic**](docs/DiagnosticsApi.md#getconfigurationdiagnostic) | **GET** /jet/diagnostics/configuration | Retrieves a subset of the configuration, for diagnosis purposes.
+*DiagnosticsApi* | [**GetLogFile**](docs/DiagnosticsApi.md#getlogfile) | **GET** /jet/diagnostics/logs/files/{name} | Retrieves one retained log file by its listed name.
 *DiagnosticsApi* | [**GetLogs**](docs/DiagnosticsApi.md#getlogs) | **GET** /jet/diagnostics/logs | Retrieves latest logs.
+*DiagnosticsApi* | [**ListLogFiles**](docs/DiagnosticsApi.md#listlogfiles) | **GET** /jet/diagnostics/logs/files | Lists the log files retained by this Gateway.
 *HealthApi* | [**GetHealth**](docs/HealthApi.md#gethealth) | **GET** /jet/health | Performs a health check
 *HeartbeatApi* | [**GetHeartbeat**](docs/HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a heartbeat check
 *JrecApi* | [**DeleteManyRecordings**](docs/JrecApi.md#deletemanyrecordings) | **DELETE** /jet/jrec/delete | Mass-deletes recordings stored on this instance
@@ -229,6 +231,7 @@ Class | Method | HTTP request | Description
  - [Model.InterfaceInfo](docs/InterfaceInfo.md)
  - [Model.JrlInfo](docs/JrlInfo.md)
  - [Model.ListenerUrls](docs/ListenerUrls.md)
+ - [Model.LogFileInfo](docs/LogFileInfo.md)
  - [Model.MonitorDefinition](docs/MonitorDefinition.md)
  - [Model.MonitorDefinitionProbeTypeError](docs/MonitorDefinitionProbeTypeError.md)
  - [Model.MonitorResult](docs/MonitorResult.md)

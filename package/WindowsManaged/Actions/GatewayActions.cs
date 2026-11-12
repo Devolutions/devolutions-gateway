@@ -145,13 +145,6 @@ internal static class GatewayActions
         Impersonate = false
     };
 
-    // Deferred sequence
-
-    /// <summary>
-    /// The action data that passes the installer's language to a deferred action, which shows its errors in it.
-    /// </summary>
-    private const string ProductLanguage = "ProductLanguage=[ProductLanguage]";
-
     /// <summary>
     /// Fail the run, with an error naming the folder, when %programdata%\Devolutions or %programdata%\Devolutions\Gateway
     /// is a link or is controlled by an account that is not an administrator
@@ -160,8 +153,11 @@ internal static class GatewayActions
     /// The major upgrade removes the installed product at RemoveExistingProducts, right after InstallInitialize, so
     /// running before it fails an install, an upgrade, a repair or a maintenance run before it changes anything.
     /// A full uninstall is never refused, so that a machine can always be uninstalled.
+    /// The action runs immediately rather than deferred, because RemoveExistingProducts scheduled after
+    /// InstallInitialize fails the install with error 2613 when a deferred action precedes it in the script.
+    /// It then impersonates the installing administrator, who can read the owner and permissions of the folders.
     /// </remarks>
-    internal static readonly ElevatedManagedAction checkProgramDataDirectory = new(
+    internal static readonly ManagedAction checkProgramDataDirectory = new(
         new Id($"CA.{nameof(checkProgramDataDirectory)}"),
         CustomActions.CheckProgramDataDirectory,
         Return.check,
@@ -169,10 +165,15 @@ internal static class GatewayActions
         Condition.NOT_BeingRemoved,
         Sequence.InstallExecuteSequence)
     {
-        Execute = Execute.deferred,
-        Impersonate = false,
-        UsesProperties = ProductLanguage,
+        Execute = Execute.immediate,
     };
+
+    // Deferred sequence
+
+    /// <summary>
+    /// The action data that passes the installer's language to a deferred action, which shows its errors in it.
+    /// </summary>
+    private const string ProductLanguage = "ProductLanguage=[ProductLanguage]";
 
     /// <summary>
     /// Create the path %programdata%\Devolutions\Gateway with its owner and ACL if it does not exist, or reset both on
