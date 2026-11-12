@@ -6,6 +6,9 @@
 # Optional environment variables:
 #   DEVOLUTIONS_AGENT_INSTALLER_URL     Installs this MSI instead of the latest published one.
 #   DEVOLUTIONS_AGENT_INSTALLER_SHA256  Expected SHA-256 of the MSI set by DEVOLUTIONS_AGENT_INSTALLER_URL.
+#   DEVOLUTIONS_AGENT_DEV_URL           Development only. Base URL of a server that gives a locally built agent
+#                                       (DevolutionsAgent.exe) and, optionally, the test root CA of the server (dvls-ca.pem).
+#                                       See Start-DevInstallServer.ps1. No MSI is installed in this mode.
 #
 # The script has no param block so that it also runs through `irm | iex`. It never writes the token.
 
@@ -16,6 +19,13 @@
 
     $ProductInfoUrl = 'https://devolutions.net/productinfo.json'
     $ServiceName = 'DevolutionsAgent'
+
+    # Start-DevInstallServer.ps1 sets this value in the copy of the script that it serves.
+    $DevUrl = ''
+    if ($env:DEVOLUTIONS_AGENT_DEV_URL) {
+        $DevUrl = $env:DEVOLUTIONS_AGENT_DEV_URL
+    }
+    $DevUrl = $DevUrl.TrimEnd('/')
 
     function Stop-Install([string] $Message) {
         Remove-Item Env:\DEVOLUTIONS_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
@@ -32,64 +42,113 @@
         Stop-Install 'set DEVOLUTIONS_ENROLLMENT_TOKEN to the enrollment token from Remote Desktop Manager.'
     }
 
-    $installerUrl = $env:DEVOLUTIONS_AGENT_INSTALLER_URL
-    $expectedHash = $env:DEVOLUTIONS_AGENT_INSTALLER_SHA256
-    if ([string]::IsNullOrWhiteSpace($installerUrl)) {
-        $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-        $arch = switch ($architecture) {
-            'AMD64' { 'x64' }
-            'ARM64' { 'arm64' }
-            default { Stop-Install "the $architecture architecture is not supported." }
-        }
+    $configDir = Join-Path $env:ProgramData 'Devolutions\Agent'
+    $configPath = Join-Path $configDir 'agent.json'
+    $devCaFile = $null
 
-        Write-Host 'Reading the latest Devolutions Agent version...'
-        $productInfo = Invoke-RestMethod -Uri $ProductInfoUrl -UseBasicParsing
-        $file = $productInfo.Agent.Current.Files | Where-Object { $_.Type -eq 'msi' -and $_.Arch -eq $arch } | Select-Object -First 1
-        if (-not $file) {
-            Stop-Install "no Devolutions Agent installer is available for Windows $arch."
-        }
+    if ($DevUrl) {
+        Write-Warning "Development mode: installing the Devolutions Agent build from $DevUrl."
+        $installDir = Join-Path $env:ProgramFiles 'Devolutions\Agent'
+        $agentExe = Join-Path $installDir 'DevolutionsAgent.exe'
+        $downloadPath = Join-Path ([IO.Path]::GetTempPath()) ("DevolutionsAgent-{0}.exe" -f [guid]::NewGuid().ToString('N'))
+        try {
+            Write-Host "Downloading $DevUrl/DevolutionsAgent.exe..."
+            Invoke-WebRequest -Uri "$DevUrl/DevolutionsAgent.exe" -OutFile $downloadPath -UseBasicParsing
 
-        $installerUrl = $file.Url
-        $expectedHash = $file.Hash
-    }
+            Write-Host 'Installing Devolutions Agent...'
+            $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+            if ($service -and $service.Status -ne 'Stopped') {
+                Stop-Service -Name $ServiceName -Force
+                $service.WaitForStatus('Stopped', '00:00:30')
+            }
+            Get-Process -Name 'DevolutionsAgent' -ErrorAction SilentlyContinue | Stop-Process -Force
 
-    $msiPath = Join-Path ([IO.Path]::GetTempPath()) ("DevolutionsAgent-{0}.msi" -f [guid]::NewGuid().ToString('N'))
-    try {
-        Write-Host "Downloading $installerUrl..."
-        Invoke-WebRequest -Uri $installerUrl -OutFile $msiPath -UseBasicParsing
+            New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+            Get-ChildItem -Path "$agentExe.old*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            # Windows can lock the executable after the process stops. A locked file cannot be overwritten, but it can be renamed.
+            if (Test-Path $agentExe) {
+                Move-Item -Path $agentExe -Destination "$agentExe.old$([DateTime]::Now.Ticks)" -Force
+            }
+            Copy-Item -Path $downloadPath -Destination $agentExe -Force
 
-        if (-not [string]::IsNullOrWhiteSpace($expectedHash)) {
-            $actualHash = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash
-            if ($actualHash -ne $expectedHash.Trim().ToUpperInvariant()) {
-                Stop-Install 'the SHA-256 hash of the downloaded installer is not correct.'
+            if (-not $service) {
+                New-Service -Name $ServiceName -BinaryPathName "`"$agentExe`"" -DisplayName 'Devolutions Agent' -StartupType Automatic | Out-Null
             }
         }
-        else {
-            Write-Warning 'The installer hash is not checked because DEVOLUTIONS_AGENT_INSTALLER_SHA256 is not set.'
+        finally {
+            Remove-Item -Path $downloadPath -Force -ErrorAction SilentlyContinue
         }
 
-        Write-Host 'Installing Devolutions Agent...'
-        $logPath = Join-Path ([IO.Path]::GetTempPath()) 'DevolutionsAgent-install.log'
-        $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$msiPath`"", '/qn', '/norestart', '/l*v', "`"$logPath`"") -Wait -PassThru
-        if ($process.ExitCode -notin @(0, 3010)) {
-            Stop-Install "msiexec stopped with exit code $($process.ExitCode). See $logPath."
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        try {
+            Invoke-WebRequest -Uri "$DevUrl/dvls-ca.pem" -OutFile (Join-Path $configDir 'dvls-ca.pem') -UseBasicParsing
+            $devCaFile = 'dvls-ca.pem'
+            Write-Host 'The agent trusts the test root CA from the development server.'
+        }
+        catch {
+            Write-Host 'The development server gives no test root CA. The agent uses the system trust store.'
         }
     }
-    finally {
-        Remove-Item -Path $msiPath -Force -ErrorAction SilentlyContinue
+    else {
+        $installerUrl = $env:DEVOLUTIONS_AGENT_INSTALLER_URL
+        $expectedHash = $env:DEVOLUTIONS_AGENT_INSTALLER_SHA256
+        if ([string]::IsNullOrWhiteSpace($installerUrl)) {
+            $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+            $arch = switch ($architecture) {
+                'AMD64' { 'x64' }
+                'ARM64' { 'arm64' }
+                default { Stop-Install "the $architecture architecture is not supported." }
+            }
+
+            Write-Host 'Reading the latest Devolutions Agent version...'
+            $productInfo = Invoke-RestMethod -Uri $ProductInfoUrl -UseBasicParsing
+            $file = $productInfo.Agent.Current.Files | Where-Object { $_.Type -eq 'msi' -and $_.Arch -eq $arch } | Select-Object -First 1
+            if (-not $file) {
+                Stop-Install "no Devolutions Agent installer is available for Windows $arch."
+            }
+
+            $installerUrl = $file.Url
+            $expectedHash = $file.Hash
+        }
+
+        $msiPath = Join-Path ([IO.Path]::GetTempPath()) ("DevolutionsAgent-{0}.msi" -f [guid]::NewGuid().ToString('N'))
+        try {
+            Write-Host "Downloading $installerUrl..."
+            Invoke-WebRequest -Uri $installerUrl -OutFile $msiPath -UseBasicParsing
+
+            if (-not [string]::IsNullOrWhiteSpace($expectedHash)) {
+                $actualHash = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash
+                if ($actualHash -ne $expectedHash.Trim().ToUpperInvariant()) {
+                    Stop-Install 'the SHA-256 hash of the downloaded installer is not correct.'
+                }
+            }
+            else {
+                Write-Warning 'The installer hash is not checked because DEVOLUTIONS_AGENT_INSTALLER_SHA256 is not set.'
+            }
+
+            Write-Host 'Installing Devolutions Agent...'
+            $logPath = Join-Path ([IO.Path]::GetTempPath()) 'DevolutionsAgent-install.log'
+            $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$msiPath`"", '/qn', '/norestart', '/l*v', "`"$logPath`"") -Wait -PassThru
+            if ($process.ExitCode -notin @(0, 3010)) {
+                Stop-Install "msiexec stopped with exit code $($process.ExitCode). See $logPath."
+            }
+        }
+        finally {
+            Remove-Item -Path $msiPath -Force -ErrorAction SilentlyContinue
+        }
+
+        $installDir = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Devolutions\Agent' -Name 'InstallDir' -ErrorAction SilentlyContinue).InstallDir
+        if (-not $installDir) {
+            $installDir = Join-Path $env:ProgramFiles 'Devolutions\Agent'
+        }
+
+        $agentExe = Join-Path $installDir 'DevolutionsAgent.exe'
     }
 
-    $installDir = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Devolutions\Agent' -Name 'InstallDir' -ErrorAction SilentlyContinue).InstallDir
-    if (-not $installDir) {
-        $installDir = Join-Path $env:ProgramFiles 'Devolutions\Agent'
-    }
-
-    $agentExe = Join-Path $installDir 'DevolutionsAgent.exe'
     if (-not (Test-Path $agentExe)) {
         Stop-Install "$agentExe is missing after the installation."
     }
 
-    $configPath = Join-Path $env:ProgramData 'Devolutions\Agent\agent.json'
     if (-not (Test-Path $configPath)) {
         & $agentExe config init | Out-Null
     }
@@ -105,8 +164,30 @@
     }
 
     $config | Add-Member -NotePropertyName 'DeviceManagement' -NotePropertyValue ([pscustomobject]@{ Enabled = $true }) -Force
-    New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
+    if ($DevUrl) {
+        # Development builds of UniGetUI are not signed, so the broker does not validate the caller signature.
+        $config | Add-Member -NotePropertyName 'PackageBroker' -NotePropertyValue ([pscustomobject]@{ Enabled = $true }) -Force
+        $debug = [pscustomobject]@{ skip_broker_signature_validation = $true }
+        if ($devCaFile) {
+            $debug | Add-Member -NotePropertyName 'identity' -NotePropertyValue ([pscustomobject]@{ extra_trusted_root = $devCaFile })
+        }
+        $config | Add-Member -NotePropertyName '__debug__' -NotePropertyValue $debug -Force
+    }
+
+    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 32), [Text.UTF8Encoding]::new($false))
+
+    if ($DevUrl) {
+        $policyPath = Join-Path $env:ProgramData 'Devolutions\PackageBroker\package-broker-policy.json'
+        $policyDir = Split-Path $policyPath
+        New-Item -ItemType Directory -Path $policyDir -Force | Out-Null
+        # The broker refuses a policy folder that inherits the ProgramData ACL, because users can create files there.
+        icacls $policyDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+        icacls $policyDir /setowner '*S-1-5-32-544' /T | Out-Null
+        if (-not (Test-Path $policyPath)) {
+            [IO.File]::WriteAllText($policyPath, '{"PolicyFormatVersion":"1.0.0","Metadata":{"Id":"dev.allow-all","Publisher":"Development","Revision":1,"PublishedAt":"2026-10-21T00:00:00Z","Description":"Allow all package operations."},"Enforcement":{"DefaultDecision":"Allow"},"Rules":[]}')
+        }
+    }
 
     Write-Host 'Enrolling the device...'
     $token.Trim() | & $agentExe identity enroll - | Out-Null

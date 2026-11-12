@@ -7,6 +7,9 @@
 # Optional environment variables:
 #   DEVOLUTIONS_AGENT_INSTALLER_URL     Installs this .deb package instead of the latest published one.
 #   DEVOLUTIONS_AGENT_INSTALLER_SHA256  Expected SHA-256 of the package set by DEVOLUTIONS_AGENT_INSTALLER_URL.
+#   DEVOLUTIONS_AGENT_DEV_URL           Development only. Base URL of a server that gives a locally built agent
+#                                       (devolutions-agent) and, optionally, the test root CA of the server (dvls-ca.pem).
+#                                       See Start-DevInstallServer.ps1. No package is installed in this mode.
 #
 # Only Debian-based x64 distributions are supported. The script never writes the token.
 
@@ -17,6 +20,12 @@ AGENT_BIN='/usr/bin/devolutions-agent'
 CONFIG_DIR='/etc/devolutions-agent'
 CONFIG_PATH="$CONFIG_DIR/agent.json"
 SERVICE_NAME='devolutions-agent'
+
+# Start-DevInstallServer.ps1 sets this value in the copy of the script that it serves.
+DEV_URL=''
+DEV_URL="${DEVOLUTIONS_AGENT_DEV_URL:-$DEV_URL}"
+DEV_URL="${DEV_URL%/}"
+DEV_CA_FILE=''
 
 fail() {
     unset DEVOLUTIONS_ENROLLMENT_TOKEN
@@ -54,7 +63,7 @@ case "$(uname -m)" in
     *) fail "the $(uname -m) architecture is not supported." ;;
 esac
 
-if ! command -v dpkg >/dev/null 2>&1; then
+if [ -z "$DEV_URL" ] && ! command -v dpkg >/dev/null 2>&1; then
     if command -v rpm >/dev/null 2>&1; then
         fail 'RPM-based distributions are not supported yet. Use a Debian-based distribution such as Debian or Ubuntu.'
     fi
@@ -66,6 +75,43 @@ EXPECTED_HASH="${DEVOLUTIONS_AGENT_INSTALLER_SHA256:-}"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT INT TERM
 
+if [ -n "$DEV_URL" ]; then
+    info "Warning: development mode. Installing the Devolutions Agent build from $DEV_URL." >&2
+    command -v python3 >/dev/null 2>&1 || fail 'python3 is required in development mode.'
+    info "Downloading $DEV_URL/devolutions-agent..."
+    download "$DEV_URL/devolutions-agent" "$WORK_DIR/devolutions-agent"
+
+    info 'Installing Devolutions Agent...'
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    install -m 755 "$WORK_DIR/devolutions-agent" "$AGENT_BIN"
+    if [ ! -f "/etc/systemd/system/$SERVICE_NAME.service" ] && [ ! -f "/lib/systemd/system/$SERVICE_NAME.service" ]; then
+        cat > "/etc/systemd/system/$SERVICE_NAME.service" <<'EOF'
+[Unit]
+Description=Devolutions Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/devolutions-agent run
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+    fi
+
+    mkdir -p "$CONFIG_DIR"
+    if download "$DEV_URL/dvls-ca.pem" "$WORK_DIR/dvls-ca.pem" 2>/dev/null; then
+        install -m 644 "$WORK_DIR/dvls-ca.pem" "$CONFIG_DIR/dvls-ca.pem"
+        DEV_CA_FILE='dvls-ca.pem'
+        info 'The agent trusts the test root CA from the development server.'
+    else
+        info 'The development server gives no test root CA. The agent uses the system trust store.'
+    fi
+else
 if [ -z "$INSTALLER_URL" ]; then
     info 'Reading the latest Devolutions Agent version...'
     download "$PRODUCT_INFO_URL" "$WORK_DIR/productinfo.json"
@@ -101,6 +147,7 @@ if command -v apt-get >/dev/null 2>&1; then
 else
     dpkg -i "$PACKAGE_PATH" >/dev/null || fail 'dpkg could not install the package.'
 fi
+fi
 
 [ -x "$AGENT_BIN" ] || fail "$AGENT_BIN is missing after the installation."
 
@@ -109,7 +156,7 @@ mkdir -p "$CONFIG_DIR"
 
 info 'Turning on Device Management...'
 if command -v python3 >/dev/null 2>&1; then
-    python3 - "$CONFIG_PATH" <<'EOF' || fail "could not update $CONFIG_PATH."
+    python3 - "$CONFIG_PATH" "$DEV_URL" "$DEV_CA_FILE" <<'EOF' || fail "could not update $CONFIG_PATH."
 import json, sys
 path = sys.argv[1]
 try:
@@ -118,6 +165,13 @@ try:
 except FileNotFoundError:
     config = {}
 config["DeviceManagement"] = {"Enabled": True}
+if sys.argv[2]:
+    # Development builds of UniGetUI are not signed, so the broker does not validate the caller signature.
+    config["PackageBroker"] = {"Enabled": True}
+    debug = {"skip_broker_signature_validation": True}
+    if sys.argv[3]:
+        debug["identity"] = {"extra_trusted_root": sys.argv[3]}
+    config["__debug__"] = debug
 with open(path, "w", encoding="utf-8") as file:
     json.dump(config, file, indent=2)
     file.write("\n")
