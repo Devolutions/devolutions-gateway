@@ -43,6 +43,7 @@ model/aiAnalysisSucceededPayload.ts
 model/aiAnalysisTask.ts
 model/aiAnalysisUsage.ts
 model/aiProvider.ts
+model/apiError.ts
 model/appCredential.ts
 model/appCredentialKind.ts
 model/appTokenContentType.ts
@@ -56,6 +57,7 @@ model/dataEncoding.ts
 model/deleteManyResult.ts
 model/enrollRequest.ts
 model/enrollResponse.ts
+model/errorCode.ts
 model/eventOutcomeResponse.ts
 model/getUpdateProductsResponse.ts
 model/getUpdateScheduleResponse.ts
@@ -65,6 +67,7 @@ model/identity.ts
 model/interfaceInfo.ts
 model/jrlInfo.ts
 model/listenerUrls.ts
+model/logFileInfo.ts
 model/models.ts
 model/monitorDefinition.ts
 model/monitorDefinitionProbeTypeError.ts

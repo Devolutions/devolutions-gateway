@@ -31,10 +31,10 @@ pub fn make_router<S>(state: crate::DgwState) -> Router<S> {
     ),
     responses(
         (status = 200, description = "Successfully claimed traffic events", body = Vec<ClaimedTrafficEvent>),
-        (status = 400, description = "Invalid query parameters"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Internal server error"),
+        (status = 400, description = "Invalid query parameters", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Internal server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.traffic.claim"])),
 ))]
@@ -89,11 +89,11 @@ pub(crate) async fn post_traffic_claim(
     request_body(content = AckRequest, description = "Array of event IDs to acknowledge", content_type = "application/json"),
     responses(
         (status = 200, description = "Successfully acknowledged events", body = AckResponse),
-        (status = 400, description = "Invalid request body (empty ids array)"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 413, description = "Payload too large (more than 10,000 IDs)"),
-        (status = 500, description = "Internal server error"),
+        (status = 400, description = "Invalid request body (empty ids array)", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 413, description = "Payload too large (more than 10,000 IDs)", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Internal server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.traffic.ack"])),
 ))]

@@ -298,11 +298,11 @@ fn apply_products(req: UpdateRequest, manifest: &mut UpdateManifestV2, was_v2: b
     request_body(content = Option<UpdateRequestSchema>, description = "Products and target versions to update", content_type = "application/json"),
     responses(
         (status = 200, description = "Update request accepted", body = UpdateResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to write update manifest"),
-        (status = 503, description = "Agent updater service is unavailable"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to write update manifest", body = ApiError, content_type = "application/problem+json"),
+        (status = 503, description = "Agent updater service is unavailable", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.update"])),
 ))]
@@ -386,10 +386,10 @@ pub(crate) struct GetUpdateProductsResponse {
     path = "/jet/update",
     responses(
         (status = 200, description = "Installed product versions", body = GetUpdateProductsResponse),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to read agent status file"),
-        (status = 503, description = "Agent updater service is unavailable"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to read agent status file", body = ApiError, content_type = "application/problem+json"),
+        (status = 503, description = "Agent updater service is unavailable", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.update.read"])),
 ))]
@@ -505,10 +505,10 @@ pub(crate) struct SetUpdateScheduleResponse {}
     path = "/jet/update/schedule",
     responses(
         (status = 200, description = "Current auto-update schedule", body = GetUpdateScheduleResponse),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to read agent status file"),
-        (status = 503, description = "Agent updater service is unavailable"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to read agent status file", body = ApiError, content_type = "application/problem+json"),
+        (status = 503, description = "Agent updater service is unavailable", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.update.read"])),
 ))]
@@ -558,11 +558,11 @@ pub(super) async fn get_update_schedule(_scope: UpdateReadScope) -> Result<Json<
     request_body = SetUpdateScheduleRequest,
     responses(
         (status = 200, description = "Auto-update schedule applied", body = SetUpdateScheduleResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to write update manifest"),
-        (status = 503, description = "Agent updater service is unavailable"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to write update manifest", body = ApiError, content_type = "application/problem+json"),
+        (status = 503, description = "Agent updater service is unavailable", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.update"])),
 ))]

@@ -5,6 +5,7 @@ use axum::extract::{ConnectInfo, FromRequest, FromRequestParts, Path, RawQuery, 
 use axum::http::request::Parts;
 
 use crate::DgwState;
+use crate::error_code::ErrorCode;
 use crate::http::HttpError;
 use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, EnrollmentTokenClaims, JmuxTokenClaims,
@@ -42,7 +43,9 @@ where
         if let AccessTokenClaims::Association(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected ASSOCIATION)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected ASSOCIATION)"))
         }
     }
 }
@@ -60,7 +63,9 @@ where
         if let AccessTokenClaims::Jrl(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected JRL)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected JRL)"))
         }
     }
 }
@@ -78,7 +83,9 @@ where
         if let AccessTokenClaims::Jrec(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected JREC)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected JREC)"))
         }
     }
 }
@@ -96,7 +103,9 @@ where
         if let AccessTokenClaims::Jmux(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected JMUX)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected JMUX)"))
         }
     }
 }
@@ -132,11 +141,13 @@ impl FromRequestParts<DgwState> for KdcToken {
             &state.recordings.active_recordings,
             None,
         )
-        .map_err(HttpError::unauthorized().err())?;
+        .map_err(|error| HttpError::unauthorized().with_error_code(error.code()).build(error))?;
 
         match claims {
             AccessTokenClaims::Kdc(claims) => Ok(Self(claims)),
-            _ => Err(HttpError::forbidden().msg("token not allowed (expected KDC token)")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected KDC token)")),
         }
     }
 }
@@ -154,7 +165,9 @@ where
         if let AccessTokenClaims::Scope(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected SCOPE)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected SCOPE)"))
         }
     }
 }
@@ -172,7 +185,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::SessionsRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -190,7 +205,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::SessionTerminate => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -208,7 +225,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::AssociationsRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -226,7 +245,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::DiagnosticsRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -244,7 +265,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::JrlRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -262,7 +285,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::ConfigWrite => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -280,7 +305,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::HeartbeatRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -298,7 +325,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::RecordingDelete => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -316,7 +345,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::RecordingsRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -335,7 +366,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::RecordingAiAnalysisStart => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -354,7 +387,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::RecordingAiAnalysisRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -372,7 +407,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::RecordingsSearch => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -390,7 +427,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::Update => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -410,7 +449,9 @@ where
             // The full write scope also grants read access.
             AccessScope::Update => Ok(Self),
             AccessScope::UpdateRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -428,7 +469,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::Preflight => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -446,7 +489,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::TrafficClaim => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -464,7 +509,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::TrafficAck => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -482,7 +529,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::NetMonitorConfig => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -500,7 +549,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::NetMonitorDrain => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }
@@ -527,9 +578,12 @@ where
             AccessTokenClaims::Scope(scope) => match scope.scope {
                 AccessScope::Wildcard | AccessScope::AgentRead => Ok(Self),
                 _ => Err(HttpError::forbidden()
+                    .with_error_code(ErrorCode::InsufficientScope)
                     .msg("invalid scope for agent management read (require one of: gateway.agent.read, *)")),
             },
-            _ => Err(HttpError::forbidden().msg("scope token required for agent management read")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("scope token required for agent management read")),
         }
     }
 }
@@ -556,9 +610,12 @@ where
             AccessTokenClaims::Scope(scope) => match scope.scope {
                 AccessScope::Wildcard | AccessScope::AgentDelete => Ok(Self),
                 _ => Err(HttpError::forbidden()
+                    .with_error_code(ErrorCode::InsufficientScope)
                     .msg("invalid scope for agent management delete (require one of: gateway.agent.delete, *)")),
             },
-            _ => Err(HttpError::forbidden().msg("scope token required for agent management delete")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("scope token required for agent management delete")),
         }
     }
 }
@@ -576,7 +633,9 @@ where
         if let AccessTokenClaims::WebApp(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected WEBAPP)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected WEBAPP)"))
         }
     }
 }
@@ -594,7 +653,9 @@ where
         if let AccessTokenClaims::NetScan(_) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self)
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected NETSCAN)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected NETSCAN)"))
         }
     }
 }
@@ -612,7 +673,9 @@ where
         if let AccessTokenClaims::Bridge(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected BRIDGE)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected BRIDGE)"))
         }
     }
 }
@@ -631,7 +694,9 @@ where
         if let AccessTokenClaims::Enrollment(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
             Ok(Self(claims))
         } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected ENROLLMENT token)"))
+            Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::WrongTokenType)
+                .msg("token not allowed (expected ENROLLMENT token)"))
         }
     }
 }

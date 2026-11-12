@@ -100,10 +100,10 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     request_body(content = EnrollRequest, description = "Agent identity and certificate signing request", content_type = "application/json"),
     responses(
         (status = 200, description = "Agent enrolled", body = EnrollResponse),
-        (status = 400, description = "Invalid agent name, request body, or certificate signing request"),
-        (status = 401, description = "Invalid or missing enrollment token"),
-        (status = 409, description = "Agent ID or name already registered, agent key previously deleted, or enrollment token already used"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 400, description = "Invalid agent name, request body, or certificate signing request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing enrollment token", body = ApiError, content_type = "application/problem+json"),
+        (status = 409, description = "Agent ID or name already registered, agent key previously deleted, or enrollment token already used", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("enrollment_token" = [])),
 ))]
@@ -282,9 +282,9 @@ fn agent_info(
     path = "/jet/tunnel/agents",
     responses(
         (status = 200, description = "Accepted agents and their current status", body = [AgentInfo]),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.agent.read"])),
 ))]
@@ -322,10 +322,10 @@ pub(crate) async fn list_agents(
     ),
     responses(
         (status = 200, description = "Agent status", body = AgentInfo),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "Agent not found"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 404, description = "Agent not found", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.agent.read"])),
 ))]
@@ -361,10 +361,10 @@ pub(crate) async fn get_agent(
     ),
     responses(
         (status = 204, description = "Agent deleted"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "Agent not found"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 404, description = "Agent not found", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.agent.delete"])),
 ))]
