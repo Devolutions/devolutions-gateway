@@ -1,5 +1,4 @@
 use anyhow::Context as _;
-use testsuite::cli::start_dgw;
 use testsuite::dgw_config::{DgwConfig, ProxyMode, SubscriberConfig};
 use testsuite::http::HttpRequestCapture;
 
@@ -16,7 +15,7 @@ async fn subscriber_requests_identify_gateway() -> anyhow::Result<()> {
         .build()
         .init()
         .context("initialize Gateway configuration")?;
-    let mut process = start_dgw(&config_handle).await?;
+    let mut process = config_handle.start().await?;
 
     let request = capture.receive().await;
 
