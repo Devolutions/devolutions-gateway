@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use win_api_wrappers::token::Token;
 
 use crate::impersonation::{ThreadImpersonation, impersonation_token};
-use crate::policy_security::{PathOpener, is_plain_local_drive_path};
+use crate::policy_security::{PathOpener, is_plain_local_drive_path, is_plain_local_drive_root};
 
 /// Environment variables of the target user, with filesystem lookups performed as that user.
 ///
@@ -95,7 +95,10 @@ impl<'a> UserEnv<'a> {
 
 impl PathOpener for UserEnv<'_> {
     fn open(&self, options: &OpenOptions, path: &Path) -> std::io::Result<File> {
-        if !path.to_str().is_some_and(is_plain_local_drive_path) {
+        if !path
+            .to_str()
+            .is_some_and(|path| is_plain_local_drive_path(path) || is_plain_local_drive_root(path))
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("'{}' is not a plain local drive path", path.display()),
