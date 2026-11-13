@@ -88,24 +88,6 @@ export interface SessionRecordingLogSearchHit {
   matchedFields: SearchableSessionRecordingLogField[];
 }
 
-export interface SessionRecordingArtifact {
-  recordingId: string;
-  artifactId: string;
-  fileName: string;
-  /** Derived from fileName extension, not read from recording.json. */
-  artifactType: string;
-  contentType?: string;
-  displayName: string;
-  startTime?: number;
-  duration?: number;
-}
-
-export interface SessionRecordingArtifactContent {
-  artifact: SessionRecordingArtifact;
-  blob: Blob;
-  text: string;
-}
-
 // Alias preserved to match AD producer historical naming.
 export type SessionRecordingLogRecord = SessionRecordingLogEntry;
 export type ParsedSessionRecordingLog = SessionRecordingLogParseResult;

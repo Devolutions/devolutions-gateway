@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/session-recording-log",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic parser and models for Devolutions Gateway Session Recording Log NDJSON files",
   "type": "module",
   "main": "./index.js",
