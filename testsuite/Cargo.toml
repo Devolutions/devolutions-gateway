@@ -55,7 +55,7 @@ picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"]
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 rstest = "0.25"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
@@ -77,6 +77,8 @@ libc = "0.2"
 sysevent-syslog.path = "../crates/sysevent-syslog"
 
 [target.'cfg(windows)'.dev-dependencies]
+# Deletes the machine keys an agent under test creates.
+device-key.path = "../crates/device-key"
 sysevent-winevent.path = "../crates/sysevent-winevent"
 win-api-wrappers.path = "../crates/win-api-wrappers"
 windows = { version = "0.61", features = ["Win32_Security_Authentication_Identity"] }
