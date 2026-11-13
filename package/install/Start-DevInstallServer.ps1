@@ -30,6 +30,9 @@ param(
     # The root CA of a test Devolutions Server certificate. The agent trusts it in addition to the system store. Optional.
     [string] $CaPem,
 
+    # A UniGetUI installer for reinstall-unigetui.ps1, for example from UniGetUI scripts\build.ps1. Optional.
+    [string] $UniGetUIInstaller,
+
     [string] $StagingPath = (Join-Path ([IO.Path]::GetTempPath()) 'devolutions-agent-dev')
 )
 
@@ -70,6 +73,17 @@ $ps1 = [regex]::Replace($ps1, "(?m)^(\s*)\`$DevUrl = ''", "`${1}`$`$DevUrl = '$d
 $sh = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'install-agent.sh')).Replace("`r`n", "`n")
 $sh = [regex]::Replace($sh, "(?m)^DEV_URL=''", "DEV_URL='$devUrl'")
 [IO.File]::WriteAllText((Join-Path $StagingPath 'install-agent.sh'), $sh)
+
+Copy-Item -Path (Join-Path $PSScriptRoot 'uninstall-agent.ps1') -Destination $StagingPath
+$uninstallSh = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'uninstall-agent.sh')).Replace("`r`n", "`n")
+[IO.File]::WriteAllText((Join-Path $StagingPath 'uninstall-agent.sh'), $uninstallSh)
+
+if ($UniGetUIInstaller) {
+    Copy-Item -Path $UniGetUIInstaller -Destination (Join-Path $StagingPath 'UniGetUI.Installer.x64.exe')
+    $reinstall = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'reinstall-unigetui.ps1'))
+    $reinstall = [regex]::Replace($reinstall, "(?m)^(\s*)\`$DevUrl = ''", "`${1}`$`$DevUrl = '$devUrl'")
+    [IO.File]::WriteAllText((Join-Path $StagingPath 'reinstall-unigetui.ps1'), $reinstall)
+}
 
 Write-Host "Serving $StagingPath at $devUrl" -ForegroundColor Cyan
 Get-ChildItem -Path $StagingPath | ForEach-Object { Write-Host "  $devUrl/$($_.Name)" }
