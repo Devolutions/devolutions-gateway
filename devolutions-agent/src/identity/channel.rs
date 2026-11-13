@@ -7,13 +7,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use agent_channel_client::{Channel, Closure, ClosureClass, ErrorCode, Event, TerminalCode};
+use agent_channel_client::{Channel, Closure, ClosureClass, ErrorCode, Event, Reporter, TerminalCode};
 use agent_identity::client;
 use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use url::Url;
+use uuid::Uuid;
 
 use super::runner::config_revision;
 
@@ -145,11 +146,20 @@ pub(super) trait LinkChannel {
     fn ack(&self, correlation_id: &str);
 
     fn next_event(&mut self) -> impl Future<Output = Option<Event>> + Send;
+
+    /// Returns a handle that queues device-management reports on the stream, if it can carry them.
+    fn reporter(&self) -> Option<Reporter> {
+        None
+    }
 }
 
 impl LinkChannel for Channel {
     fn ack(&self, correlation_id: &str) {
         Channel::ack(self, correlation_id);
+    }
+
+    fn reporter(&self) -> Option<Reporter> {
+        Some(Channel::reporter(self))
     }
 
     fn next_event(&mut self) -> impl Future<Output = Option<Event>> + Send {
@@ -204,13 +214,13 @@ struct Status {
 }
 
 impl<C: LinkChannel + Send + 'static> Streams<C> {
-    /// Starts the task; it must be called within a Tokio runtime.
-    pub(super) fn spawn() -> Self {
+    /// Starts the task of the identity `identity_id`; it must be called within a Tokio runtime.
+    pub(super) fn spawn(identity_id: Uuid) -> Self {
         let (commands, command_receiver) = mpsc::unbounded_channel();
         let inbox = Arc::new(Inbox::default());
         let (status_sender, status) = watch::channel(Status::default());
         let task = tokio::spawn(run_streams(
-            Links::new(),
+            Links::new(identity_id),
             command_receiver,
             Arc::clone(&inbox),
             status_sender,
@@ -339,6 +349,7 @@ async fn run_streams<C: LinkChannel>(
 /// Dropping a stream's channel is what stops it from reopening, so that a retired key never opens a stream, which the
 /// authority would answer with the terminal `identity_unknown`.
 pub(super) struct Links<C> {
+    identity_id: Uuid,
     want: Want,
     /// The stream in use.
     active: Option<Link<C>>,
@@ -385,8 +396,9 @@ enum Role {
 }
 
 impl<C: LinkChannel> Links<C> {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(identity_id: Uuid) -> Self {
         Self {
+            identity_id,
             want: Want::Nothing,
             active: None,
             replacement: None,
@@ -560,6 +572,11 @@ impl<C: LinkChannel> Links<C> {
                 // stored config stays; the authority sends it again after the next `Hello`.
                 Err(error) => warn!(%error, "Ignoring an Agent Identity config pushed on the agent channel"),
             },
+            Some(Event::DeviceManagement { id, request }) => {
+                if let Some(reporter) = self.link(role).and_then(|link| link.channel.reporter()) {
+                    crate::device_management::handle(self.identity_id, id, request, reporter);
+                }
+            }
             Some(Event::Closed { closure, reopen_after }) => self.closed(role, closure, reopen_after, now),
         }
         if was_authenticated && !self.authenticated() {
@@ -769,7 +786,7 @@ mod tests {
     // The runner learns of the outcome from a notice only once it isn't busy, so the streams' task holds this rule.
     #[tokio::test]
     async fn after_a_terminal_closure_no_stream_opens_even_before_the_runner_acts_on_it() -> anyhow::Result<()> {
-        let mut streams = Streams::spawn();
+        let mut streams = Streams::spawn(Uuid::nil());
         assert!(streams.reconcile(stream("current")).await);
         let (events, _dropped) = open_stream(&streams, "current");
         events.send(Event::Authenticated)?;
@@ -797,7 +814,7 @@ mod tests {
     #[tokio::test]
     async fn a_terminal_refusal_of_a_new_stream_closes_the_stream_in_use_before_the_runner_acts_on_it()
     -> anyhow::Result<()> {
-        let mut streams = Streams::spawn();
+        let mut streams = Streams::spawn(Uuid::nil());
         assert!(streams.reconcile(stream("current")).await);
         let (current_events, current_dropped) = open_stream(&streams, "current");
         current_events.send(Event::Authenticated)?;
@@ -815,7 +832,7 @@ mod tests {
     #[tokio::test]
     async fn a_burst_of_config_updates_while_the_runner_is_busy_leaves_one_with_the_highest_revision()
     -> anyhow::Result<()> {
-        let mut streams = Streams::spawn();
+        let mut streams = Streams::spawn(Uuid::nil());
         assert!(streams.reconcile(stream("current")).await);
         let (events, _dropped) = open_stream(&streams, "current");
         events.send(Event::Authenticated)?;
@@ -867,7 +884,7 @@ mod tests {
     fn a_flood_of_pushed_configs_keeps_the_highest_and_a_bounded_number_of_acknowledgements() {
         // oracle: intent devolutions-agent/src/identity/INTENT.md §Channel
         let now = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (link, _dropped) = open(&mut links, "current", now);
         links.handle(link, Some(Event::Authenticated), now);
@@ -890,7 +907,7 @@ mod tests {
     fn repeated_renewal_requests_and_stream_needs_leave_one_notice_each() {
         // oracle: mutant every renewal request and stream need stays queued until the runner takes it
         let now = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (link, _dropped) = open(&mut links, "current", now);
         links.handle(link, Some(Event::Authenticated), now);
@@ -929,7 +946,7 @@ mod tests {
     #[case::the_streams_are_held(Want::Hold)]
     fn an_authenticated_stream_that_may_not_reopen_is_dropped_when_it_closes(#[case] want: Want) {
         let now = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (link, dropped) = open(&mut links, "current", now);
         links.handle(link, Some(Event::Authenticated), now);
@@ -946,7 +963,7 @@ mod tests {
         // On `Reconnect` (step 6), the agent opens the new stream, then closes the old one; only the runner can open a
         // stream, so the request reaches it as a notice.
         let now = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (first, first_dropped) = open(&mut links, "current", now);
         links.handle(first, Some(Event::Authenticated), now);
@@ -976,7 +993,7 @@ mod tests {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
         // Once `confirm` is sent (step 3), no stream may be opening.
         let now = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (_link, dropped) = open(&mut links, "current", now);
 
@@ -991,7 +1008,7 @@ mod tests {
         // Check-in resumes once no stream has authenticated for 1 h, so the runner learns when the identity's last
         // authenticated stream closes.
         let now = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (link, dropped) = open(&mut links, "current", now);
         links.handle(link, Some(Event::Authenticated), now);
@@ -1010,7 +1027,7 @@ mod tests {
         // The runner sends `confirm` only while no stream is opening (`CONTRACT.agent-identity.md` §8.1 step 3), and a
         // stream waiting to reopen sends nothing until its backoff ends.
         let opened_at = Instant::now();
-        let mut links = Links::new();
+        let mut links = Links::new(Uuid::nil());
         links.reconcile(stream("current"));
         let (link, _dropped) = open(&mut links, "current", opened_at);
         assert_eq!(links.opening_at(), Some(opened_at));

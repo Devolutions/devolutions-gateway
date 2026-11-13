@@ -1932,6 +1932,7 @@ name = "devolutions-agent"
 version = "2026.3.3"
 dependencies = [
  "agent-channel-client",
+ "agent-channel-proto",
  "agent-identity",
  "agent-sysevent-codes",
  "agent-tunnel-proto",
@@ -1943,6 +1944,7 @@ dependencies = [
  "bytes 1.12.1",
  "camino",
  "ceviche",
+ "chrono",
  "ctrlc",
  "device-key",
  "devolutions-agent-shared",
@@ -1960,6 +1962,7 @@ dependencies = [
  "libc",
  "notify-debouncer-mini",
  "now-package-broker",
+ "now-policy-api",
  "parking_lot",
  "prost 0.13.5",
  "prost-types",

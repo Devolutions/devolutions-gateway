@@ -136,7 +136,7 @@ impl Runner {
             check_in_after_confirm: false,
             channel_url: None,
             warned_malformed_config: None,
-            streams: Streams::spawn(),
+            streams: Streams::spawn(identity.identity_id),
             notices: Notices::default(),
             confirm_unknown: identity.keys.pending.is_some(),
             channel_after_confirm: false,
@@ -609,6 +609,7 @@ impl Runner {
                 .into_iter()
                 .collect(),
             config_revision: config_revision.load(Ordering::Relaxed),
+            capabilities: vec![crate::device_management::CAPABILITY.to_owned()],
         })
     }
 

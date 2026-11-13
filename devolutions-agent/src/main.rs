@@ -2,6 +2,7 @@
 #![allow(clippy::print_stdout)]
 
 // Used by devolutions-agent library.
+use agent_channel_proto as _;
 use agent_tunnel_proto as _;
 use anyhow as _;
 use async_trait as _;
@@ -30,8 +31,8 @@ use url as _;
 use uuid as _;
 #[cfg(windows)]
 use {
-    aws_lc_rs as _, devolutions_pedm as _, hex as _, notify_debouncer_mini as _, sha2 as _, thiserror as _,
-    win_api_wrappers as _, windows as _,
+    aws_lc_rs as _, chrono as _, devolutions_pedm as _, hex as _, notify_debouncer_mini as _, now_policy_api as _,
+    sha2 as _, thiserror as _, win_api_wrappers as _, windows as _,
 };
 
 #[macro_use]
@@ -58,6 +59,9 @@ fn agent_service_main(
     _args: Vec<String>,
     _standalone_mode: bool,
 ) -> u8 {
+    // Both ring and aws-lc-rs are in the dependency graph, so rustls cannot pick a process default by itself.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let Ok(conf_handle) = ConfHandle::init() else {
         // At this point, the logger is not yet initialized.
         return BAD_CONFIG_ERR_CODE;

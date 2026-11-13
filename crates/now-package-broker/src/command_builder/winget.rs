@@ -75,6 +75,10 @@ pub fn build_winget_command(request: &PackageRequest) -> anyhow::Result<Vec<Stri
     // `--no-upgrade` only applies to install (skip if a version is already present).
     if matches!(request.operation, Operation::Install) {
         set_if_true(&mut command, "--no-upgrade", request.options.no_upgrade);
+
+        // Without --force, winget converts an install of an installed package into an upgrade
+        // and rejects a lower pinned version (0x8A15002B), so downgrades never apply.
+        set_if_true(&mut command, "--force", request.package.version.is_some());
     }
 
     // `--uninstall-previous` applies to upgrade (remove the previous version).

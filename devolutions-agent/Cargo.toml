@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 agent-channel-client = { path = "../crates/agent-channel-client" }
+agent-channel-proto = { path = "../crates/agent-channel-proto" }
 agent-identity = { path = "../crates/agent-identity" }
 agent-sysevent-codes = { path = "../crates/agent-sysevent-codes" }
 device-key = { path = "../crates/device-key" }
@@ -87,7 +88,9 @@ aws-lc-rs = "1.15"
 time = { version = "0.3", features = ["local-offset", "macros", "parsing"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 notify-debouncer-mini = "0.6"
+chrono = "0.4"
 now-package-broker = { path = "../crates/now-package-broker" }
+now-policy-api = "0.7"
 sysevent-winevent = { path = "../crates/sysevent-winevent" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 rustls-platform-verifier = "0.7"

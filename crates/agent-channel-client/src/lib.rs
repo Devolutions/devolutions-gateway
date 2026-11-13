@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use agent_channel_proto::{AgentMessage, DeviceManagementReport, agent_message};
 use device_key::DeviceKey;
 use http_client_proxy::ProxyConfig;
 use rustls::pki_types::CertificateDer;
@@ -80,13 +81,15 @@ pub struct HelloFields {
     pub metadata: HashMap<String, String>,
     /// The stored `config.revision`, sent as `applied_state_versions["config"]`.
     pub config_revision: u64,
+    /// The optional features the agent supports, sent as `capabilities`.
+    pub capabilities: Vec<String>,
 }
 
 /// What a channel reports to its caller.
 ///
 /// Each `id` an event carries is a lowercase hyphenated UUID: the channel closes a stream on a message whose `id` is
 /// not.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// The authority answered the `Hello` with `Welcome`: the stream is authenticated.
     Authenticated,
@@ -100,6 +103,11 @@ pub enum Event {
     Reconnect { id: String, reason: String },
     /// A newer effective config, as a JSON object; the caller acknowledges `id`.
     ConfigUpdate { id: String, config_json: String },
+    /// A device-management request; the caller answers through a [`Reporter`] with `id` as the correlation id.
+    DeviceManagement {
+        id: String,
+        request: agent_channel_proto::DeviceManagementRequest,
+    },
     /// The stream closed or its opening failed.
     ///
     /// The channel opens a new stream after `reopen_after`; without one, the channel has stopped.
@@ -117,6 +125,27 @@ pub struct Channel {
     events: mpsc::Receiver<Event>,
     /// Dropping it tells the stream task to stop.
     acks: mpsc::UnboundedSender<String>,
+    reports: Reporter,
+}
+
+/// Queues device-management reports on a [`Channel`].
+///
+/// Reports wait for an authenticated stream, and a reopened stream sends those queued before; the reports still
+/// queued when the channel stops are lost.
+#[derive(Clone)]
+pub struct Reporter {
+    sender: mpsc::UnboundedSender<AgentMessage>,
+}
+
+impl Reporter {
+    /// Queues `report`, which answers the authority's message `correlation_id`.
+    pub fn send(&self, correlation_id: Option<String>, report: DeviceManagementReport) {
+        let _ = self.sender.send(AgentMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            correlation_id,
+            payload: Some(agent_message::Payload::DeviceManagement(report)),
+        });
+    }
 }
 
 impl ChannelClient {
@@ -142,13 +171,19 @@ impl ChannelClient {
         transport::endpoint(&target.url)?;
         let (event_sender, events) = mpsc::channel(16);
         let (acks, ack_receiver) = mpsc::unbounded_channel();
+        let (report_sender, report_receiver) = mpsc::unbounded_channel();
         tokio::spawn(stream::run(
             Arc::clone(&self.shared),
             target,
             event_sender,
             ack_receiver,
+            report_receiver,
         ));
-        Ok(Channel { events, acks })
+        Ok(Channel {
+            events,
+            acks,
+            reports: Reporter { sender: report_sender },
+        })
     }
 }
 
@@ -166,6 +201,11 @@ impl Channel {
     /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
     pub fn ack(&self, correlation_id: &str) {
         let _ = self.acks.send(correlation_id.to_owned());
+    }
+
+    /// Returns a handle that queues device-management reports on this channel.
+    pub fn reporter(&self) -> Reporter {
+        self.reports.clone()
     }
 }
 

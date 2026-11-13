@@ -15,6 +15,7 @@ message AgentMessage {
   oneof payload {
     Hello hello = 10;
     Ack ack = 11;
+    DeviceManagementReport device_management = 12;
   }
 }
 
@@ -28,6 +29,7 @@ message ServerMessage {
     Reconnect reconnect = 13;
     Challenge challenge = 14;
     ConfigUpdate config_update = 15;
+    DeviceManagementRequest device_management = 16;
   }
 }
 
@@ -62,4 +64,97 @@ message RenewRequested {
 
 message Reconnect {
   string reason = 1;
+}
+
+// Device management. The authority sends these requests only to an agent whose Hello lists the
+// "device_management" capability. The agent answers on the same channel; each report carries the
+// request message id as its correlation_id.
+message DeviceManagementRequest {
+  oneof request {
+    SyncInventory sync_inventory = 1;
+    PackageOperationRequest package_operation = 2;
+    CatalogSync catalog_sync = 3;
+  }
+}
+
+message DeviceManagementReport {
+  oneof report {
+    InventoryReport inventory = 1;
+    PackageOperationResult package_operation_result = 2;
+    CatalogSyncResult catalog_sync_result = 3;
+  }
+}
+
+message SyncInventory {}
+
+// One part of an inventory. The agent splits an inventory so that each envelope stays under the
+// envelope limit. All parts of one inventory share report_id, and the last part has last = true.
+// The first part carries the managers and sources. A complete inventory replaces the previous one.
+message InventoryReport {
+  string report_id = 1;
+  bool last = 2;
+  repeated InstalledPackage packages = 3;
+  repeated PackageManager managers = 4;
+  repeated PackageSource sources = 5;
+}
+
+message InstalledPackage {
+  string manager = 1;
+  string source = 2;
+  string id = 3;
+  string name = 4;
+  string version = 5;
+  // Newer version reported by the package manager. Empty when the package is up to date.
+  string available_version = 6;
+}
+
+message PackageManager {
+  string name = 1;
+  bool installed = 2;
+  bool enabled = 3;
+  string version = 4;
+}
+
+message PackageSource {
+  string manager = 1;
+  string name = 2;
+  string url = 3;
+}
+
+enum PackageOperationType {
+  PACKAGE_OPERATION_TYPE_INSTALL = 0;
+  PACKAGE_OPERATION_TYPE_UPDATE = 1;
+  PACKAGE_OPERATION_TYPE_UNINSTALL = 2;
+}
+
+// Installs, updates or uninstalls one package through the agent's package broker.
+// An empty version means the latest version.
+message PackageOperationRequest {
+  string operation_id = 1;
+  PackageOperationType type = 2;
+  string manager = 3;
+  string source = 4;
+  string package_id = 5;
+  string version = 6;
+}
+
+// Answer to PackageOperationRequest. Error is set when success is false.
+message PackageOperationResult {
+  string operation_id = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+message CatalogSync {
+  int64 revision = 1;
+  oneof content {
+    string document = 2;
+    bool delete = 3;
+  }
+}
+
+message CatalogSyncResult {
+  int64 revision = 1;
+  bool ok = 2;
+  string error = 3;
 }

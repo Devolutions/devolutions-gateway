@@ -235,7 +235,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                 policy_path: conf.package_broker.policy_path.clone(),
                 skip_signature_validation: conf.debug.skip_broker_signature_validation,
             };
-            tasks.register(BrokerTask::new(broker_config));
+            let broker = BrokerTask::new(broker_config);
+            devolutions_agent::device_management::set_broker(broker.state());
+            tasks.register(broker);
         }
 
         if conf.session.enabled {
