@@ -37,12 +37,28 @@ impl Default for BrokerTaskConfig {
 }
 
 pub struct BrokerTask {
-    config: BrokerTaskConfig,
+    state: Arc<BrokerState>,
 }
 
 impl BrokerTask {
     pub fn new(config: BrokerTaskConfig) -> Self {
-        Self { config }
+        let policy_store = PolicyStore::load(config.policy_path.map(std::path::PathBuf::from));
+        let executor: Arc<dyn CommandExecutor> = executor::create_platform_executor().into();
+        let state = Arc::new(BrokerState {
+            policy_store,
+            executor,
+            pipe_name: config.pipe_name,
+            tracker: crate::operation_tracker::OperationTracker::new(),
+            skip_signature_validation: config.skip_signature_validation,
+            manager_probe_cache: Default::default(),
+        });
+        Self { state }
+    }
+
+    /// Returns the broker state, through which an in-process caller submits requests with
+    /// [`BrokerState::execute`] while the task runs.
+    pub fn state(&self) -> Arc<BrokerState> {
+        Arc::clone(&self.state)
     }
 }
 
@@ -53,19 +69,8 @@ impl Task for BrokerTask {
     const NAME: &'static str = "package-broker";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
-        let policy_store = PolicyStore::load(self.config.policy_path.clone().map(std::path::PathBuf::from));
-        let watcher = PolicyWatcher::new(Arc::clone(&policy_store));
-
-        let executor: Arc<dyn CommandExecutor> = executor::create_platform_executor().into();
-
-        let state = Arc::new(BrokerState {
-            policy_store,
-            executor,
-            pipe_name: self.config.pipe_name.clone(),
-            tracker: crate::operation_tracker::OperationTracker::new(),
-            skip_signature_validation: self.config.skip_signature_validation,
-            manager_probe_cache: Default::default(),
-        });
+        let state = self.state;
+        let watcher = PolicyWatcher::new(Arc::clone(&state.policy_store));
 
         // Bridge the agent's ShutdownSignal to the cancellation token used by subsystems.
         let shutdown = CancellationToken::new();

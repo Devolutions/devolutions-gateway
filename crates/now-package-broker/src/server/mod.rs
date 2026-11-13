@@ -611,7 +611,11 @@ impl BrokerState {
         })
     }
 
-    async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
+    /// Evaluates `request` against the policy and, when it allows it, starts the operation for the user `user_sid`.
+    ///
+    /// The pipe server calls it after authenticating the client; an in-process caller supplies the user itself.
+    /// Follow the operation with `tracker`.
+    pub async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
