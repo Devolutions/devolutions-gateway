@@ -189,9 +189,34 @@
         }
     }
 
+    # The service creates the identity drop box when it starts, and enrollment needs it.
+    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if (-not $service) {
+        Stop-Install "the $ServiceName service is missing."
+    }
+
+    if ($service.Status -ne 'Running') {
+        Start-Service -Name $ServiceName
+        $service.WaitForStatus('Running', '00:00:30')
+    }
+
     Write-Host 'Enrolling the device...'
-    $token.Trim() | & $agentExe identity enroll - | Out-Null
-    $enrollExitCode = $LASTEXITCODE
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    do {
+        # Windows PowerShell turns native stderr into a terminating error when the preference is Stop.
+        $ErrorActionPreference = 'Continue'
+        $enrollOutput = $token.Trim() | & $agentExe identity enroll - 2>&1
+        $enrollExitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        $notReady = $enrollExitCode -ne 0 -and ($enrollOutput | Out-String) -match 'has not prepared the enrollment directory'
+        if ($notReady) {
+            Start-Sleep -Seconds 2
+        }
+    } while ($notReady -and [DateTime]::UtcNow -lt $deadline)
+
+    if ($enrollExitCode -ne 0) {
+        $enrollOutput | ForEach-Object { Write-Host $_ }
+    }
     $token = $null
     Remove-Item Env:\DEVOLUTIONS_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
     if ($enrollExitCode -ne 0) {
