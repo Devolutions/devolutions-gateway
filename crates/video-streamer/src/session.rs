@@ -103,6 +103,9 @@ impl Default for SessionConfig {
 /// WebSocket subprotocol a client offers to get [`ShadowProtocolVersion::V2`].
 pub const SHADOW_PROTOCOL_V2: &str = "jrec-shadow.v2";
 
+/// WebSocket subprotocol a client offers to get [`ShadowProtocolVersion::V3`].
+pub const SHADOW_PROTOCOL_V3: &str = "jrec-shadow.v3";
+
 /// Shadow wire protocol version negotiated for one session stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShadowProtocolVersion {
@@ -112,6 +115,12 @@ pub enum ShadowProtocolVersion {
     V1,
     /// The session stream carries every output segment, and `SegmentStarted` announces each one after the first.
     V2,
+    /// Same messages as [`ShadowProtocolVersion::V2`], plus `PullOrKeyFrame`.
+    ///
+    /// Some players, like Media Foundation, only show a stream once a large block of it has arrived, which a still
+    /// screen never sends. `PullOrKeyFrame` lets such a player get a key frame of the current picture instead of
+    /// waiting, within a byte budget per viewer.
+    V3,
 }
 
 /// Converts a recording session into independent VP8 WebM segments over one pull-driven stream.
