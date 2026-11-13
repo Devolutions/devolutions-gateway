@@ -390,6 +390,24 @@ impl PipeClient {
     }
 }
 
+/// Looks up the token user of the process on the other end of a connected pipe instance.
+///
+/// This lookup is cheap, so per-user admission can run before [`PipeClient::from_connected_pipe`]
+/// performs the full identity capture.
+pub(crate) fn connected_pipe_client_user_sid(server: &NamedPipeServer) -> anyhow::Result<Sid> {
+    let process_id = connected_pipe_client_process_id(server).context("failed to query pipe client process id")?;
+    let process = Process::get_by_pid(process_id, PROCESS_QUERY_LIMITED_INFORMATION)
+        .with_context(|| format!("failed to open pipe client process {process_id}"))?;
+    let user_sid = process
+        .token(TOKEN_QUERY)
+        .with_context(|| format!("failed to open pipe client process {process_id} token"))?
+        .sid_and_attributes()
+        .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
+        .sid;
+
+    Ok(user_sid)
+}
+
 fn connected_pipe_client_process_id(server: &NamedPipeServer) -> anyhow::Result<u32> {
     use std::os::windows::io::AsRawHandle as _;
 

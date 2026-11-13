@@ -10,17 +10,17 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use windows::Win32::Foundation::GENERIC_ALL;
 use windows::Win32::Security;
 use windows::Win32::Security::Authorization::SET_ACCESS;
-use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA};
 
-use crate::auth::PipeClient;
-use crate::server::{BrokerState, build_router_for_client, serve_connection};
+use crate::auth::{PipeClient, connected_pipe_client_user_sid};
+use crate::server::{BrokerState, build_busy_router, build_router_for_client, serve_connection};
 
 /// Default pipe name for the package broker.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
@@ -29,9 +29,22 @@ pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1"
 ///
 /// Connection setup performs unauthenticated work (client process identity lookups)
 /// before any signature gate, so a connection flood could otherwise trigger unbounded
-/// work and task spawning. While all slots are taken, no pipe instance is listening, so
-/// further clients see the pipe as busy and can wait until a slot frees up.
+/// work and task spawning. While all slots are taken, further clients receive a busy
+/// reply, so a server instance keeps listening on the pipe name.
 const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
+/// Maximum number of concurrently served connections per client user.
+///
+/// Keeps a single user from holding every connection slot.
+const MAX_CONCURRENT_CONNECTIONS_PER_USER: usize = 4;
+
+/// Maximum number of concurrent busy replies to clients over the connection limit.
+///
+/// Beyond this, further clients are disconnected without a reply.
+const MAX_CONCURRENT_BUSY_REPLIES: usize = 16;
+
+/// Deadline for sending a busy reply, from accept to response completion.
+const BUSY_REPLY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Consecutive connect failures tolerated before the accept loop backs off.
 const CONNECT_FAILURES_BEFORE_BACKOFF: u32 = 3;
@@ -40,10 +53,11 @@ const CONNECT_FAILURES_BEFORE_BACKOFF: u32 = 3;
 const CONNECT_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(10);
 const CONNECT_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Minimum interval between two connect failure log entries.
-const CONNECT_FAILURE_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// Minimum interval between two entries of a repeated warning or error log, such as connect
+/// failures or rejected connections.
+const REPEATED_LOG_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Initial delay before retrying after a pipe instance could not be created.
+/// Initial delay before retrying after a pipe instance could not be created or recycled.
 const INSTANCE_RETRY_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Maximum delay between pipe instance retries.
@@ -92,18 +106,36 @@ async fn accept_connections(
     let pipe_name = state.pipe_name.clone();
     info!(%pipe_name, "Starting named pipe server");
 
+    let busy_replies = Arc::new(Semaphore::new(MAX_CONCURRENT_BUSY_REPLIES));
+    let admission = Arc::new(UserAdmission::new(
+        MAX_CONCURRENT_CONNECTIONS_PER_USER,
+        Arc::clone(&busy_replies),
+    ));
+
     accept_loop(
         &pipe_name,
         shutdown,
-        MAX_CONCURRENT_CONNECTIONS,
+        AcceptLimits {
+            max_connections: MAX_CONCURRENT_CONNECTIONS,
+            busy_replies,
+        },
         &create_pipe_instance,
         RetryDelay::default(),
-        |server, permit| {
+        |server, accepted| {
             // Reap the connections that already finished, so completed tasks do not accumulate here
             // for the lifetime of the process.
             while connections.try_join_next().is_some() {}
 
+            let permit = match accepted {
+                Admission::Serve(permit) => permit,
+                Admission::Busy(permit) => {
+                    connections.spawn(send_busy_reply(server, permit));
+                    return;
+                }
+            };
+
             let state = Arc::clone(state);
+            let admission = Arc::clone(&admission);
             let connection_deadline = tokio::time::Instant::now() + CONNECTION_DEADLINE;
             connections.spawn(async move {
                 // Serving this connection can commit a policy and record its terminal
@@ -111,33 +143,18 @@ async fn accept_connections(
                 // lease keeps the recorder from closing the queue under that event.
                 let _audit_lease = crate::audit::AuditLease::acquire();
 
-                let serve = async move {
-                    // Keep blocking unauthenticated capture off the accept loop and
-                    // retain the connection slot until the work actually completes.
-                    let capture = spawn_bounded_capture(permit, move || {
-                        let client = PipeClient::from_connected_pipe(&server);
-                        (server, client)
-                    });
-                    let (_permit, server, client) = match capture.await {
-                        Ok((permit, (server, Ok(client)))) => (permit, server, client),
-                        Ok((_permit, (_server, Err(error)))) => {
-                            warn!(error = format!("{error:#}"), "Rejected named pipe client");
-                            return;
-                        }
-                        Err(error) => {
-                            error!(
-                                error = format!("{error:#}"),
-                                "Named pipe client identity capture task failed"
-                            );
-                            return;
-                        }
-                    };
-
-                    info!("Client connected to named pipe");
-                    let router = build_router_for_client(state, client);
-                    serve_connection(server, router).await;
-                    info!("Client disconnected from named pipe");
-                };
+                let serve = admission.serve(
+                    server,
+                    permit,
+                    PipeClient::from_connected_pipe,
+                    PipeClient::user_sid,
+                    |server, client| async move {
+                        info!("Client connected to named pipe");
+                        let router = build_router_for_client(state, client);
+                        serve_connection(server, router).await;
+                        info!("Client disconnected from named pipe");
+                    },
+                );
 
                 // Enforce a deadline so idle or slow clients cannot pin
                 // a connection slot indefinitely.
@@ -154,57 +171,108 @@ async fn accept_connections(
     Ok(())
 }
 
+/// Concurrency limits applied by [`accept_loop`].
+struct AcceptLimits {
+    /// Connections served concurrently.
+    max_connections: usize,
+    /// Slots for busy replies to clients over a connection limit, shared with the per-user limit.
+    busy_replies: Arc<Semaphore>,
+}
+
+/// Answer a client over a connection limit with a busy reply, holding a busy reply slot.
+async fn send_busy_reply(server: NamedPipeServer, permit: OwnedSemaphorePermit) {
+    let _permit = permit;
+    if tokio::time::timeout(BUSY_REPLY_DEADLINE, serve_connection(server, build_busy_router()))
+        .await
+        .is_err()
+    {
+        debug!("Closed named pipe busy reply: deadline exceeded");
+    }
+}
+
+/// How a connected client handed off by [`accept_loop`] must be handled.
+enum Admission {
+    /// Serve the client, holding a connection slot.
+    Serve(OwnedSemaphorePermit),
+    /// Send the client a busy reply, holding a busy reply slot.
+    Busy(OwnedSemaphorePermit),
+}
+
 /// Accept clients on `pipe_name` until `shutdown` is cancelled, handing each one to `dispatch`.
 ///
-/// A pipe instance is only exposed while a connection slot is free, so clients arriving while
-/// all slots are taken see the pipe as busy and can wait for an instance to become available.
-/// Instance creation failures are retried with backoff instead of ending the loop, and repeated
-/// connect failures are rate-limited in the log and slowed down with backoff.
+/// The pipe name always keeps a listening server instance owned by this loop.
+/// Two instances listen at once, so that a client can connect while the other one is
+/// handed off: the remaining instance keeps listening and a new spare is created right
+/// after the handoff. A burst of more simultaneous clients than listening instances can
+/// still briefly see `ERROR_PIPE_BUSY`, which clients wait out with `WaitNamedPipeW`,
+/// as `NamedPipeClientStream.Connect` does.
+/// A client that cannot be handed off is disconnected so that its instance listens again.
+/// Clients over the connection limit are handed off for a busy reply while busy reply
+/// slots remain. Instance failures are retried with backoff instead of ending the loop.
+/// While a failed spare creation is backing off, the loop keeps listening and disconnects
+/// the clients that arrive in the meantime. Repeated connect failures and rejections are
+/// rate-limited in the log, and connect failures are slowed down with backoff.
 async fn accept_loop(
     pipe_name: &str,
     shutdown: &CancellationToken,
-    max_connections: usize,
+    limits: AcceptLimits,
     create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
     mut retry: RetryDelay,
-    mut dispatch: impl FnMut(NamedPipeServer, OwnedSemaphorePermit),
+    mut dispatch: impl FnMut(NamedPipeServer, Admission),
 ) {
-    let connection_permits = Arc::new(Semaphore::new(max_connections));
+    let connection_permits = Arc::new(Semaphore::new(limits.max_connections));
+    let busy_permits = limits.busy_replies;
     let mut connect_failures = ConnectFailures::default();
+    let mut busy_log = LogRateLimit::default();
+    let mut rejection_log = LogRateLimit::default();
+
     // The first instance claims the pipe name, so it alone is created with `first_pipe_instance`.
-    let mut first_instance = true;
-
-    loop {
-        // Wait for a free connection slot before exposing a new pipe instance.
-        let permit = tokio::select! {
-            permit = Arc::clone(&connection_permits).acquire_owned() => {
-                permit.expect("the semaphore is never closed")
-            }
-            () = shutdown.cancelled() => return,
-        };
-
-        let server = match create_instance(pipe_name, first_instance) {
-            Ok(server) => server,
+    let mut server = loop {
+        match create_instance(pipe_name, true) {
+            Ok(server) => break server,
             Err(error) => {
                 error!(
                     error = format!("{error:#}"),
                     %pipe_name,
-                    first_instance,
-                    "Failed to create a named pipe instance; retrying"
+                    "Failed to create the first named pipe instance; retrying"
                 );
-                drop(permit);
                 if !retry.wait(shutdown).await {
                     return;
                 }
+            }
+        }
+    };
+    retry.reset();
+    let mut spare = SpareInstance::default();
+    spare.replenish(pipe_name, create_instance, &mut retry);
+
+    loop {
+        let spare_retry_at = spare.retry_at;
+        let (spare_connected, result) = tokio::select! {
+            result = server.connect() => (false, result),
+            result = async {
+                match spare.instance.as_ref() {
+                    Some(instance) => instance.connect().await,
+                    None => std::future::pending().await,
+                }
+            } => (true, result),
+            () = async move {
+                match spare_retry_at {
+                    Some(retry_at) => tokio::time::sleep_until(retry_at).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                spare.replenish(pipe_name, create_instance, &mut retry);
                 continue;
             }
+            _ = shutdown.cancelled() => return,
         };
-        retry.reset();
-        first_instance = false;
-
-        let result = tokio::select! {
-            result = server.connect() => result,
-            () = shutdown.cancelled() => return,
-        };
+        if spare_connected {
+            // Continue with the connected instance as `server`, and the other one as the listening spare.
+            if let Some(instance) = spare.instance.as_mut() {
+                std::mem::swap(&mut server, instance);
+            }
+        }
 
         if let Err(error) = result {
             let action = connect_failures.record(std::time::Instant::now());
@@ -217,8 +285,11 @@ async fn accept_loop(
                 ),
                 None => {}
             }
-            drop(server);
-            drop(permit);
+            if !recycle_instance(pipe_name, &mut server, &mut spare, &mut retry, create_instance)
+                && !retry.wait(shutdown).await
+            {
+                return;
+            }
             if let Some(delay) = action.delay {
                 tokio::select! {
                     () = tokio::time::sleep(delay) => {}
@@ -234,7 +305,93 @@ async fn accept_loop(
             );
         }
 
-        dispatch(server, permit);
+        let admission = match Arc::clone(&connection_permits).try_acquire_owned() {
+            Ok(permit) => Admission::Serve(permit),
+            Err(_) => match Arc::clone(&busy_permits).try_acquire_owned() {
+                Ok(permit) => {
+                    if let Some(suppressed) = busy_log.record(std::time::Instant::now()) {
+                        warn!(
+                            suppressed,
+                            "Replying busy to named pipe client: too many concurrent connections"
+                        );
+                    }
+                    Admission::Busy(permit)
+                }
+                Err(_) => {
+                    if let Some(suppressed) = rejection_log.record(std::time::Instant::now()) {
+                        warn!(
+                            suppressed,
+                            "Rejected named pipe client: too many concurrent connections and busy replies"
+                        );
+                    }
+                    if !recycle_instance(pipe_name, &mut server, &mut spare, &mut retry, create_instance)
+                        && !retry.wait(shutdown).await
+                    {
+                        return;
+                    }
+                    continue;
+                }
+            },
+        };
+
+        if spare
+            .retry_at
+            .is_some_and(|retry_at| tokio::time::Instant::now() >= retry_at)
+        {
+            spare.replenish(pipe_name, create_instance, &mut retry);
+        }
+        let Some(next) = spare.instance.take() else {
+            if let Some(suppressed) = rejection_log.record(std::time::Instant::now()) {
+                warn!(
+                    suppressed,
+                    "Rejected named pipe client: waiting to retry the spare named pipe instance"
+                );
+            }
+            drop(admission);
+            if !recycle_instance(pipe_name, &mut server, &mut spare, &mut retry, create_instance)
+                && !retry.wait(shutdown).await
+            {
+                return;
+            }
+            continue;
+        };
+
+        // The spare keeps listening, so the connected instance can be handed off.
+        dispatch(std::mem::replace(&mut server, next), admission);
+        spare.replenish(pipe_name, create_instance, &mut retry);
+    }
+}
+
+/// A second listening pipe instance, so that clients can connect while another one is handed off.
+#[derive(Default)]
+struct SpareInstance {
+    instance: Option<NamedPipeServer>,
+    /// When to retry creating the spare after a failure, if it is missing.
+    retry_at: Option<tokio::time::Instant>,
+}
+
+impl SpareInstance {
+    /// Create the spare instance, or schedule another attempt with backoff.
+    fn replenish(
+        &mut self,
+        pipe_name: &str,
+        create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+        retry: &mut RetryDelay,
+    ) {
+        match create_instance(pipe_name, false) {
+            Ok(instance) => {
+                self.instance = Some(instance);
+                self.retry_at = None;
+                retry.reset();
+            }
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Failed to create a spare named pipe instance; retrying"
+                );
+                self.retry_at = Some(tokio::time::Instant::now() + retry.advance());
+            }
+        }
     }
 }
 
@@ -250,8 +407,7 @@ struct ConnectFailureAction {
 /// Tracks consecutive connect failures to rate-limit their logs and slow the loop down.
 struct ConnectFailures {
     consecutive: u32,
-    suppressed: u64,
-    last_report: Option<std::time::Instant>,
+    log: LogRateLimit,
     delay: RetryDelay,
 }
 
@@ -259,8 +415,7 @@ impl Default for ConnectFailures {
     fn default() -> Self {
         Self {
             consecutive: 0,
-            suppressed: 0,
-            last_report: None,
+            log: LogRateLimit::default(),
             delay: RetryDelay::new(CONNECT_RETRY_INITIAL_DELAY, CONNECT_RETRY_MAX_DELAY),
         }
     }
@@ -269,18 +424,7 @@ impl Default for ConnectFailures {
 impl ConnectFailures {
     fn record(&mut self, now: std::time::Instant) -> ConnectFailureAction {
         self.consecutive = self.consecutive.saturating_add(1);
-
-        let report = if self
-            .last_report
-            .is_none_or(|last| now.saturating_duration_since(last) >= CONNECT_FAILURE_REPORT_INTERVAL)
-        {
-            self.last_report = Some(now);
-            Some(std::mem::take(&mut self.suppressed))
-        } else {
-            self.suppressed += 1;
-            None
-        };
-
+        let report = self.log.record(now);
         let delay = (self.consecutive > CONNECT_FAILURES_BEFORE_BACKOFF).then(|| self.delay.advance());
 
         ConnectFailureAction { report, delay }
@@ -293,8 +437,228 @@ impl ConnectFailures {
         }
         self.consecutive = 0;
         self.delay.reset();
-        let suppressed = std::mem::take(&mut self.suppressed);
+        let suppressed = std::mem::take(&mut self.log.suppressed);
         (suppressed > 0).then_some(suppressed)
+    }
+}
+
+/// Limits a repeated log entry to one per `REPEATED_LOG_REPORT_INTERVAL`, counting the suppressed ones.
+#[derive(Default)]
+struct LogRateLimit {
+    suppressed: u64,
+    last_report: Option<std::time::Instant>,
+}
+
+impl LogRateLimit {
+    /// Record an occurrence. Returns the number of occurrences suppressed since the last report
+    /// when this one must be logged.
+    fn record(&mut self, now: std::time::Instant) -> Option<u64> {
+        if self
+            .last_report
+            .is_none_or(|last| now.saturating_duration_since(last) >= REPEATED_LOG_REPORT_INTERVAL)
+        {
+            self.last_report = Some(now);
+            Some(std::mem::take(&mut self.suppressed))
+        } else {
+            self.suppressed += 1;
+            None
+        }
+    }
+}
+
+/// Per-user count of concurrently served connections.
+struct UserConnectionSlots {
+    max_per_user: usize,
+    counts: parking_lot::Mutex<std::collections::HashMap<String, usize>>,
+}
+
+impl UserConnectionSlots {
+    fn new(max_per_user: usize) -> Self {
+        Self {
+            max_per_user,
+            counts: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Take a connection slot for `user_sid`, unless the user already holds all of theirs.
+    fn try_acquire(self: &Arc<Self>, user_sid: &Sid) -> Option<UserConnectionSlot> {
+        let key = user_sid.to_string();
+        let mut counts = self.counts.lock();
+        let count = counts.entry(key.clone()).or_insert(0);
+        if *count >= self.max_per_user {
+            return None;
+        }
+        *count += 1;
+
+        Some(UserConnectionSlot {
+            slots: Arc::clone(self),
+            key,
+        })
+    }
+}
+
+/// A connection slot held by one user, released on drop.
+struct UserConnectionSlot {
+    slots: Arc<UserConnectionSlots>,
+    key: String,
+}
+
+impl Drop for UserConnectionSlot {
+    fn drop(&mut self) {
+        let mut counts = self.slots.counts.lock();
+        if let Some(count) = counts.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// Per-user admission of the clients that hold a connection slot.
+struct UserAdmission {
+    user_slots: Arc<UserConnectionSlots>,
+    /// Slots for busy replies, shared with the connection limit of the accept loop.
+    busy_replies: Arc<Semaphore>,
+    rejections: parking_lot::Mutex<LogRateLimit>,
+}
+
+impl UserAdmission {
+    fn new(max_per_user: usize, busy_replies: Arc<Semaphore>) -> Self {
+        Self {
+            user_slots: Arc::new(UserConnectionSlots::new(max_per_user)),
+            busy_replies,
+            rejections: parking_lot::Mutex::new(LogRateLimit::default()),
+        }
+    }
+
+    /// Serve a connected client, or send it a busy reply when its user already holds all of their
+    /// connection slots.
+    ///
+    /// Blocking unauthenticated work stays off the async runtime and keeps the connection slots until
+    /// it actually completes. The client user is looked up first, so that the per-user limit applies
+    /// before the expensive identity `capture`, which must report the same user.
+    async fn serve<C, Fut>(
+        &self,
+        server: NamedPipeServer,
+        permit: OwnedSemaphorePermit,
+        capture: fn(&NamedPipeServer) -> anyhow::Result<C>,
+        client_user: fn(&C) -> &Sid,
+        serve: impl FnOnce(NamedPipeServer, C) -> Fut,
+    ) where
+        C: Send + 'static,
+        Fut: Future<Output = ()>,
+    {
+        let lookup = spawn_bounded_capture(permit, move || {
+            let user_sid = connected_pipe_client_user_sid(&server);
+            (server, user_sid)
+        });
+        let (permit, server, user_sid) = match lookup.await {
+            Ok((permit, (server, Ok(user_sid)))) => (permit, server, user_sid),
+            Ok((_permit, (_server, Err(error)))) => {
+                warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                return;
+            }
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Named pipe client user lookup task failed"
+                );
+                return;
+            }
+        };
+
+        let Some(user_slot) = self.user_slots.try_acquire(&user_sid) else {
+            // Release the connection slot so the busy reply cannot hold it for other users.
+            drop(permit);
+            let busy_permit = Arc::clone(&self.busy_replies).try_acquire_owned().ok();
+            let report = self.rejections.lock().record(std::time::Instant::now());
+            if let Some(suppressed) = report {
+                if busy_permit.is_some() {
+                    warn!(
+                        %user_sid,
+                        suppressed,
+                        "Replying busy to named pipe client: too many concurrent connections for the user"
+                    );
+                } else {
+                    warn!(
+                        %user_sid,
+                        suppressed,
+                        "Rejected named pipe client: too many concurrent connections for the user and busy replies"
+                    );
+                }
+            }
+            if let Some(busy_permit) = busy_permit {
+                send_busy_reply(server, busy_permit).await;
+            }
+            return;
+        };
+
+        let capture = spawn_bounded_capture((permit, user_slot), move || {
+            let client = capture(&server);
+            (server, client)
+        });
+        let (_slots, server, client) = match capture.await {
+            Ok((slots, (server, Ok(client)))) => (slots, server, client),
+            Ok((_slots, (_server, Err(error)))) => {
+                warn!(error = format!("{error:#}"), "Rejected named pipe client");
+                return;
+            }
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Named pipe client identity capture task failed"
+                );
+                return;
+            }
+        };
+        if *client_user(&client) != user_sid {
+            warn!(
+                %user_sid,
+                captured_user_sid = %client_user(&client),
+                "Rejected named pipe client: user changed while its identity was captured"
+            );
+            return;
+        }
+
+        serve(server, client).await;
+    }
+}
+
+/// Make `server` listen again after a client that is not served.
+///
+/// Disconnects the client and reuses the instance. If that fails, the instance is replaced
+/// by a new one created before the old one closes, or else by the spare, whose replacement
+/// is then retried with backoff. Returns `false` when none of these worked.
+fn recycle_instance(
+    pipe_name: &str,
+    server: &mut NamedPipeServer,
+    spare: &mut SpareInstance,
+    retry: &mut RetryDelay,
+    create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+) -> bool {
+    let Err(error) = server.disconnect() else {
+        return true;
+    };
+
+    warn!(%error, "Failed to disconnect named pipe instance; replacing it");
+    match create_instance(pipe_name, false) {
+        Ok(next) => {
+            *server = next;
+            true
+        }
+        Err(error) => {
+            error!(
+                error = format!("{error:#}"),
+                "Failed to create a replacement named pipe instance"
+            );
+            let Some(next) = spare.instance.take() else {
+                return false;
+            };
+            *server = next;
+            spare.retry_at = Some(tokio::time::Instant::now() + retry.advance());
+            true
+        }
     }
 }
 
@@ -381,12 +745,14 @@ async fn wait_for_connections(connections: &mut tokio::task::JoinSet<()>, grace:
     }
 }
 
-fn spawn_bounded_capture<T, F>(permit: OwnedSemaphorePermit, capture: F) -> JoinHandle<(OwnedSemaphorePermit, T)>
+/// Run blocking `capture` work while holding `slots`, which are released only once the work completes.
+fn spawn_bounded_capture<S, T, F>(slots: S, capture: F) -> JoinHandle<(S, T)>
 where
+    S: Send + 'static,
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || (permit, capture()))
+    tokio::task::spawn_blocking(move || (slots, capture()))
 }
 
 fn create_pipe_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result<NamedPipeServer> {
@@ -409,13 +775,15 @@ fn create_pipe_instance(pipe_name: &str, first_instance: bool) -> anyhow::Result
 
 /// Access granted to `BUILTIN\Users` on the broker pipe.
 ///
-/// Existing clients open the pipe with `GENERIC_READ | GENERIC_WRITE`, so both generic rights are granted.
-const PIPE_CLIENT_ACCESS: u32 = FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0;
+/// Clients need to read, write data, and set the pipe read mode through `FILE_WRITE_ATTRIBUTES`.
+/// `FILE_GENERIC_WRITE` is deliberately not granted because it includes `FILE_APPEND_DATA`,
+/// which for named pipes is `FILE_CREATE_PIPE_INSTANCE`.
+const PIPE_CLIENT_ACCESS: u32 = FILE_GENERIC_READ.0 | FILE_WRITE_DATA.0 | FILE_WRITE_ATTRIBUTES.0;
 
 /// Build a security descriptor that grants:
 /// - SYSTEM: full control
 /// - Administrators: full control
-/// - BUILTIN\Users: read + write (allows interactive users to connect)
+/// - BUILTIN\Users: client read and write access, without the right to create pipe instances
 fn build_pipe_security_attributes() -> anyhow::Result<win_api_wrappers::security::attributes::SecurityAttributes> {
     let users_sid = Sid::from_well_known(Security::WinBuiltinUsersSid, None).context("failed to create Users SID")?;
     let admins_sid = Sid::from_well_known(Security::WinBuiltinAdministratorsSid, None)
@@ -517,13 +885,13 @@ mod tests {
         .expect("create first pipe instance")
     }
 
-    /// Open a broker pipe client with `GENERIC_READ | FILE_WRITE_DATA`, as the Agent policy tester does.
+    /// Open a broker pipe client with the access the broker grants to standard users.
     fn open_client(pipe_name: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
         use std::os::windows::fs::OpenOptionsExt as _;
         use std::os::windows::io::IntoRawHandle as _;
 
         use windows::Win32::Foundation::GENERIC_READ;
-        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, FILE_WRITE_DATA, SECURITY_IDENTIFICATION};
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, SECURITY_IDENTIFICATION};
 
         let file = std::fs::OpenOptions::new()
             .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
@@ -555,7 +923,7 @@ mod tests {
         }
     }
 
-    type Dispatched = (NamedPipeServer, OwnedSemaphorePermit);
+    type Dispatched = (NamedPipeServer, Admission);
 
     /// Create an instance with the broker client ACE, plus full control for the current user
     /// so that a non-elevated test process can create additional instances like the service does.
@@ -573,25 +941,27 @@ mod tests {
         Ok(server)
     }
 
+    fn limits(max_connections: usize, max_busy_replies: usize) -> AcceptLimits {
+        AcceptLimits {
+            max_connections,
+            busy_replies: Arc::new(Semaphore::new(max_busy_replies)),
+        }
+    }
+
     fn spawn_accept_loop(
         pipe_name: &str,
-        max_connections: usize,
+        limits: AcceptLimits,
     ) -> (
         CancellationToken,
         tokio::sync::mpsc::UnboundedReceiver<Dispatched>,
         JoinHandle<()>,
     ) {
-        spawn_accept_loop_with(
-            pipe_name,
-            max_connections,
-            create_owned_test_instance,
-            RetryDelay::default(),
-        )
+        spawn_accept_loop_with(pipe_name, limits, create_owned_test_instance, RetryDelay::default())
     }
 
     fn spawn_accept_loop_with(
         pipe_name: &str,
-        max_connections: usize,
+        limits: AcceptLimits,
         create_instance: impl Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Send + Sync + 'static,
         retry: RetryDelay,
     ) -> (
@@ -608,11 +978,13 @@ mod tests {
                 accept_loop(
                     &pipe_name,
                     &shutdown,
-                    max_connections,
+                    limits,
                     &create_instance,
                     retry,
-                    move |server, permit| {
-                        dispatched_tx.send((server, permit)).expect("test holds the receiver");
+                    move |server, admission| {
+                        dispatched_tx
+                            .send((server, admission))
+                            .expect("test holds the receiver");
                     },
                 )
                 .await;
@@ -629,46 +1001,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn accept_loop_reports_busy_at_capacity_and_lets_waiting_clients_connect() {
-        use windows::Win32::Foundation::ERROR_PIPE_BUSY;
-        use windows::Win32::System::Pipes::WaitNamedPipeW;
-        use windows::core::PCWSTR;
+    async fn accept_loop_keeps_a_listening_instance_while_connections_are_held() {
+        use tokio::io::AsyncReadExt as _;
 
-        let pipe_name = unique_pipe_name("capacity");
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 2);
+        let pipe_name = unique_pipe_name("listen");
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(2, 1));
 
         let _first_client = open_client_when_listening(&pipe_name).await;
         let first = next_dispatched(&mut dispatched).await;
-        let _second_client = open_client_when_listening(&pipe_name).await;
-        let _second = next_dispatched(&mut dispatched).await;
+        assert!(matches!(first.1, Admission::Serve(_)));
 
-        // At capacity, no instance is listening, so clients see the pipe as busy.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let error = open_client(&pipe_name).expect_err("no instance listens while all slots are taken");
-        assert_eq!(error.raw_os_error(), Some(ERROR_PIPE_BUSY.0.cast_signed()));
-        assert!(dispatched.try_recv().is_err(), "no client is dispatched at capacity");
+        // The next instance exists before the connected one is handed off, so no wait is needed.
+        let _second_client = open_client(&pipe_name).expect("a listening instance follows each handoff");
+        let second = next_dispatched(&mut dispatched).await;
+        assert!(matches!(second.1, Admission::Serve(_)));
 
-        // A client waiting for an instance is released once a slot frees up.
-        let waiter = std::thread::spawn({
-            let pipe_name = widestring::U16CString::from_str(&pipe_name).expect("pipe name without NUL");
-            move || {
-                // SAFETY: `pipe_name` is a valid NUL-terminated UTF-16 string for the duration of the call.
-                unsafe { WaitNamedPipeW(PCWSTR(pipe_name.as_ptr()), 10_000) }.as_bool()
-            }
-        });
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Over the connection limit, the client is handed off for a busy reply.
+        let _busy_client = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
+        let busy = next_dispatched(&mut dispatched).await;
+        assert!(matches!(busy.1, Admission::Busy(_)));
+
+        // Over both limits, the client is accepted and disconnected, and the loop keeps listening.
+        let mut rejected = open_client(&pipe_name).expect("over-limit clients still find a listening instance");
+        let mut buffer = [0u8; 1];
+        let read = tokio::time::timeout(Duration::from_secs(10), rejected.read(&mut buffer))
+            .await
+            .expect("an over-limit client is disconnected promptly");
+        assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
         assert!(
-            !waiter.is_finished(),
-            "the waiting client blocks while the pipe is busy"
+            dispatched.try_recv().is_err(),
+            "an over-limit client must not be dispatched"
         );
 
         drop(first);
-        assert!(
-            tokio::task::spawn_blocking(move || waiter.join().expect("waiter thread"))
-                .await
-                .expect("join waiter"),
-            "the waiting client sees an available instance"
-        );
         let _third_client = open_client_when_listening(&pipe_name).await;
         let _third = next_dispatched(&mut dispatched).await;
 
@@ -680,34 +1045,103 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn accept_loop_retries_failed_instance_creation() {
+    async fn accept_loop_keeps_a_spare_instance_for_clients_arriving_during_a_handoff() {
         use std::sync::atomic::AtomicUsize;
 
-        let pipe_name = unique_pipe_name("retry-next");
-        let failed_attempts = Arc::new(AtomicUsize::new(0));
+        let pipe_name = unique_pipe_name("spare");
+        let created = Arc::new(AtomicUsize::new(0));
         let (shutdown, mut dispatched, task) = spawn_accept_loop_with(
             &pipe_name,
-            4,
+            limits(8, 0),
             {
-                let failed_attempts = Arc::clone(&failed_attempts);
+                let created = Arc::clone(&created);
                 move |pipe_name, first_instance| {
-                    if !first_instance && failed_attempts.fetch_add(1, Ordering::SeqCst) < 2 {
-                        anyhow::bail!("injected instance creation failure");
-                    }
-                    create_owned_test_instance(pipe_name, first_instance)
+                    let instance = create_owned_test_instance(pipe_name, first_instance)?;
+                    created.fetch_add(1, Ordering::SeqCst);
+                    Ok(instance)
                 }
             },
-            RetryDelay::new(Duration::from_millis(10), Duration::from_millis(10)),
+            RetryDelay::default(),
         );
 
-        let _first_client = open_client_when_listening(&pipe_name).await;
-        let _first = next_dispatched(&mut dispatched).await;
+        for round in 1..=2 {
+            // Wait until the listening instance and its spare both exist.
+            let expected = round * 2;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while created.load(Ordering::SeqCst) < expected {
+                assert!(
+                    Instant::now() < deadline,
+                    "the spare instance is created (round {round})"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
 
-        // The next instance fails twice, then the loop recovers instead of exiting.
-        let _second_client = open_client_when_listening(&pipe_name).await;
-        let _second = next_dispatched(&mut dispatched).await;
-        assert!(failed_attempts.load(Ordering::SeqCst) >= 3);
-        assert!(!task.is_finished(), "the accept loop keeps running");
+            // Two clients arriving at once both connect, without waiting for the loop to catch up.
+            let _first = open_client(&pipe_name).expect("the listening instance accepts a client");
+            let _second = open_client(&pipe_name).expect("the spare instance accepts a concurrent client");
+            next_dispatched(&mut dispatched).await;
+            next_dispatched(&mut dispatched).await;
+        }
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("the accept loop stops on shutdown")
+            .expect("the accept loop does not panic");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accept_loop_keeps_listening_while_spare_instance_creation_backs_off() {
+        use std::sync::atomic::AtomicUsize;
+
+        use tokio::io::AsyncReadExt as _;
+
+        let pipe_name = unique_pipe_name("backoff");
+        let spare_attempts = Arc::new(AtomicUsize::new(0));
+        let (shutdown, mut dispatched, task) = spawn_accept_loop_with(
+            &pipe_name,
+            limits(4, 4),
+            {
+                let spare_attempts = Arc::clone(&spare_attempts);
+                move |pipe_name, first_instance| {
+                    if first_instance {
+                        create_owned_test_instance(pipe_name, true)
+                    } else {
+                        spare_attempts.fetch_add(1, Ordering::SeqCst);
+                        anyhow::bail!("injected spare instance failure")
+                    }
+                }
+            },
+            // Long enough that every client below arrives during the backoff.
+            RetryDelay::new(Duration::from_secs(60), Duration::from_secs(60)),
+        );
+
+        for attempt in 0..3 {
+            // The instance must be listening again promptly, well before the retry delay ends.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut client = loop {
+                match open_client(&pipe_name) {
+                    Ok(client) => break client,
+                    Err(_) if Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(error) => panic!("no listening instance during backoff (attempt {attempt}): {error}"),
+                }
+            };
+            let mut buffer = [0u8; 1];
+            let read = tokio::time::timeout(Duration::from_secs(5), client.read(&mut buffer))
+                .await
+                .expect("the client is disconnected promptly");
+            assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
+        }
+
+        assert_eq!(
+            spare_attempts.load(Ordering::SeqCst),
+            1,
+            "spare instance creation is not retried before the delay elapses"
+        );
+        assert!(
+            dispatched.try_recv().is_err(),
+            "no client is dispatched without a spare instance"
+        );
 
         shutdown.cancel();
         tokio::time::timeout(Duration::from_secs(10), task)
@@ -719,7 +1153,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn accept_loop_survives_a_connect_and_close_storm() {
         let pipe_name = unique_pipe_name("storm");
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 64);
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(64, 0));
 
         drop(open_client_when_listening(&pipe_name).await);
         for _ in 0..50 {
@@ -732,7 +1166,7 @@ mod tests {
         let _client = open_client_when_listening(&pipe_name).await;
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            let (server, _permit) = next_dispatched(&mut dispatched).await;
+            let (server, _admission) = next_dispatched(&mut dispatched).await;
             drop(server);
             if dispatched.is_empty() {
                 break;
@@ -771,7 +1205,7 @@ mod tests {
             ]
         );
 
-        let later = failures.record(start + CONNECT_FAILURE_REPORT_INTERVAL);
+        let later = failures.record(start + REPEATED_LOG_REPORT_INTERVAL);
         assert_eq!(
             later.report,
             Some(5),
@@ -780,7 +1214,7 @@ mod tests {
 
         assert_eq!(failures.reset(), None, "everything was reported");
         assert_eq!(failures.reset(), None);
-        let after_reset = failures.record(start + CONNECT_FAILURE_REPORT_INTERVAL);
+        let after_reset = failures.record(start + REPEATED_LOG_REPORT_INTERVAL);
         assert_eq!(after_reset.delay, None, "backoff restarts after a success");
         assert_eq!(after_reset.report, None, "the log stays rate-limited across a success");
         assert_eq!(
@@ -788,6 +1222,195 @@ mod tests {
             Some(1),
             "unreported failures are summarized on recovery"
         );
+    }
+
+    #[test]
+    fn user_connection_slots_are_capped_per_user() {
+        let slots = Arc::new(UserConnectionSlots::new(2));
+        let alice = Sid::from_well_known(Security::WinLocalSystemSid, None).expect("SYSTEM SID");
+        let bob = Sid::from_well_known(Security::WinBuiltinUsersSid, None).expect("Users SID");
+
+        let first = slots.try_acquire(&alice).expect("first slot");
+        let _second = slots.try_acquire(&alice).expect("second slot");
+        assert!(slots.try_acquire(&alice).is_none(), "the per-user cap is enforced");
+        let _other = slots.try_acquire(&bob).expect("other users are not affected");
+
+        drop(first);
+        let _third = slots.try_acquire(&alice).expect("a released slot can be reused");
+    }
+
+    fn same_user(user_sid: &Sid) -> &Sid {
+        user_sid
+    }
+
+    /// Connect a client and admit it like the pipe server does, with the current user as the client user.
+    ///
+    /// A served client reports on `on_served`, then holds its connection until `release` grants a permit.
+    async fn connect_admitted(
+        pipe_name: &str,
+        admission: &Arc<UserAdmission>,
+        connection_permits: &Arc<Semaphore>,
+        on_served: tokio::sync::mpsc::UnboundedSender<()>,
+        release: Arc<Semaphore>,
+    ) -> (tokio::net::windows::named_pipe::NamedPipeClient, JoinHandle<()>) {
+        let server = create_owned_test_instance(pipe_name, false).expect("create pipe instance");
+        let client = open_client(pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+        let permit = Arc::clone(connection_permits)
+            .try_acquire_owned()
+            .expect("connection slot");
+
+        let admission = Arc::clone(admission);
+        let task = tokio::spawn(async move {
+            admission
+                .serve(
+                    server,
+                    permit,
+                    connected_pipe_client_user_sid,
+                    same_user,
+                    |server, _user_sid| async move {
+                        let _server = server;
+                        on_served.send(()).expect("the test holds the receiver");
+                        release.acquire().await.expect("release semaphore").forget();
+                    },
+                )
+                .await;
+        });
+
+        (client, task)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn user_admission_replies_busy_over_the_per_user_limit_and_reuses_released_slots() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        const MAX_PER_USER: usize = 2;
+        const MAX_CONNECTIONS: usize = 8;
+
+        let pipe_name = unique_pipe_name("admission");
+        let connection_permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let admission = Arc::new(UserAdmission::new(MAX_PER_USER, Arc::new(Semaphore::new(1))));
+        let (served_tx, mut served_rx) = tokio::sync::mpsc::unbounded_channel();
+        let release = Arc::new(Semaphore::new(0));
+        let next_served = async |served_rx: &mut tokio::sync::mpsc::UnboundedReceiver<()>| {
+            tokio::time::timeout(Duration::from_secs(10), served_rx.recv())
+                .await
+                .expect("the client is served")
+                .expect("a serving task reports");
+        };
+
+        let mut connections = Vec::new();
+        for _ in 0..MAX_PER_USER {
+            let (client, task) = connect_admitted(
+                &pipe_name,
+                &admission,
+                &connection_permits,
+                served_tx.clone(),
+                Arc::clone(&release),
+            )
+            .await;
+            next_served(&mut served_rx).await;
+            connections.push((client, task));
+        }
+
+        // The user already holds all of their slots, so the next client receives a busy reply.
+        let (mut busy_client, busy_task) = connect_admitted(
+            &pipe_name,
+            &admission,
+            &connection_permits,
+            served_tx.clone(),
+            Arc::clone(&release),
+        )
+        .await;
+        busy_client
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write request");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), busy_client.read_to_end(&mut response))
+            .await
+            .expect("the busy reply completes promptly")
+            .expect("read busy reply");
+        let response = String::from_utf8(response).expect("UTF-8 response");
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(
+            response.to_ascii_lowercase().contains("\r\nretry-after: 1\r\n"),
+            "{response}"
+        );
+        tokio::time::timeout(Duration::from_secs(10), busy_task)
+            .await
+            .expect("the busy reply task ends")
+            .expect("the busy reply task does not panic");
+        assert!(served_rx.try_recv().is_err(), "an over-limit client is not served");
+        assert_eq!(
+            connection_permits.available_permits(),
+            MAX_CONNECTIONS - MAX_PER_USER,
+            "a busy reply does not keep its connection slot"
+        );
+
+        // Once a served connection ends, its slot serves the next client of the same user.
+        release.add_permits(1);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !connections.iter().any(|(_client, task)| task.is_finished()) {
+            assert!(Instant::now() < deadline, "a released connection ends");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let (_client, _task) = connect_admitted(
+            &pipe_name,
+            &admission,
+            &connection_permits,
+            served_tx.clone(),
+            Arc::clone(&release),
+        )
+        .await;
+        next_served(&mut served_rx).await;
+
+        release.add_permits(MAX_PER_USER);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn busy_reply_is_a_well_formed_service_unavailable_response() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let pipe_name = unique_pipe_name("busy");
+        let server = create_client_access_pipe(&pipe_name);
+        let mut client = open_client(&pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+        let serving = tokio::spawn(serve_connection(server, build_busy_router()));
+
+        client
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write request");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), client.read_to_end(&mut response))
+            .await
+            .expect("the busy reply completes promptly")
+            .expect("read busy reply");
+        let response = String::from_utf8(response).expect("UTF-8 response");
+
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(
+            response.to_ascii_lowercase().contains("\r\nretry-after: 1\r\n"),
+            "{response}"
+        );
+        let body = response.split_once("\r\n\r\n").expect("response body").1;
+        let error: now_policy_api::ErrorResponse = serde_json::from_str(body).expect("JSON error response");
+        assert_eq!(error.code, now_policy_api::ErrorCode::BrokerPaused);
+
+        serving.await.expect("serving task");
+    }
+
+    #[tokio::test]
+    async fn connected_client_user_is_looked_up_from_the_pipe() {
+        let pipe_name = unique_pipe_name("user");
+        let server = create_client_access_pipe(&pipe_name);
+        let _client = open_client(&pipe_name).expect("open client");
+        server.connect().await.expect("accept client");
+
+        let user_sid = connected_pipe_client_user_sid(&server).expect("look up the client user");
+
+        assert!(user_sid == current_user_sid());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -804,7 +1427,7 @@ mod tests {
             Duration::from_secs(10),
             crate::server::serve_connection_with_header_timeout(
                 server,
-                axum::Router::new(),
+                build_busy_router(),
                 Duration::from_millis(200),
             ),
         )
@@ -824,7 +1447,7 @@ mod tests {
             .create(&pipe_name)
             .expect("create the competing first instance");
 
-        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, 1);
+        let (shutdown, mut dispatched, task) = spawn_accept_loop(&pipe_name, limits(1, 0));
         tokio::time::sleep(INSTANCE_RETRY_INITIAL_DELAY * 3).await;
         assert!(!task.is_finished(), "a failed first instance must be retried");
         drop(squatter);
@@ -858,6 +1481,29 @@ mod tests {
         assert_eq!(retry.next, INSTANCE_RETRY_INITIAL_DELAY);
     }
 
+    #[test]
+    fn pipe_client_access_never_includes_pipe_instance_creation() {
+        use windows::Win32::Storage::FileSystem::{FILE_APPEND_DATA, FILE_CREATE_PIPE_INSTANCE, FILE_GENERIC_WRITE};
+
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_CREATE_PIPE_INSTANCE.0, 0);
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_APPEND_DATA.0, 0);
+        assert_ne!(PIPE_CLIENT_ACCESS & FILE_GENERIC_WRITE.0, FILE_GENERIC_WRITE.0);
+    }
+
+    #[tokio::test]
+    async fn client_access_cannot_create_additional_pipe_instances() {
+        let pipe_name = unique_pipe_name("instance");
+        let _server = create_client_access_pipe(&pipe_name);
+
+        let error = ServerOptions::new()
+            .create(&pipe_name)
+            .expect_err("client access must not allow creating another pipe instance");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0.cast_signed())
+        );
+    }
+
     #[tokio::test]
     async fn client_access_allows_read_and_write_data_clients() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -880,28 +1526,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_access_allows_generic_read_write_clients() {
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    async fn client_access_rejects_generic_write_clients() {
         use tokio::net::windows::named_pipe::ClientOptions;
 
-        // The pipe grants only the client entry to the current user, so this holds for non-administrators.
         let pipe_name = unique_pipe_name("generic");
-        let mut server = create_client_access_pipe(&pipe_name);
+        let _server = create_client_access_pipe(&pipe_name);
 
-        let mut client = ClientOptions::new()
+        let error = ClientOptions::new()
             .open(&pipe_name)
-            .expect("open the pipe with GENERIC_READ | GENERIC_WRITE");
-        server.connect().await.expect("accept the client");
-
-        client.write_all(b"ping").await.expect("client write");
-        let mut request = [0u8; 4];
-        server.read_exact(&mut request).await.expect("server read");
-        assert_eq!(&request, b"ping");
-
-        server.write_all(b"pong").await.expect("server write");
-        let mut response = [0u8; 4];
-        client.read_exact(&mut response).await.expect("client read");
-        assert_eq!(&response, b"pong");
+            .expect_err("GENERIC_WRITE requests FILE_CREATE_PIPE_INSTANCE, which clients are not granted");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(windows::Win32::Foundation::ERROR_ACCESS_DENIED.0.cast_signed())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
