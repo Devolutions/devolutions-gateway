@@ -3,7 +3,6 @@ use std::time::Duration;
 use anyhow::Context;
 use devolutions_agent::AgentServiceEvent;
 use devolutions_agent::config::ConfHandle;
-use devolutions_agent::device_management::DeviceManagementTask;
 use devolutions_agent::identity::IdentityTask;
 use devolutions_agent::log::AgentLog;
 use devolutions_agent::psu_agent::PsuAgentTask;
@@ -236,7 +235,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                 policy_path: conf.package_broker.policy_path.clone(),
                 skip_signature_validation: conf.debug.skip_broker_signature_validation,
             };
-            tasks.register(BrokerTask::new(broker_config));
+            let broker = BrokerTask::new(broker_config);
+            devolutions_agent::device_management::set_broker(broker.state());
+            tasks.register(broker);
         }
 
         if conf.session.enabled {
@@ -258,10 +259,6 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
 
     if conf.tunnel.is_enabled() {
         tasks.register(TunnelTask::new(conf_handle.clone()));
-    }
-
-    if conf.device_management.is_some() {
-        tasks.register(DeviceManagementTask::new(conf_handle.clone()));
     }
 
     if conf.psu_agent.is_some() {

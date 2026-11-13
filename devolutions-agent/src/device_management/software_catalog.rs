@@ -2,10 +2,9 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
+use agent_channel_proto::{CatalogSync, catalog_sync};
 use anyhow::{Context as _, bail};
 use uuid::Uuid;
-
-use super::protocol::{CatalogSync, catalog_sync};
 
 pub(super) fn apply(identity_id: Uuid, request: CatalogSync) -> anyhow::Result<()> {
     if request.revision <= 0 {

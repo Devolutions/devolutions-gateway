@@ -1,4 +1,4 @@
-using DevolutionsAgent.Helpers;
+﻿using DevolutionsAgent.Helpers;
 using DevolutionsAgent.Properties;
 using DevolutionsAgent.Resources;
 using Microsoft.Deployment.WindowsInstaller;
@@ -1147,9 +1147,7 @@ namespace DevolutionsAgent.Actions
                 }
             }
 
-            // Device management is part of the PEDM feature.
-            bool pedmEnabled = enabledFeatures.Contains(Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length));
-            return ToggleAgentFeature(session, "DeviceManagement", pedmEnabled);
+            return ActionResult.Success;
         }
 
         [CustomAction]

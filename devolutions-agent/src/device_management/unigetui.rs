@@ -1,5 +1,6 @@
-//! Reads packages, managers and sources from the UniGetUI IPC API running on this machine, and installs, updates and
-//! uninstalls packages through it.
+//! Reads packages, managers and sources from the UniGetUI IPC API running on this machine.
+//!
+//! The agent uses the IPC API only to read. It runs package operations through the package broker.
 //!
 //! UniGetUI writes one endpoint registration file per running session under
 //! `<local data>/UniGetUI/Configuration/IpcApiEndpoints` (`%LOCALAPPDATA%` on Windows, `~/.local/share` on Unix).
@@ -9,11 +10,10 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use agent_channel_proto::{InstalledPackage, PackageManager, PackageSource};
 use anyhow::{Context as _, bail};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-
-use super::protocol::{InstalledPackage, PackageManager, PackageSource};
 
 const INSTALLED_PACKAGES_PATH: &str = "/uniget/v1/packages/installed";
 const UPGRADABLE_PACKAGES_PATH: &str = "/uniget/v1/packages/updates";
@@ -21,52 +21,6 @@ const MANAGERS_PATH: &str = "/uniget/v1/managers";
 const SOURCES_PATH: &str = "/uniget/v1/sources";
 const DEFAULT_PIPE_NAME: &str = "UniGetUI.IPC";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-// UniGetUI answers a package operation only when the installer is finished.
-const OPERATION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-
-#[derive(Debug, Clone, Copy)]
-enum Method {
-    Get,
-    Post,
-}
-
-impl Method {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Get => "GET",
-            Self::Post => "POST",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum PackageOperation {
-    Install,
-    Update,
-    Uninstall,
-}
-
-impl PackageOperation {
-    fn path(self) -> &'static str {
-        match self {
-            Self::Install => "/uniget/v1/packages/install",
-            Self::Update => "/uniget/v1/packages/update",
-            Self::Uninstall => "/uniget/v1/packages/uninstall",
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IpcOperationResult {
-    #[serde(default)]
-    status: String,
-    #[serde(default)]
-    operation_status: String,
-    message: Option<String>,
-    #[serde(default)]
-    output: Vec<String>,
-}
 
 #[derive(Debug, Clone)]
 enum Transport {
@@ -154,7 +108,10 @@ pub(super) async fn installed_packages() -> anyhow::Result<Vec<InstalledPackage>
     // A failure here only hides the available versions; the inventory is still valid.
     match get_json::<Vec<IpcPackage>>(UPGRADABLE_PACKAGES_PATH, &[]).await {
         Ok(upgradable) => merge_available_versions(&mut packages, upgradable),
-        Err(error) => warn!(error = format!("{error:#}"), "Failed to read UniGetUI upgradable packages"),
+        Err(error) => warn!(
+            error = format!("{error:#}"),
+            "Failed to read UniGetUI upgradable packages"
+        ),
     }
 
     Ok(packages)
@@ -167,55 +124,12 @@ fn merge_available_versions(packages: &mut [InstalledPackage], upgradable: Vec<I
         let index = packages
             .iter()
             .position(|package| same_package(package) && package.source == update.source)
-            .or_else(|| packages.iter().position(|package| same_package(package)));
+            .or_else(|| packages.iter().position(same_package));
         if let Some(index) = index {
             packages[index].available_version = update.new_version;
         }
     }
 }
-
-/// Runs one package operation and waits for the end of the installer. An empty version means the latest version.
-pub(super) async fn package_operation(
-    operation: PackageOperation,
-    manager: &str,
-    source: &str,
-    package_id: &str,
-    version: &str,
-) -> anyhow::Result<()> {
-    let mut parameters = vec![("packageId", package_id), ("manager", manager)];
-    if !source.is_empty() {
-        parameters.push(("packageSource", source));
-    }
-    if matches!(operation, PackageOperation::Uninstall) {
-        // Uninstallers come from the ARP entry, so winget cannot detect a machine-wide uninstaller that needs admin rights.
-        parameters.push(("elevated", "true"));
-    } else if !version.is_empty() {
-        parameters.push(("version", version));
-    }
-
-    let result: IpcOperationResult =
-        request_json(Method::Post, operation.path(), &parameters, OPERATION_TIMEOUT).await?;
-
-    if result.status.eq_ignore_ascii_case("success") {
-        return Ok(());
-    }
-
-    let detail = result
-        .message
-        .filter(|message| !message.is_empty())
-        .or_else(|| result.output.last().cloned())
-        .unwrap_or_else(|| result.operation_status.clone());
-
-    // An upgrade of a package that is already on the latest version is not an error.
-    if matches!(operation, PackageOperation::Update) && detail.contains(WINGET_UPDATE_NOT_APPLICABLE) {
-        info!(package_id, "Package is already on the latest version");
-        return Ok(());
-    }
-
-    bail!("UniGetUI operation failed: {detail}")
-}
-
-const WINGET_UPDATE_NOT_APPLICABLE: &str = "0x8A15002B";
 
 pub(super) async fn managers() -> anyhow::Result<Vec<PackageManager>> {
     let managers: Vec<IpcManager> = get_json(MANAGERS_PATH, &[]).await?;
@@ -245,16 +159,6 @@ pub(super) async fn sources() -> anyhow::Result<Vec<PackageSource>> {
 
 /// Sends a GET to the first UniGetUI endpoint that answers.
 async fn get_json<T: DeserializeOwned>(path: &str, parameters: &[(&str, &str)]) -> anyhow::Result<T> {
-    request_json(Method::Get, path, parameters, REQUEST_TIMEOUT).await
-}
-
-/// Sends a request to the first UniGetUI endpoint that answers.
-async fn request_json<T: DeserializeOwned>(
-    method: Method,
-    path: &str,
-    parameters: &[(&str, &str)],
-    timeout: Duration,
-) -> anyhow::Result<T> {
     let endpoints = discover_endpoints();
     if endpoints.is_empty() {
         bail!("no UniGetUI IPC endpoint registration found; is UniGetUI running?");
@@ -273,7 +177,7 @@ async fn request_json<T: DeserializeOwned>(
         let path_and_query = format!("{path}?{query}");
 
         let started = Instant::now();
-        match query_endpoint(&endpoint, method, &path_and_query, timeout).await {
+        match query_endpoint(&endpoint, &path_and_query).await {
             Ok(body) => {
                 let request_ms = started.elapsed().as_millis();
                 let parse_started = Instant::now();
@@ -306,21 +210,12 @@ async fn request_json<T: DeserializeOwned>(
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no UniGetUI endpoint answered")))
 }
 
-async fn query_endpoint(
-    endpoint: &Endpoint,
-    method: Method,
-    path_and_query: &str,
-    timeout: Duration,
-) -> anyhow::Result<String> {
+async fn query_endpoint(endpoint: &Endpoint, path_and_query: &str) -> anyhow::Result<String> {
     match &endpoint.transport {
         Transport::Tcp(port) => {
             let url = format!("http://localhost:{port}{path_and_query}");
-            let client = reqwest::Client::builder().timeout(timeout).build()?;
-            let request = match method {
-                Method::Get => client.get(url),
-                Method::Post => client.post(url).header(reqwest::header::CONTENT_LENGTH, 0),
-            };
-            let response = request.send().await.context("UniGetUI TCP request failed")?;
+            let client = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build()?;
+            let response = client.get(url).send().await.context("UniGetUI TCP request failed")?;
             let status = response.status();
             let body = response.text().await.context("failed to read UniGetUI response")?;
             if !status.is_success() {
@@ -328,7 +223,7 @@ async fn query_endpoint(
             }
             Ok(body)
         }
-        Transport::NamedPipe(name) => tokio::time::timeout(timeout, named_pipe_request(name, method, path_and_query))
+        Transport::NamedPipe(name) => tokio::time::timeout(REQUEST_TIMEOUT, named_pipe_request(name, path_and_query))
             .await
             .context("UniGetUI named pipe request timed out")?,
     }
@@ -436,7 +331,7 @@ fn registration_directories() -> Vec<PathBuf> {
 }
 
 #[cfg(windows)]
-async fn named_pipe_request(pipe_name: &str, method: Method, path_and_query: &str) -> anyhow::Result<String> {
+async fn named_pipe_request(pipe_name: &str, path_and_query: &str) -> anyhow::Result<String> {
     use tokio::net::windows::named_pipe::ClientOptions;
 
     let pipe_path = format!(r"\\.\pipe\{pipe_name}");
@@ -444,27 +339,26 @@ async fn named_pipe_request(pipe_name: &str, method: Method, path_and_query: &st
         .open(&pipe_path)
         .with_context(|| format!("failed to open {pipe_path}"))?;
 
-    stream_request(pipe, method, path_and_query).await
+    stream_request(pipe, path_and_query).await
 }
 
 #[cfg(unix)]
-async fn named_pipe_request(socket_path: &str, method: Method, path_and_query: &str) -> anyhow::Result<String> {
+async fn named_pipe_request(socket_path: &str, path_and_query: &str) -> anyhow::Result<String> {
     let socket = tokio::net::UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("failed to connect to {socket_path}"))?;
 
-    stream_request(socket, method, path_and_query).await
+    stream_request(socket, path_and_query).await
 }
 
-async fn stream_request<S>(mut pipe: S, method: Method, path_and_query: &str) -> anyhow::Result<String>
+async fn stream_request<S>(mut pipe: S, path_and_query: &str) -> anyhow::Result<String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let request = format!(
-        "{} {path_and_query} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        method.as_str()
+        "GET {path_and_query} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
     );
     pipe.write_all(request.as_bytes())
         .await
