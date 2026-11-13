@@ -18,8 +18,9 @@ public class ConstructionTests
 
     public static TheoryData<Type> ValidatedTypes => new(Validated);
 
-    // IdentityConfig.Create checks the host's values and returns the config itself rather than a result.
-    public static TheoryData<Type> CheckedTypes => new([.. Validated, typeof(IdentityConfig)]);
+    // IdentityConfig.Create and KeyStoragePolicy.Create check the host's values and return the instance itself rather
+    // than a result.
+    public static TheoryData<Type> CheckedTypes => new([.. Validated, typeof(IdentityConfig), typeof(KeyStoragePolicy)]);
 
     // oracle: mutant a public IdentityConfig constructor that takes already-serialized JSON
     [Theory]

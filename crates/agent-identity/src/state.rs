@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{ErrorKind, Read as _};
 
 use anyhow::{Context as _, ensure};
@@ -8,15 +8,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tracing::warn;
 use uuid::{Uuid, Variant};
 
+use crate::key_storage::{
+    KeyStorage, KeyStoragePolicy, Placement, RenewalHeld, place_new_key, renewal_held, unavailable_key_storage,
+};
 pub use crate::private_file::UntrustedStoredIdentity;
 use crate::token::Token;
 use crate::{chain, pending, private_file, rejected, state_lock};
 
 const MAX_IDENTITY_BYTES: u64 = 2 * 1024 * 1024;
 pub const IDENTITY_KEY_PREFIX: &str = "devolutions-agent-identity";
-/// The rejection code of an identity whose current key no longer exists in its key store.
+/// The rejection code of an identity whose current key no longer exists in the key storage recorded for it.
 pub const KEY_LOST: &str = "key_lost";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,15 +58,18 @@ pub struct KeySlots {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyRecord {
     pub key_name: String,
+    /// The key storage that holds the key, which the key is always opened from.
+    pub key_storage: KeyStorage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub certificate_chain: Option<Vec<String>>,
 }
 
 impl KeyRecord {
     /// A key slot recorded before the authority issued a certificate for it.
-    fn unissued(key_name: String) -> Self {
+    fn unissued(key_name: String, key_storage: KeyStorage) -> Self {
         Self {
             key_name,
+            key_storage,
             certificate_chain: None,
         }
     }
@@ -112,51 +119,160 @@ impl EnrollmentDiscardReason {
     }
 }
 
+/// The key storages with a device-key backend, in the order a new key takes them when no key storage policy decides.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Key storage"): a Windows software provider key cannot be exported, while a key
+/// file is protected only by permissions; TPM is left out until its rank is decided.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+const KEY_STORAGE_RANKING: &[&str] = &[KeyStorage::WINDOWS_SOFTWARE_PROVIDER, KeyStorage::FILE];
+
 pub struct Store {
     data_dir: Utf8PathBuf,
-    backend: KeyBackend,
     key_prefix: String,
     acl_grant_current_user: bool,
+    /// The key storages this store uses, ranked as [`KEY_STORAGE_RANKING`]; any other counts as unavailable.
+    key_storages: &'static [&'static str],
 }
 
 impl Store {
-    pub fn new(
+    pub fn new(data_dir: Utf8PathBuf, key_prefix: String, acl_grant_current_user: bool) -> anyhow::Result<Self> {
+        Self::with_key_storages(data_dir, key_prefix, acl_grant_current_user, KEY_STORAGE_RANKING)
+    }
+
+    fn with_key_storages(
         data_dir: Utf8PathBuf,
-        backend: KeyBackend,
         key_prefix: String,
         acl_grant_current_user: bool,
+        key_storages: &'static [&'static str],
     ) -> anyhow::Result<Self> {
         keys::validate_prefix(&key_prefix)?;
-        match &backend {
-            KeyBackend::File { dir } => {
-                ensure!(
-                    *dir == data_dir.join("identity").join("keys"),
-                    "invalid device key directory"
-                );
-            }
-            KeyBackend::WindowsSoftwareProvider => {}
-        }
-        keys::list(&backend, &key_prefix)?;
         {
             let _lock = state_lock::acquire(&data_dir, acl_grant_current_user)?;
             private_file::check_stored_identities(&data_dir, acl_grant_current_user)?;
         }
         Ok(Self {
             data_dir,
-            backend,
             key_prefix,
             acl_grant_current_user,
+            key_storages,
         })
     }
 
-    pub fn file_backend(data_dir: &Utf8Path) -> KeyBackend {
-        KeyBackend::File {
-            dir: data_dir.join("identity").join("keys"),
+    /// Opens a key from the key storage recorded for it.
+    ///
+    /// `Ok(None)` means that the key storage is available and doesn't hold the key.
+    /// An unavailable key storage returns an error that [`unavailable_key_storage`] finds.
+    pub fn open_key(&self, record: &KeyRecord) -> anyhow::Result<Option<Box<dyn DeviceKey>>> {
+        self.open_in(&record.key_storage, &record.key_name)
+    }
+
+    /// Checks that a key storage is available on the machine, without creating, opening or deleting a key.
+    ///
+    /// An unavailable key storage, including one without a backend, returns an error that [`unavailable_key_storage`]
+    /// finds; any other error means availability couldn't be determined.
+    pub fn check_key_storage(&self, storage: &KeyStorage) -> anyhow::Result<()> {
+        self.available_backend(storage).map(drop)
+    }
+
+    /// Returns the key storages available on the machine, sorted in ascending byte order.
+    ///
+    /// A key storage whose availability can't be determined is left out, because no key can be created in it.
+    pub fn available_key_storages(&self) -> Vec<KeyStorage> {
+        let mut storages: Vec<KeyStorage> = self
+            .key_storages
+            .iter()
+            .map(|name| KeyStorage::known(name))
+            .filter(|storage| self.is_available(storage))
+            .collect();
+        storages.sort();
+        storages
+    }
+
+    /// Returns whether `policy` holds every renewal of its identity back: it is required and lists no key storage
+    /// available on the machine ([CONTRACT.agent-identity.md §5.7 "Key storage"][key-storage]).
+    ///
+    /// An error means that availability couldn't be determined.
+    ///
+    /// [key-storage]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#key-storage
+    pub fn holds_renewal(&self, policy: &KeyStoragePolicy) -> anyhow::Result<bool> {
+        policy.holds_renewal(|storage| self.check_key_storage(storage))
+    }
+
+    /// Returns whether `policy` calls for a renewal of a current key in `current` without waiting for the schedule or
+    /// a request: it is required, excludes `current`, and lists a key storage available on the machine
+    /// ([CONTRACT.agent-identity.md §5.7 "Key storage"][key-storage]).
+    ///
+    /// An error means that availability couldn't be determined.
+    ///
+    /// [key-storage]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#key-storage
+    pub fn calls_for_renewal(&self, policy: &KeyStoragePolicy, current: &KeyStorage) -> anyhow::Result<bool> {
+        policy.calls_for_renewal(current, |storage| self.check_key_storage(storage))
+    }
+
+    /// Chooses the key storage of a new key, given `config`, the identity's stored config, or `None` for an enrollment
+    /// key.
+    ///
+    /// A new key goes to the first available key storage of the policy in `config`
+    /// ([CONTRACT.agent-identity.md §5.7 "Key storage"][key-storage]).
+    /// Without a policy, or when a policy that isn't required lists no available key storage, it goes to the first
+    /// available key storage of [`KEY_STORAGE_RANKING`].
+    /// When a required policy lists no available key storage, no key storage is chosen, and the error is one that
+    /// [`renewal_held`] finds.
+    /// An error other than an unavailable key storage stops the choice, so that a passing failure never places a key in
+    /// a key storage that the policy or the ranking puts lower.
+    ///
+    /// [key-storage]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#key-storage
+    fn key_storage_for_new_key(&self, config: Option<&Value>) -> anyhow::Result<KeyStorage> {
+        // A malformed policy counts as none, so that an authority's mistake never stops renewal; the runner warns
+        // about it.
+        let policy = config.and_then(|config| KeyStoragePolicy::from_config(config).ok().flatten());
+        match place_new_key(policy.as_ref(), |storage| self.check_key_storage(storage))? {
+            Placement::Listed(storage) => return Ok(storage),
+            Placement::Held => return Err(anyhow::Error::new(RenewalHeld)),
+            Placement::Default => {}
+        }
+        let mut unavailable = None;
+        for storage in self.key_storages.iter().map(|name| KeyStorage::known(name)) {
+            match self.available_backend(&storage) {
+                Ok(_) => return Ok(storage),
+                Err(error) if unavailable_key_storage(&error).is_some() => unavailable = Some(error),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(unavailable.unwrap_or_else(|| anyhow::anyhow!("no key storage is ranked")))
+    }
+
+    fn available_backend(&self, storage: &KeyStorage) -> anyhow::Result<KeyBackend> {
+        let backend = self.backend(storage)?;
+        keys::check_available(&backend).map_err(|error| storage.classify(error))?;
+        Ok(backend)
+    }
+
+    fn is_available(&self, storage: &KeyStorage) -> bool {
+        self.available_backend(storage).is_ok()
+    }
+
+    fn backend(&self, storage: &KeyStorage) -> anyhow::Result<KeyBackend> {
+        if self.key_storages.contains(&storage.as_str())
+            && let Some(backend) = storage.backend(&self.data_dir)
+        {
+            Ok(backend)
+        } else {
+            Err(storage.unavailable("the agent has no device-key backend for this key storage"))
         }
     }
 
-    pub fn key_backend(&self) -> &KeyBackend {
-        &self.backend
+    fn open_in(&self, storage: &KeyStorage, name: &str) -> anyhow::Result<Option<Box<dyn DeviceKey>>> {
+        keys::open(&self.backend(storage)?, name).map_err(|error| storage.classify(error))
+    }
+
+    fn generate_in(&self, storage: &KeyStorage, name: &str) -> anyhow::Result<Box<dyn DeviceKey>> {
+        keys::generate(&self.backend(storage)?, name).map_err(|error| storage.classify(error))
+    }
+
+    fn delete_in(&self, storage: &KeyStorage, name: &str) -> anyhow::Result<()> {
+        keys::delete(&self.backend(storage)?, name).map_err(|error| storage.classify(error))
     }
 
     pub fn identity_path(&self, authority_id: Uuid) -> Utf8PathBuf {
@@ -214,8 +330,10 @@ impl Store {
             bytes.len() as u64 <= MAX_IDENTITY_BYTES,
             "stored identity exceeds size limit"
         );
+        // The parse error names what is wrong, such as a missing `key_storage`, so that an administrator can fix the
+        // file it names.
         let identity: StoredIdentity =
-            serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid stored identity"))?;
+            serde_json::from_slice(&bytes).with_context(|| format!("invalid stored identity {path}"))?;
         self.validate_identity(&identity)?;
         ensure!(
             identity.authority_id == authority_id,
@@ -298,6 +416,17 @@ impl Store {
         previous: Option<&StoredIdentity>,
         identity: &StoredIdentity,
     ) -> anyhow::Result<()> {
+        self.write_identity_with(previous, identity, None)
+    }
+
+    /// Writes `identity` as [`Store::write_identity_locked`] does, except that `left_behind`, a key that `identity` no
+    /// longer records, is not deleted.
+    fn write_identity_with(
+        &self,
+        previous: Option<&StoredIdentity>,
+        identity: &StoredIdentity,
+        left_behind: Option<&KeyRecord>,
+    ) -> anyhow::Result<()> {
         self.validate_identity(identity)?;
         // Checked before any key is deleted, so a refused identity leaves the previous file and its keys intact.
         let bytes = serde_json::to_vec(identity).context("encode stored identity")?;
@@ -325,26 +454,36 @@ impl Store {
                 "stored identity config must not lose its revision"
             );
         }
-        let old_names: HashSet<&str> = existing
+        let old_keys: HashMap<&str, &KeyStorage> = existing
             .as_ref()
             .into_iter()
-            .flat_map(|old| old.keys.records().map(|key| key.key_name.as_str()))
+            .flat_map(|old| old.keys.records().map(|key| (key.key_name.as_str(), &key.key_storage)))
             .collect();
-        let new_names: HashSet<&str> = identity.keys.records().map(|key| key.key_name.as_str()).collect();
-        for name in &new_names {
-            if !old_names.contains(name)
-                && keys::open(&self.backend, name)?.is_some()
-                && !pending::list_in_progress(&self.data_dir)?
-                    .iter()
-                    .any(|(_, record)| record.key_name == *name && record.token_sha256 == identity.token_sha256)
-            {
-                anyhow::bail!("existing device key has no prior record");
+        let new_keys: HashMap<&str, &KeyStorage> = identity
+            .keys
+            .records()
+            .map(|key| (key.key_name.as_str(), &key.key_storage))
+            .collect();
+        for (name, storage) in &new_keys {
+            match old_keys.get(name) {
+                Some(old_storage) => ensure!(old_storage == storage, "stored device key changed key storage"),
+                None => {
+                    if self.open_in(storage, name)?.is_some()
+                        && !pending::list_in_progress(&self.data_dir)?.iter().any(|(_, record)| {
+                            record.key_name == *name
+                                && record.key_storage == **storage
+                                && record.token_sha256 == identity.token_sha256
+                        })
+                    {
+                        anyhow::bail!("existing device key has no prior record");
+                    }
+                }
             }
         }
         if let Some(old) = &existing {
             for key in old.keys.records() {
-                if !new_names.contains(key.key_name.as_str()) {
-                    keys::delete(&self.backend, &key.key_name)?;
+                if !new_keys.contains_key(key.key_name.as_str()) && left_behind != Some(key) {
+                    self.delete_in(&key.key_storage, &key.key_name)?;
                 }
             }
         }
@@ -381,17 +520,18 @@ impl Store {
         Ok(true)
     }
 
-    /// Records a pending key's name durably before generating its private key.
+    /// Records a pending key's name and key storage durably before generating its private key.
     pub fn create_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
         let name = keys::new_key_name(&self.key_prefix);
+        let storage = self.key_storage_for_new_key(Some(&identity.config))?;
         self.update(
             identity,
             |updated| {
                 ensure!(updated.keys.pending.is_none(), "identity already has a pending key");
-                updated.keys.pending = Some(KeyRecord::unissued(name.clone()));
+                updated.keys.pending = Some(KeyRecord::unissued(name.clone(), storage.clone()));
                 Ok(())
             },
-            || keys::generate(&self.backend, &name),
+            || self.generate_in(&storage, &name),
         )
     }
 
@@ -435,6 +575,7 @@ impl Store {
     /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn begin_recovery(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
         let name = keys::new_key_name(&self.key_prefix);
+        let storage = self.key_storage_for_new_key(Some(&identity.config))?;
         self.update(
             identity,
             |updated| {
@@ -444,24 +585,25 @@ impl Store {
                     "pending identity key has no certificate chain"
                 );
                 updated.keys.previous = Some(expired);
-                updated.keys.pending = Some(KeyRecord::unissued(name.clone()));
+                updated.keys.pending = Some(KeyRecord::unissued(name.clone(), storage.clone()));
                 Ok(())
             },
-            || keys::generate(&self.backend, &name),
+            || self.generate_in(&storage, &name),
         )
     }
 
     /// Deletes an unusable pending key and its slot, then records a fresh pending key before generating it.
     pub fn replace_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
         let name = keys::new_key_name(&self.key_prefix);
+        let storage = self.key_storage_for_new_key(Some(&identity.config))?;
         self.update(
             identity,
             |updated| {
                 ensure!(updated.keys.pending.is_some(), "identity has no pending key");
-                updated.keys.pending = Some(KeyRecord::unissued(name.clone()));
+                updated.keys.pending = Some(KeyRecord::unissued(name.clone(), storage.clone()));
                 Ok(())
             },
-            || keys::generate(&self.backend, &name),
+            || self.generate_in(&storage, &name),
         )
     }
 
@@ -501,18 +643,42 @@ impl Store {
         then()
     }
 
+    /// Deletes the previous key, then removes its slot.
+    ///
+    /// When the previous key's key storage is unavailable, the key can be neither opened nor deleted, so only its slot
+    /// is removed and the key is left where it is, never looked for in another key storage.
+    /// Start-up deletes it as an unrecorded key once its key storage is available again
+    /// ([`crates/agent-identity/INTENT.md`], "Stored identities"), and the warning logged here says so.
+    /// Keeping the slot instead would leave the identity unable to record the next renewal's key, which no rule allows
+    /// for a key that is no longer used.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        if identity.keys.previous.is_none() {
+        let Some(previous) = identity.keys.previous.clone() else {
             return Ok(());
+        };
+        let left_behind = match self.check_key_storage(&previous.key_storage) {
+            Ok(()) => None,
+            Err(error) if unavailable_key_storage(&error).is_some() => Some(&previous),
+            Err(error) => return Err(error),
+        };
+        let mut updated = identity.clone();
+        updated.keys.previous = None;
+        {
+            let _lock = self.lock()?;
+            self.write_identity_with(Some(identity), &updated, left_behind)?;
         }
-        self.update(
-            identity,
-            |updated| {
-                updated.keys.previous = None;
-                Ok(())
-            },
-            || Ok(()),
-        )
+        *identity = updated;
+        if let Some(previous) = left_behind {
+            warn!(
+                identity_id = %identity.identity_id,
+                authority_id = %identity.authority_id,
+                key_storage = %previous.key_storage,
+                key_name = %previous.key_name,
+                "The old Agent Identity key is in an unavailable key storage; its record is removed, and the agent deletes the key when it starts with that key storage available"
+            );
+        }
+        Ok(())
     }
 
     /// Reuses an enrollment key, or skips a token already represented by an identity or rejection marker.
@@ -539,19 +705,22 @@ impl Store {
         let record = match pending::read_in_progress(&self.data_dir, &hash_hex)? {
             Some(record) => record,
             None => {
+                // `crates/agent-identity/INTENT.md` ("Key storage"): the authority's policy is known only from the
+                // enrollment response, so the enrollment key follows the agent's ranking.
                 let record = pending::InProgress {
                     version: 1,
                     token_sha256: hash_hex.clone(),
                     key_name: keys::new_key_name(&self.key_prefix),
+                    key_storage: self.key_storage_for_new_key(None)?,
                 };
                 pending::write_in_progress(&self.data_dir, &hash_hex, &record, self.acl_grant_current_user)?;
                 record
             }
         };
         self.validate_key_name(&record.key_name)?;
-        let key = match keys::open(&self.backend, &record.key_name)? {
+        let key = match self.open_in(&record.key_storage, &record.key_name)? {
             Some(key) => key,
-            None => keys::generate(&self.backend, &record.key_name)?,
+            None => self.generate_in(&record.key_storage, &record.key_name)?,
         };
         Ok(Some((record, key)))
     }
@@ -568,11 +737,12 @@ impl Store {
         pending::remove_file(&self.data_dir, hash_hex, self.acl_grant_current_user)?;
         if let Some(record) = pending::read_in_progress(&self.data_dir, hash_hex)? {
             self.validate_key_name(&record.key_name)?;
-            if let Some(identity) = self
-                .list_identities()?
-                .into_iter()
-                .find(|identity| identity.keys.records().any(|key| key.key_name == record.key_name))
-            {
+            if let Some(identity) = self.list_identities()?.into_iter().find(|identity| {
+                identity
+                    .keys
+                    .records()
+                    .any(|key| key.key_name == record.key_name && key.key_storage == record.key_storage)
+            }) {
                 ensure!(
                     identity.token_sha256 == record.token_sha256,
                     "enrollment key belongs to another identity"
@@ -580,7 +750,7 @@ impl Store {
                 pending::remove_in_progress(&self.data_dir, hash_hex)?;
                 return Ok(());
             }
-            keys::delete(&self.backend, &record.key_name)?;
+            self.delete_in(&record.key_storage, &record.key_name)?;
             pending::remove_in_progress(&self.data_dir, hash_hex)?;
         }
         Ok(())
@@ -652,7 +822,8 @@ impl Store {
         let record = pending::read_in_progress(&self.data_dir, hash_hex)?;
         if let Some(record) = &record {
             ensure!(
-                identity.keys.current.key_name == record.key_name,
+                identity.keys.current.key_name == record.key_name
+                    && identity.keys.current.key_storage == record.key_storage,
                 "enrollment key does not belong to stored identity"
             );
         }
@@ -664,6 +835,12 @@ impl Store {
     }
 
     /// Repairs missing unissued keys and drops keys no longer covered by a durable record.
+    ///
+    /// [`crates/agent-identity/INTENT.md`] ("Identities"): a key in an unavailable key storage is left as it is, with
+    /// its record, so that one unavailable key storage never stops the identities and enrollments whose keys are in
+    /// another.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn reconcile(&self) -> anyhow::Result<()> {
         let _lock = self.lock()?;
         private_file::cleanup_temporary_files(
@@ -680,7 +857,12 @@ impl Store {
         )?;
         rejected::cleanup_temporary(&self.data_dir)?;
         for hash_hex in rejected::list_rejected(&self.data_dir)? {
-            self.discard_pending_state_locked(&hash_hex)?;
+            match self.discard_pending_state_locked(&hash_hex) {
+                Ok(()) => {}
+                // The enrollment key can't be deleted, so its record stays for a later start-up.
+                Err(error) if unavailable_key_storage(&error).is_some() => {}
+                Err(error) => return Err(error),
+            }
         }
         for authority_id in private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user)? {
             let path = self.identity_path(authority_id);
@@ -696,7 +878,18 @@ impl Store {
             if identity.rejected.is_some() {
                 continue;
             }
-            if keys::open(&self.backend, &identity.keys.current.key_name)?.is_none() {
+            // `crates/agent-identity/INTENT.md` ("Identities"): an identity whose current or pending key is in an
+            // unavailable key storage is left as it is, and never recorded as `key_lost`.
+            if !self.is_available(&identity.keys.current.key_storage)
+                || identity
+                    .keys
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| !self.is_available(&pending.key_storage))
+            {
+                continue;
+            }
+            if self.open_key(&identity.keys.current)?.is_none() {
                 // The identity is kept so that its token stays a no-op and recovery needs a different token.
                 let previous = identity.clone();
                 identity.rejected = Some(Rejection {
@@ -711,23 +904,34 @@ impl Store {
             // A key refused when opened is left to the identity's runner, which replaces it, so that one unusable key
             // never stops the other identities.
             if let Some(pending) = &identity.keys.pending
-                && matches!(keys::open(&self.backend, &pending.key_name), Ok(None))
+                && matches!(self.open_key(pending), Ok(None))
             {
                 if pending.certificate_chain.is_none() {
-                    keys::generate(&self.backend, &pending.key_name)?;
+                    self.generate_in(&pending.key_storage, &pending.key_name)?;
                 } else {
                     // `crates/agent-identity/INTENT.md` ("Stored identities"): a missing pending key is unusable and is
                     // replaced by a fresh one, which keeps the pending slot, and with it the `confirm` barrier, until a
                     // renewal is confirmed.
-                    let previous = identity.clone();
-                    let name = keys::new_key_name(&self.key_prefix);
-                    identity.keys.pending = Some(KeyRecord::unissued(name.clone()));
-                    self.write_identity_locked(Some(&previous), &identity)?;
-                    keys::generate(&self.backend, &name)?;
+                    match self.key_storage_for_new_key(Some(&identity.config)) {
+                        Ok(storage) => {
+                            let previous = identity.clone();
+                            let name = keys::new_key_name(&self.key_prefix);
+                            identity.keys.pending = Some(KeyRecord::unissued(name.clone(), storage.clone()));
+                            self.write_identity_locked(Some(&previous), &identity)?;
+                            self.generate_in(&storage, &name)?;
+                        }
+                        // `CONTRACT.agent-identity.md` §5.7: a required policy that lists no available key storage
+                        // holds the replacement back; the identity's runner checks again as it does for every renewal
+                        // it holds back.
+                        Err(error) if renewal_held(&error) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
             }
+            // A previous key in an unavailable key storage fails to open, so its slot stays here; the identity's runner
+            // removes the slot and leaves the key to this cleanup at a later start.
             if let Some(previous) = &identity.keys.previous
-                && matches!(keys::open(&self.backend, &previous.key_name), Ok(None))
+                && matches!(self.open_key(previous), Ok(None))
             {
                 let previous = identity.clone();
                 identity.keys.previous = None;
@@ -736,40 +940,57 @@ impl Store {
         }
 
         let identities = self.list_identities()?;
-        let mut recorded: HashSet<String> = identities
+        let mut recorded: HashSet<(KeyStorage, String)> = identities
             .iter()
-            .flat_map(|identity| identity.keys.records().map(|record| record.key_name.clone()))
+            .flat_map(|identity| {
+                identity
+                    .keys
+                    .records()
+                    .map(|record| (record.key_storage.clone(), record.key_name.clone()))
+            })
             .collect();
         for (hash_hex, record) in pending::list_in_progress(&self.data_dir)? {
             self.validate_key_name(&record.key_name)?;
+            let key = (record.key_storage.clone(), record.key_name.clone());
             let path = pending::file_path(&self.data_dir, &hash_hex)?;
             let pending_file_is_missing = match pending::read(&path, self.acl_grant_current_user) {
                 Ok(pending::PendingRead::Ready(_)) => false,
                 Ok(_) => {
-                    recorded.insert(record.key_name);
+                    recorded.insert(key);
                     continue;
                 }
                 Err(error) if is_not_found(&error) => true,
                 Err(_) => {
-                    recorded.insert(record.key_name);
+                    recorded.insert(key);
                     continue;
                 }
             };
+            if !self.is_available(&record.key_storage) {
+                // The key can be neither deleted nor regenerated, so its record stays, and its pending file waits.
+                continue;
+            }
             if pending_file_is_missing {
-                if !recorded.contains(&record.key_name) {
-                    keys::delete(&self.backend, &record.key_name)?;
+                if !recorded.contains(&key) {
+                    self.delete_in(&record.key_storage, &record.key_name)?;
                 }
                 pending::remove_in_progress(&self.data_dir, &hash_hex)?;
                 continue;
             }
-            if keys::open(&self.backend, &record.key_name)?.is_none() {
-                keys::generate(&self.backend, &record.key_name)?;
+            if self.open_in(&record.key_storage, &record.key_name)?.is_none() {
+                self.generate_in(&record.key_storage, &record.key_name)?;
             }
-            recorded.insert(record.key_name);
+            recorded.insert(key);
         }
-        for name in keys::list(&self.backend, &self.key_prefix)? {
-            if !recorded.contains(&name) {
-                keys::delete(&self.backend, &name)?;
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): the agent owns every device key with its prefix, so
+        // it deletes each one that no record names with its key storage, in every available key storage.
+        for storage in self.available_key_storages() {
+            let names =
+                keys::list(&self.backend(&storage)?, &self.key_prefix).map_err(|error| storage.classify(error))?;
+            for name in names {
+                let key = (storage.clone(), name);
+                if !recorded.contains(&key) {
+                    self.delete_in(&storage, &key.1)?;
+                }
             }
         }
         Ok(())
@@ -898,7 +1119,7 @@ mod tests {
         }
 
         fn store(&self) -> anyhow::Result<Store> {
-            Store::new(self.0.clone(), Store::file_backend(&self.0), "ai".into(), true)
+            Store::with_key_storages(self.0.clone(), "ai".into(), true, FILE_ONLY)
         }
 
         fn authority(&self, authority_id: Uuid) -> Utf8PathBuf {
@@ -909,27 +1130,22 @@ mod tests {
         }
     }
 
-    // oracle: intent crates/agent-identity/INTENT.md §Identities
-    #[cfg(not(windows))]
-    #[test]
-    fn unavailable_backend_reaches_store_initialization_without_touching_state() -> anyhow::Result<()> {
-        let directory = TestDir::new()?;
-        let error = Store::new(
-            directory.0.clone(),
-            KeyBackend::WindowsSoftwareProvider,
-            IDENTITY_KEY_PREFIX.to_owned(),
-            false,
-        )
-        .err()
-        .context("unavailable backend was accepted")?;
-        assert_eq!(
-            error
-                .downcast_ref::<keys::BackendUnavailable>()
-                .map(|backend| backend.backend),
-            Some("WindowsSoftwareProvider")
-        );
-        assert!(!directory.0.join("identity").exists());
-        Ok(())
+    /// The key storages of a test store: key files only, so that tests never touch the machine-wide key storage that
+    /// other tests and the installed agent share.
+    const FILE_ONLY: &[&str] = &[KeyStorage::FILE];
+
+    fn file_storage() -> KeyStorage {
+        KeyStorage::known(KeyStorage::FILE)
+    }
+
+    impl Store {
+        fn open_file_key(&self, name: &str) -> anyhow::Result<Option<Box<dyn DeviceKey>>> {
+            self.open_in(&file_storage(), name)
+        }
+
+        fn delete_file_key(&self, name: &str) -> anyhow::Result<()> {
+            self.delete_in(&file_storage(), name)
+        }
     }
 
     fn test_token() -> anyhow::Result<Token> {
@@ -956,6 +1172,7 @@ mod tests {
             keys: KeySlots {
                 current: KeyRecord {
                     key_name: keys::new_key_name(IDENTITY_KEY_PREFIX),
+                    key_storage: file_storage(),
                     certificate_chain: Some(vec!["YWJj".into()]),
                 },
                 pending: None,
@@ -986,6 +1203,7 @@ mod tests {
             keys: KeySlots {
                 current: KeyRecord {
                     key_name: progress.key_name,
+                    key_storage: file_storage(),
                     certificate_chain: Some(chain),
                 },
                 pending: None,
@@ -1014,10 +1232,12 @@ mod tests {
             "keys": {
                 "current": {
                     "key_name": keys::new_key_name(IDENTITY_KEY_PREFIX),
+                    "key_storage": "file",
                     "certificate_chain": ["YWJj"]
                 },
                 "pending": {
                     "key_name": keys::new_key_name(IDENTITY_KEY_PREFIX),
+                    "key_storage": "windows_software_provider",
                     "certificate_chain": null
                 },
                 "previous": null
@@ -1083,12 +1303,12 @@ mod tests {
         let (progress, _key) = store
             .begin_enrollment(&token)?
             .context("new token was already processed")?;
-        assert!(keys::open(store.key_backend(), &progress.key_name)?.is_some());
+        assert!(store.open_file_key(&progress.key_name)?.is_some());
 
         pending::remove_file(&directory.0, &token.sha256_hex(), true)?;
         store.reconcile()?;
         assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
-        assert!(keys::open(store.key_backend(), &progress.key_name)?.is_none());
+        assert!(store.open_file_key(&progress.key_name)?.is_none());
         Ok(())
     }
 
@@ -1109,7 +1329,7 @@ mod tests {
         store.discard_enrollment(&hash_hex, EnrollmentDiscardReason::IdentityRevoked)?;
         assert!(!path.exists());
         assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        assert!(store.open_file_key(&record.key_name)?.is_none());
         let marker_path = directory
             .0
             .join("identity")
@@ -1128,7 +1348,7 @@ mod tests {
         private_file::write_atomic(&directory.0, &path, &body, true)?;
         restarted.reconcile()?;
         assert!(!path.exists());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        assert!(store.open_file_key(&record.key_name)?.is_none());
         assert_eq!(pending::write(&directory.0, &token, true)?, path);
         assert!(restarted.begin_enrollment(&token)?.is_none());
         let replacement = Token::parse(&format!(
@@ -1160,7 +1380,7 @@ mod tests {
 
         assert!(!path.exists());
         assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        assert!(store.open_file_key(&record.key_name)?.is_none());
         assert!(store.list_identities()?.is_empty());
         let marker_path = directory
             .0
@@ -1233,10 +1453,10 @@ mod tests {
         assert!(!path.exists());
         assert!(rejected::list_rejected(&directory.0)?.is_empty());
         assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_some());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+        assert!(store.open_file_key(&record.key_name)?.is_some());
         store.reconcile()?;
         assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        assert!(store.open_file_key(&record.key_name)?.is_none());
         #[cfg(windows)]
         {
             pending::write(&directory.0, &token, true)?;
@@ -1250,10 +1470,10 @@ mod tests {
             assert!(!path.exists());
             assert!(rejected::list_rejected(&directory.0)?.is_empty());
             assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_some());
-            assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+            assert!(store.open_file_key(&record.key_name)?.is_some());
             store.reconcile()?;
             assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
-            assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+            assert!(store.open_file_key(&record.key_name)?.is_none());
         }
         Ok(())
     }
@@ -1286,7 +1506,7 @@ mod tests {
             pending::PendingRead::Ready(found) if found.sha256_hex() == token.sha256_hex()
         ));
         assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_some());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+        assert!(store.open_file_key(&record.key_name)?.is_some());
         assert!(
             !directory
                 .0
@@ -1371,6 +1591,7 @@ mod tests {
                 version: 1,
                 token_sha256: token.sha256_hex(),
                 key_name: fake_key_name.clone(),
+                key_storage: file_storage(),
             })?,
         )?;
         #[cfg(unix)]
@@ -1383,7 +1604,7 @@ mod tests {
         #[cfg(windows)]
         drop(held_marker);
         assert_ne!(record.key_name, fake_key_name);
-        assert!(keys::open(store.key_backend(), &fake_key_name)?.is_none());
+        assert!(store.open_file_key(&fake_key_name)?.is_none());
         assert!(marker_path.exists());
 
         let authority_id = Uuid::new_v4();
@@ -1412,6 +1633,7 @@ mod tests {
             keys: KeySlots {
                 current: KeyRecord {
                     key_name: record.key_name.clone(),
+                    key_storage: file_storage(),
                     certificate_chain: Some(vec!["YWJj".into()]),
                 },
                 pending: None,
@@ -1431,7 +1653,7 @@ mod tests {
         assert_eq!(untrusted_path(&reconciliation), Some(identity_path.as_path()));
         assert_eq!(fs::read(&identity_path)?, b"not a stored identity");
         // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+        assert!(store.open_file_key(&record.key_name)?.is_some());
         fs::remove_file(&identity_path)?;
 
         let pending_path = pending::file_path(&directory.0, &hash)?;
@@ -1442,7 +1664,7 @@ mod tests {
         store.reconcile()?;
         // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         assert!(pending::read_in_progress(&directory.0, &hash)?.is_some());
-        assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+        assert!(store.open_file_key(&record.key_name)?.is_some());
         Ok(())
     }
 
@@ -1504,7 +1726,7 @@ mod tests {
         let result = store.reconcile();
         crate::windows::test::set_test_directory_access(authority, true)?;
         assert!(result.is_err(), "inaccessible authority directory was silently ignored");
-        assert!(keys::open(store.key_backend(), &identity.keys.current.key_name)?.is_some());
+        assert!(store.open_file_key(&identity.keys.current.key_name)?.is_some());
         assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
         Ok(())
     }
@@ -1603,7 +1825,7 @@ mod tests {
         store.reconcile()?;
 
         assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
-        assert!(keys::open(store.key_backend(), &progress.key_name)?.is_some());
+        assert!(store.open_file_key(&progress.key_name)?.is_some());
         assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
         Ok(())
     }
@@ -1680,7 +1902,7 @@ mod tests {
         assert!(restarted.begin_enrollment(&token)?.is_none());
         assert!(!path.exists());
         assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
-        assert!(keys::open(restarted.key_backend(), &progress.key_name)?.is_some());
+        assert!(restarted.open_file_key(&progress.key_name)?.is_some());
         assert_eq!(restarted.read_identity(identity.authority_id)?, Some(identity));
         Ok(())
     }
@@ -1747,7 +1969,7 @@ mod tests {
 
         assert_eq!(fs::read(&path)?, old_bytes);
         // oracle: mutant size check moved after the replaced identity's keys are deleted
-        assert!(keys::open(store.key_backend(), &old.keys.current.key_name)?.is_some());
+        assert!(store.open_file_key(&old.keys.current.key_name)?.is_some());
 
         let at_limit = sized(2 * 1024 * 1024);
         store.replace_identity(&old, &at_limit)?;
@@ -1781,6 +2003,7 @@ mod tests {
             keys: KeySlots {
                 current: KeyRecord {
                     key_name: progress.key_name,
+                    key_storage: file_storage(),
                     certificate_chain: Some(vec!["bmV3".into()]),
                 },
                 pending: None,
@@ -1791,7 +2014,7 @@ mod tests {
         store.replace_identity(&old, &new)?;
 
         assert_eq!(store.read_identity(old.authority_id)?, Some(new));
-        assert!(keys::open(store.key_backend(), &old.keys.current.key_name)?.is_none());
+        assert!(store.open_file_key(&old.keys.current.key_name)?.is_none());
         Ok(())
     }
 
@@ -2039,6 +2262,7 @@ mod tests {
             keys: KeySlots {
                 current: KeyRecord {
                     key_name: progress.key_name,
+                    key_storage: file_storage(),
                     certificate_chain: Some(chain),
                 },
                 pending: None,
@@ -2217,7 +2441,7 @@ mod tests {
 
         assert_eq!(fs::read_to_string(store.identity_path(held.authority_id))?, held_file);
         assert_eq!(outcome, EnrolledIdentity::AuthorityConflict);
-        assert!(keys::open(store.key_backend(), &held.keys.current.key_name)?.is_some());
+        assert!(store.open_file_key(&held.keys.current.key_name)?.is_some());
         let marker_path = directory
             .0
             .join("identity")
@@ -2227,7 +2451,7 @@ mod tests {
         assert_eq!(marker["code"], "authority_conflict");
         assert!(!pending::file_path(&directory.0, &hash_hex)?.exists());
         assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
-        assert!(keys::open(store.key_backend(), &claim.keys.current.key_name)?.is_none());
+        assert!(store.open_file_key(&claim.keys.current.key_name)?.is_none());
         Ok(())
     }
 
@@ -2379,11 +2603,7 @@ mod tests {
         assert_eq!(outcome, EnrolledIdentity::Stored);
         assert_eq!(store.read_identity(held.authority_id)?, Some(claim));
         for key in held.keys.records() {
-            assert!(
-                keys::open(store.key_backend(), &key.key_name)?.is_none(),
-                "{}",
-                key.key_name
-            );
+            assert!(store.open_file_key(&key.key_name)?.is_none(), "{}", key.key_name);
         }
         Ok(())
     }
@@ -2417,7 +2637,7 @@ mod tests {
 
         assert_eq!(outcome, EnrolledIdentity::Stored);
         assert_eq!(store.read_identity(held.authority_id)?, Some(claim));
-        assert!(keys::open(store.key_backend(), &held.keys.current.key_name)?.is_none());
+        assert!(store.open_file_key(&held.keys.current.key_name)?.is_none());
         Ok(())
     }
 
@@ -2447,7 +2667,7 @@ mod tests {
         assert!(store.write_identity(&identity).is_err());
 
         assert_eq!(store.read_identity(identity.authority_id)?, None);
-        assert!(keys::open(store.key_backend(), &other_progress.key_name)?.is_some());
+        assert!(store.open_file_key(&other_progress.key_name)?.is_some());
         Ok(())
     }
 
@@ -2463,7 +2683,7 @@ mod tests {
         let already_enrolled = test_token()?;
         pending::write(&directory.0, &already_enrolled, true)?;
         assert!(store.begin_enrollment(&already_enrolled)?.is_none());
-        assert!(keys::open(store.key_backend(), &fresh.keys.current.key_name)?.is_some());
+        assert!(store.open_file_key(&fresh.keys.current.key_name)?.is_some());
         let mut stale = fresh.clone();
         assert!(store.update_config(&mut fresh, json!({"version": 1, "revision": 9}))?);
         assert!(!store.update_config(&mut stale, json!({"version": 1, "revision": 8}))?);
@@ -2476,6 +2696,7 @@ mod tests {
         promoted.keys.previous = Some(promoted.keys.current.clone());
         promoted.keys.current = KeyRecord {
             key_name: new_name.clone(),
+            key_storage: file_storage(),
             certificate_chain: Some(vec!["bmV3".into()]),
         };
         promoted.keys.pending = None;
@@ -2486,7 +2707,7 @@ mod tests {
         rollback.config = json!({"version": 1, "revision": 8});
         rollback.keys.previous = None;
         assert!(store.replace_identity(&promoted, &rollback).is_err());
-        assert!(keys::open(store.key_backend(), &original_name)?.is_some());
+        assert!(store.open_file_key(&original_name)?.is_some());
         let mut same_revision = promoted.clone();
         same_revision.config = json!({"version": 1, "revision": 9, "changed": true});
         assert!(store.replace_identity(&promoted, &same_revision).is_err());
@@ -2499,7 +2720,7 @@ mod tests {
         let mut without_pending = fresh.clone();
         without_pending.keys.pending = None;
         assert!(store.replace_identity(&fresh, &without_pending).is_err());
-        assert!(keys::open(store.key_backend(), &new_name)?.is_some());
+        assert!(store.open_file_key(&new_name)?.is_some());
 
         assert!(store.update_config(&mut stale, json!({"version": 1, "revision": 10}))?);
         assert_eq!(stale.keys.current.key_name, new_name);
@@ -2507,8 +2728,8 @@ mod tests {
         stale_replacement.config = json!({"version": 1, "revision": 11});
         assert!(store.replace_identity(&promoted, &stale_replacement).is_err());
         store.remove_previous_key(&mut stale)?;
-        assert!(keys::open(store.key_backend(), &original_name)?.is_none());
-        assert!(keys::open(store.key_backend(), &new_name)?.is_some());
+        assert!(store.open_file_key(&original_name)?.is_none());
+        assert!(store.open_file_key(&new_name)?.is_some());
         assert_eq!(
             store
                 .read_identity(stale.authority_id)?
@@ -2531,7 +2752,7 @@ mod tests {
         }
         let store = directory.store()?;
         let identity = enroll_locally(&store, &directory.0)?;
-        keys::delete(store.key_backend(), &identity.keys.current.key_name)?;
+        store.delete_file_key(&identity.keys.current.key_name)?;
 
         store.reconcile()?;
 
@@ -2586,19 +2807,20 @@ mod tests {
             stored.keys.pending,
             Some(KeyRecord {
                 key_name: fresh_name.clone(),
+                key_storage: file_storage(),
                 certificate_chain: None,
             })
         );
         for name in [&current.key_name, &expired.key_name, &fresh_name] {
-            assert!(keys::open(store.key_backend(), name)?.is_some(), "{name}");
+            assert!(store.open_file_key(name)?.is_some(), "{name}");
         }
 
         store.store_pending_chain(&mut identity, vec!["ZnJlc2g=".into()])?;
         store.remove_previous_key(&mut identity)?;
         store.promote_pending(&mut identity)?;
         store.remove_previous_key(&mut identity)?;
-        assert!(keys::open(store.key_backend(), &expired.key_name)?.is_none());
-        assert!(keys::open(store.key_backend(), &current.key_name)?.is_none());
+        assert!(store.open_file_key(&expired.key_name)?.is_none());
+        assert!(store.open_file_key(&current.key_name)?.is_none());
         assert_eq!(identity.keys.current.key_name, fresh_name);
         Ok(())
     }
@@ -2634,12 +2856,13 @@ mod tests {
             stored.keys.pending,
             Some(KeyRecord {
                 key_name: fresh_name.clone(),
+                key_storage: file_storage(),
                 certificate_chain: None,
             })
         );
-        assert!(keys::open(store.key_backend(), &older.key_name)?.is_none());
+        assert!(store.open_file_key(&older.key_name)?.is_none());
         for name in [&current.key_name, &newest.key_name, &fresh_name] {
-            assert!(keys::open(store.key_backend(), name)?.is_some(), "{name}");
+            assert!(store.open_file_key(name)?.is_some(), "{name}");
         }
         Ok(())
     }
@@ -2662,7 +2885,7 @@ mod tests {
         let mut identity = enroll_locally(&store, &directory.0)?;
         let certified = store.create_pending_key(&mut identity)?.name().to_owned();
         store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
-        keys::delete(store.key_backend(), &certified)?;
+        store.delete_file_key(&certified)?;
 
         store.reconcile()?;
 
@@ -2674,7 +2897,7 @@ mod tests {
         let pending = stored.keys.pending.context("start-up dropped the pending slot")?;
         assert_ne!(pending.key_name, certified);
         assert_eq!(pending.certificate_chain, None);
-        assert!(keys::open(store.key_backend(), &pending.key_name)?.is_some());
+        assert!(store.open_file_key(&pending.key_name)?.is_some());
         Ok(())
     }
 
@@ -2692,7 +2915,7 @@ mod tests {
         let refused = store.create_pending_key(&mut identity)?.name().to_owned();
         store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
         fs::write(key_file(&directory, &refused), b"not a PKCS#8 key")?;
-        assert!(keys::open(store.key_backend(), &refused).is_err());
+        assert!(store.open_file_key(&refused).is_err());
 
         store.reconcile()?;
 
@@ -2714,7 +2937,7 @@ mod tests {
         let pending = store.create_pending_key(&mut identity)?.name().to_owned();
         store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
         store.reject_identity(&mut identity, "identity_revoked")?;
-        keys::delete(store.key_backend(), &pending)?;
+        store.delete_file_key(&pending)?;
 
         store.reconcile()?;
 
@@ -2743,7 +2966,7 @@ mod tests {
             .previous
             .clone()
             .context("expired pending key disappeared")?;
-        keys::delete(store.key_backend(), &fresh_name)?;
+        store.delete_file_key(&fresh_name)?;
 
         store.reconcile()?;
 
@@ -2754,7 +2977,45 @@ mod tests {
         let pending = stored.keys.pending.context("recovery lost its pending slot")?;
         assert_ne!(pending.key_name, fresh_name);
         assert_eq!(pending.certificate_chain, None);
-        assert!(keys::open(store.key_backend(), &pending.key_name)?.is_some());
+        assert!(store.open_file_key(&pending.key_name)?.is_some());
+        Ok(())
+    }
+
+    // oracle: mutant a previous key in an unavailable key storage keeps its slot, or is looked for in another key storage
+    // The old key of a confirmed renewal whose key storage is unavailable can be neither opened nor deleted, so its slot
+    // is dropped and the key is left where it is; nothing touches it in another key storage, here the key file of the
+    // same name.
+    #[test]
+    fn a_previous_key_in_an_unavailable_key_storage_loses_its_slot_and_is_left_in_place() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let old_name = identity.keys.current.key_name.clone();
+        store.create_pending_key(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["bmV3".into()])?;
+        store.promote_pending(&mut identity)?;
+        rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            json["keys"]["previous"]["key_storage"] = Value::from("tpm");
+        })?;
+        let mut identity = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        let mut expected = identity.clone();
+        expected.keys.previous = None;
+
+        store.remove_previous_key(&mut identity)?;
+
+        assert_eq!(identity, expected);
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(expected));
+        assert!(store.open_file_key(&old_name)?.is_some());
+
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+        // At start-up the agent deletes each key with its prefix that no record names, in every available key storage.
+        store.reconcile()?;
+        assert!(store.open_file_key(&old_name)?.is_none());
         Ok(())
     }
 
@@ -2777,6 +3038,7 @@ mod tests {
 
         let expected_current = KeyRecord {
             key_name: new_name.clone(),
+            key_storage: file_storage(),
             certificate_chain: Some(vec!["bmV3".into()]),
         };
         let stored = store
@@ -2785,10 +3047,10 @@ mod tests {
         assert_eq!(stored.keys.current, expected_current);
         assert_eq!(stored.keys.previous.as_ref(), Some(&old));
         assert_eq!(stored.keys.pending, None);
-        assert!(keys::open(store.key_backend(), &old.key_name)?.is_some());
+        assert!(store.open_file_key(&old.key_name)?.is_some());
         store.remove_previous_key(&mut identity)?;
-        assert!(keys::open(store.key_backend(), &old.key_name)?.is_none());
-        assert!(keys::open(store.key_backend(), &new_name)?.is_some());
+        assert!(store.open_file_key(&old.key_name)?.is_none());
+        assert!(store.open_file_key(&new_name)?.is_some());
         Ok(())
     }
 
@@ -3259,6 +3521,454 @@ mod tests {
 
         assert_eq!(untrusted_path(&error), Some(authority.as_path()));
         assert_eq!(protection(&authority)?, inherited);
+        Ok(())
+    }
+
+    /// Rewrites a stored identity's file in place with `change` applied to its JSON, bypassing every check of the
+    /// store.
+    fn rewrite_identity_json(
+        directory: &TestDir,
+        store: &Store,
+        authority_id: Uuid,
+        change: impl FnOnce(&mut Value),
+    ) -> anyhow::Result<Vec<u8>> {
+        let path = store.identity_path(authority_id);
+        let mut json: Value = serde_json::from_slice(&fs::read(&path)?)?;
+        change(&mut json);
+        let bytes = serde_json::to_vec(&json)?;
+        private_file::write_atomic(&directory.0, &path, &bytes, true)?;
+        Ok(bytes)
+    }
+
+    /// Rewrites an in-progress record in place with `change` applied to its JSON.
+    fn rewrite_in_progress_json(
+        directory: &TestDir,
+        hash_hex: &str,
+        change: impl FnOnce(&mut Value),
+    ) -> anyhow::Result<Vec<u8>> {
+        let path = pending::in_progress_path(&directory.0, hash_hex)?;
+        let mut json: Value = serde_json::from_slice(&fs::read(&path)?)?;
+        change(&mut json);
+        let bytes = serde_json::to_vec(&json)?;
+        private_file::write_atomic(&directory.0, &path, &bytes, true)?;
+        Ok(bytes)
+    }
+
+    fn set_key_storage(record: &mut Value, key_storage: Option<&str>) {
+        match key_storage {
+            Some(name) => record["key_storage"] = Value::from(name),
+            None => {
+                if let Some(record) = record.as_object_mut() {
+                    record.remove("key_storage");
+                }
+            }
+        }
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    // An `identity.json` without a required field, or with a `key_storage` that isn't a well-formed name, is never
+    // repaired and never read as absent, and stops identity processing until it is fixed.
+    #[rstest::rstest]
+    #[case::current_without_key_storage("current", None)]
+    #[case::current_with_a_malformed_name("current", Some("File"))]
+    #[case::pending_without_key_storage("pending", None)]
+    #[case::pending_with_a_malformed_name("pending", Some("1tpm"))]
+    fn an_identity_file_whose_key_slot_lacks_a_well_formed_key_storage_is_refused(
+        #[case] slot: &str,
+        #[case] key_storage: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store.create_pending_key(&mut identity)?;
+        let bytes = rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            set_key_storage(&mut json["keys"][slot], key_storage);
+        })?;
+
+        assert!(store.read_identity(identity.authority_id).is_err());
+        assert!(store.list_identities().is_err());
+        assert!(store.reconcile().is_err());
+        let token = token_for("https://other.test")?;
+        pending::write(&directory.0, &token, true)?;
+        assert!(store.begin_enrollment(&token).is_err());
+        assert_eq!(fs::read(store.identity_path(identity.authority_id))?, bytes);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    // An in-progress record without `key_storage`, or with one that isn't a well-formed name, is refused like any other
+    // unusable file of the agent's own, so its enrollment key is never replaced by a second one.
+    #[rstest::rstest]
+    #[case::without_key_storage(None)]
+    #[case::with_a_malformed_name(Some("windows-software-provider"))]
+    fn an_in_progress_record_without_a_well_formed_key_storage_is_refused(
+        #[case] key_storage: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        pending::write(&directory.0, &token, true)?;
+        let (record, _key) = store.begin_enrollment(&token)?.context("begin enrollment")?;
+        let bytes = rewrite_in_progress_json(&directory, &hash_hex, |json| set_key_storage(json, key_storage))?;
+
+        assert!(pending::read_in_progress(&directory.0, &hash_hex).is_err());
+        assert!(store.begin_enrollment(&token).is_err());
+        assert!(store.reconcile().is_err());
+        assert_eq!(fs::read(pending::in_progress_path(&directory.0, &hash_hex)?)?, bytes);
+        assert!(store.open_file_key(&record.key_name)?.is_some());
+        Ok(())
+    }
+
+    // oracle: mutant the refusal drops the parse error that names the missing field, or the path of the file
+    // An administrator fixes a refused `identity.json` from the error alone, so it names the file and the missing field.
+    #[test]
+    fn an_identity_file_without_key_storage_is_refused_with_an_error_naming_the_field_and_the_file()
+    -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            set_key_storage(&mut json["keys"]["current"], None);
+        })?;
+
+        let error = store
+            .read_identity(identity.authority_id)
+            .err()
+            .context("an identity without key_storage was read")?;
+
+        let message = format!("{error:#}");
+        assert!(message.contains("key_storage"), "{message}");
+        assert!(
+            message.contains(store.identity_path(identity.authority_id).as_str()),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    // oracle: mutant the refusal drops the parse error that names the missing field, or the path of the file
+    // An administrator fixes a refused in-progress record from the error alone, so it names the file and the missing
+    // field.
+    #[test]
+    fn an_in_progress_record_without_key_storage_is_refused_with_an_error_naming_the_field_and_the_file()
+    -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        pending::write(&directory.0, &token, true)?;
+        store.begin_enrollment(&token)?.context("begin enrollment")?;
+        rewrite_in_progress_json(&directory, &hash_hex, |json| set_key_storage(json, None))?;
+
+        let error = pending::read_in_progress(&directory.0, &hash_hex)
+            .err()
+            .context("an in-progress record without key_storage was read")?;
+
+        let message = format!("{error:#}");
+        assert!(message.contains("key_storage"), "{message}");
+        assert!(
+            message.contains(pending::in_progress_path(&directory.0, &hash_hex)?.as_str()),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // The agent writes a key's name and key storage to its record before creating the key, in that key storage.
+    #[test]
+    fn every_new_key_is_recorded_with_the_key_storage_that_holds_it() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = token_for("https://other.test")?;
+        pending::write(&directory.0, &token, true)?;
+        let (record, _key) = store.begin_enrollment(&token)?.context("begin enrollment")?;
+        let in_progress = pending::in_progress_path(&directory.0, &token.sha256_hex())?;
+        let on_disk: Value = serde_json::from_slice(&fs::read(in_progress)?)?;
+        assert_eq!(on_disk["key_storage"], "file");
+        assert!(store.open_file_key(&record.key_name)?.is_some());
+
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store.create_pending_key(&mut identity)?;
+        let on_disk: Value = serde_json::from_slice(&fs::read(store.identity_path(identity.authority_id))?)?;
+        assert_eq!(on_disk["keys"]["current"]["key_storage"], "file");
+        assert_eq!(on_disk["keys"]["pending"]["key_storage"], "file");
+        let pending = identity.keys.pending.as_ref().context("no pending key")?;
+        assert!(store.open_file_key(&pending.key_name)?.is_some());
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §key-storage
+    // Without a key storage policy, a new key goes to the first available of the Windows software provider, then the
+    // file backend; the Windows software provider is available only on Windows (CONTRACT.agent-identity.md §5.7).
+    #[test]
+    fn a_new_key_without_a_policy_takes_the_first_available_key_storage_of_the_ranking() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let store = Store::new(directory.0.clone(), "ai".into(), true)?;
+        let expected = if cfg!(windows) {
+            "windows_software_provider"
+        } else {
+            "file"
+        };
+        assert_eq!(store.key_storage_for_new_key(None)?.as_str(), expected);
+        let config = json!({"version": 1, "revision": 1});
+        assert_eq!(store.key_storage_for_new_key(Some(&config))?.as_str(), expected);
+        Ok(())
+    }
+
+    /// The key storage of a new key without a policy on this machine: the first available of the Windows software
+    /// provider, then the file backend, where the Windows software provider is available only on Windows.
+    fn default_key_storage() -> &'static str {
+        if cfg!(windows) {
+            "windows_software_provider"
+        } else {
+            "file"
+        }
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // A new key goes to the first of `backends` available; `tpm`, which this agent can't create keys in yet, and a name
+    // it doesn't know count as unavailable.
+    #[test]
+    fn a_new_key_takes_the_first_available_key_storage_of_the_policy() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let store = Store::new(directory.0.clone(), "ai".into(), true)?;
+        let config = json!({
+            "version": 1,
+            "revision": 1,
+            "key_storage": { "backends": ["tpm", "future_storage", "file"], "required": true },
+        });
+        assert_eq!(store.key_storage_for_new_key(Some(&config))?.as_str(), "file");
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // oracle: intent crates/agent-identity/INTENT.md §key-storage
+    // A policy that isn't required and lists no available key storage, and a malformed policy, even one meant to be
+    // required, leave the choice to the agent's ranking.
+    #[rstest::rstest]
+    #[case::none_available_not_required(json!({ "backends": ["tpm", "future_storage"], "required": false }))]
+    #[case::malformed_required(json!({ "backends": [], "required": true }))]
+    fn a_new_key_outside_the_policy_takes_the_first_available_key_storage_of_the_ranking(
+        #[case] key_storage: Value,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let store = Store::new(directory.0.clone(), "ai".into(), true)?;
+        let config = json!({ "version": 1, "revision": 1, "key_storage": key_storage });
+        assert_eq!(
+            store.key_storage_for_new_key(Some(&config))?.as_str(),
+            default_key_storage()
+        );
+        Ok(())
+    }
+
+    /// Stores a config whose key storage policy is `key_storage` for `identity`.
+    fn store_policy(store: &Store, identity: &mut StoredIdentity, key_storage: Value) -> anyhow::Result<()> {
+        let revision = config_revision(&identity.config)? + 1;
+        let config = json!({ "version": 1, "revision": revision, "key_storage": key_storage });
+        ensure!(store.update_config(identity, config)?, "the config was not stored");
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // While `required` is `true` and none of `backends` is available, no new key is created, and the identity keeps its
+    // current key.
+    #[test]
+    fn a_required_policy_without_an_available_key_storage_creates_no_renewal_key() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store_policy(
+            &store,
+            &mut identity,
+            json!({ "backends": ["tpm", "future_storage"], "required": true }),
+        )?;
+        let held = identity.clone();
+
+        let error = store
+            .create_pending_key(&mut identity)
+            .err()
+            .context("a renewal key was created outside a required policy")?;
+
+        assert!(renewal_held(&error), "{error:#}");
+        assert_eq!(identity, held);
+        assert_eq!(store.read_identity(held.authority_id)?, Some(held));
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // A missing pending key is replaced at start-up only where the policy allows a new key; a required policy without an
+    // available key storage leaves the identity as it is, and start-up completes rather than fail, which would stop
+    // every identity.
+    #[test]
+    fn startup_leaves_a_missing_pending_key_that_a_required_policy_holds_back() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let certified = store.create_pending_key(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
+        store.delete_file_key(&certified)?;
+        store_policy(&store, &mut identity, json!({ "backends": ["tpm"], "required": true }))?;
+
+        store.reconcile()?;
+
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // The available key storages are each listed once, in ascending byte order; `windows_software_provider` can be
+    // available only on Windows, `file` everywhere, and `tpm` has no backend in this agent.
+    #[test]
+    fn available_key_storages_are_listed_in_byte_order() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let store = Store::new(directory.0.clone(), "ai".into(), true)?;
+        let expected: &[&str] = if cfg!(windows) {
+            &["file", "windows_software_provider"]
+        } else {
+            &["file"]
+        };
+        let available = store.available_key_storages();
+        assert_eq!(available.iter().map(KeyStorage::as_str).collect::<Vec<_>>(), expected);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // An identity whose current or pending key is recorded in an unavailable key storage, or under a well-formed name
+    // the agent doesn't know, is left as it is and never recorded as `key_lost`, because the key may still exist there.
+    #[rstest::rstest]
+    #[case::current_in_tpm("current", "tpm")]
+    #[case::current_in_an_unknown_key_storage("current", "future_storage")]
+    #[case::current_in_an_unavailable_backend("current", "windows_software_provider")]
+    #[case::pending_in_tpm("pending", "tpm")]
+    #[case::pending_in_an_unknown_key_storage("pending", "future_storage")]
+    fn start_up_leaves_an_identity_whose_key_storage_is_unavailable_unchanged(
+        #[case] slot: &str,
+        #[case] storage: &str,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store.create_pending_key(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["YWJj".into()])?;
+        // The key of the slot is gone from the file backend, so the identity would be `key_lost`, or its pending key
+        // replaced, if start-up looked for it in another key storage than the one recorded.
+        let name = match slot {
+            "current" => identity.keys.current.key_name.clone(),
+            _ => identity
+                .keys
+                .pending
+                .as_ref()
+                .context("no pending key")?
+                .key_name
+                .clone(),
+        };
+        store.delete_file_key(&name)?;
+        let bytes = rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            json["keys"][slot]["key_storage"] = Value::from(storage);
+        })?;
+        let paused = store
+            .read_identity(identity.authority_id)?
+            .context("identity is missing")?;
+
+        store.reconcile()?;
+
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(paused));
+        assert_eq!(fs::read(store.identity_path(identity.authority_id))?, bytes);
+        let key = KeyRecord {
+            key_name: name,
+            key_storage: KeyStorage::parse(storage)?,
+            certificate_chain: None,
+        };
+        let error = store
+            .open_key(&key)
+            .err()
+            .context("a key opened from an unavailable key storage")?;
+        assert_eq!(unavailable_key_storage(&error).map(KeyStorage::as_str), Some(storage));
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // A pending file whose in-progress record names an unavailable key storage waits: its record is kept, and
+    // processing it fails as a transient error that names the key storage.
+    #[test]
+    fn an_enrollment_whose_key_storage_is_unavailable_waits_for_it() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        let pending_path = pending::write(&directory.0, &token, true)?;
+        store.begin_enrollment(&token)?.context("begin enrollment")?;
+        let bytes = rewrite_in_progress_json(&directory, &hash_hex, |json| {
+            json["key_storage"] = Value::from("tpm");
+        })?;
+
+        let error = store
+            .begin_enrollment(&token)
+            .err()
+            .context("an enrollment key opened from an unavailable key storage")?;
+        assert_eq!(unavailable_key_storage(&error).map(KeyStorage::as_str), Some("tpm"));
+        store.reconcile()?;
+        assert!(pending_path.exists());
+        assert_eq!(fs::read(pending::in_progress_path(&directory.0, &hash_hex)?)?, bytes);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // At start-up the agent deletes each key with its prefix that no record names with its key storage, so a key file
+    // whose name a record gives another key storage is deleted, while a recorded key file is kept.
+    #[test]
+    fn start_up_deletes_a_key_file_whose_name_is_recorded_only_in_another_key_storage() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store.create_pending_key(&mut identity)?;
+        let pending_name = identity
+            .keys
+            .pending
+            .as_ref()
+            .context("no pending key")?
+            .key_name
+            .clone();
+        rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            json["keys"]["pending"]["key_storage"] = Value::from("tpm");
+        })?;
+
+        store.reconcile()?;
+
+        assert!(store.open_file_key(&pending_name)?.is_none());
+        assert!(store.open_file_key(&identity.keys.current.key_name)?.is_some());
         Ok(())
     }
 }

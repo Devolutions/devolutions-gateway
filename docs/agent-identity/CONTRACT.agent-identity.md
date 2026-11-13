@@ -26,6 +26,8 @@ Each party's own realization (the agent's local files, configuration and CLI; an
 - **Certificate status**: each certificate the authority issues to an identity is `pending` (issued by renew, not yet confirmed), `current` (the one the identity authenticates with) or `retired` (replaced by a confirmed certificate).
   An identity has at most one `pending` and one `current` certificate.
 - **Effective config**: the config the authority holds for an identity at a given moment, with its `revision` (§5.2).
+- **Key storage**: where the device holds a private key, one of the names §5.7 lists.
+- **Key storage policy**: the authority's choice of key storage for an identity's keys, `config.key_storage` (§5.7).
 - **Authenticated stream**: an agent channel stream after the authority has verified its channel proof (§7.3 step 4).
 - `base64` means standard Base64 (RFC 4648 §4) with padding.
 - `base64url` means URL- and filename-safe Base64 alphabet (RFC 4648 §5) without padding.
@@ -104,7 +106,7 @@ Unless stated otherwise, implementations must follow these conventions.
 ## 3. Metadata
 
 - JSON object of string → string.
-- Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
+- Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`, `key_storage`, `key_storage_available`.
 - Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0, DEL (U+007F) or C1 control characters and no invisible format character (U+00AD, U+034F, U+061C, U+115F–U+1160, U+17B4–U+17B5, U+180B–U+180F, U+200B–U+200F, U+202A–U+202E, U+2060–U+206F, U+3164, U+FE00–U+FE0F, U+FEFF, U+FFA0, U+FFF0–U+FFFB, U+1BCA0–U+1BCA3, U+1D173–U+1D17A, U+E0000–U+E0FFF); whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
 - Invisible format characters are excluded so that no value can reorder or hide text where an administrator reads it, such as a friendly name evaluated from metadata.
 - `metadata` is required in enroll, renew and check-in bodies and may be an empty object; an absent or non-object value → `invalid_request`.
@@ -118,7 +120,7 @@ Unless stated otherwise, implementations must follow these conventions.
 ### 3.1 Metadata sent by the agent
 
 - The agent sends a metadata object at enroll, at renew, at check-in and in every `Hello`, collected at send time (so it reflects current values).
-- Always present, non-empty: `hostname`, `os_name`, `os_version`, `arch`, `agent_version`.
+- Always present, non-empty: `hostname`, `os_name`, `os_version`, `arch`, `agent_version`, `key_storage`.
 - Present when the OS provides a value: `fqdn`, `domain`, `machine_id`.
 - The agent sends no other keys.
 - Values use these stable representations so servers can display and filter them consistently:
@@ -126,6 +128,9 @@ Unless stated otherwise, implementations must follow these conventions.
   - `arch`: `x86_64`, `aarch64` or `x86`; another architecture reports a lowercase name that the authority treats as opaque.
   - `agent_version`: the agent's own product version string, the same one the binary's version resource and package report.
   - `machine_id`: Windows SMBIOS system UUID, lowercase hyphenated; Linux `/etc/machine-id` as-is; macOS `IOPlatformUUID`, lowercase hyphenated.
+  - `key_storage`: the name (§5.7) of the key storage holding the key that the CSR carries at enroll and renew, or the key that signs the request at check-in or the proof in `Hello`.
+  - `key_storage_available`: the names (§5.7) of the key storages available on the device, each once, sorted in ascending byte order and joined with `,`, such as `file,windows_software_provider`; it is omitted when none is available.
+- An authority never refuses a request because of `key_storage` or `key_storage_available`, which the agent reports without proof; it may use them to choose a key storage policy.
 - The agent never sends a value that violates §3:
   - It removes C0, DEL and C1 control characters and the invisible format characters of §3, and truncates to 1024 UTF-8 bytes on a character boundary.
   - An optional key whose value is empty after that is omitted.
@@ -212,7 +217,7 @@ Request:
 }
 ```
 
-- Every field is required except `config.agent_channel_url` and product-specific config fields.
+- Every field is required except `config.agent_channel_url`, `config.key_storage` and product-specific config fields.
 - `authority_id` is the authority's UUID; it never changes for that authority, across restarts, upgrades, nodes, backup restores and disaster recovery, and a different `authority_id` denotes a different authority.
 - The server generates `identity_id` when it creates the identity, and the ID remains stable for that identity.
 - The agent refuses, as a permanent outcome, a response whose leaf lacks the enrollment URL extension, carries it more than once or not as an `IA5String`, or whose value, read as text, is not its token's `u` without trailing slashes.
@@ -226,6 +231,8 @@ Request:
   It is absent when the server does not offer the channel to this identity, and the agent then opens no agent channel for that authority.
   It must be an absolute `https` URL without a user name or password, a query or a fragment, read as text like `u` (§2); an agent receiving any other value treats it as absent and logs a warning.
   Product-specific config fields, such as a PSU channel URL, may coexist with it.
+- `config.key_storage` is the identity's key storage policy (§5.7); it is absent when the authority sets none.
+  Product-specific config fields never use a member name that this contract defines for the config: `version`, `revision`, `agent_channel_url` or `key_storage`.
 - The agent's identity HTTP client never follows redirects and treats a `3xx` response as transient.
   It validates the server certificate and host name against the OS trust store.
 
@@ -241,8 +248,6 @@ Request:
 - If the CSR key is the key of any other certificate the server has issued, including this identity's current or retired certificates and every certificate of another identity, the server returns `invalid_request`.
 - If the CSR key was never issued, the server issues a new pending certificate and retires the identity's previous pending certificate, if any.
 - Renew never promotes a certificate; only `confirm` does (§5.5).
-- The name `key_storage` is reserved in the `enroll` and `renew` `200` bodies for a later revision of this contract: an ordered list of suggested device-key backends for the identity's next keys, and a flag saying whether the agent must fail when none of them is available.
-  Until that revision, servers don't send it and agents ignore it, as any unknown field.
 
 <a id="errors"></a>
 
@@ -324,9 +329,41 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 ```
 
 - `config`: the identity's effective config (same shape as in §5.2, with its current `revision`); the agent stores and applies it as for a `ConfigUpdate` (§7.3 step 7).
-- `renewal_requested`: the identity's request-renewal flag (§8.2); when `true`, the agent starts a renewal (§8).
+- `renewal_requested`: the identity's request-renewal flag (§8.2); when `true`, the agent starts a renewal (§8), unless its key storage policy holds renewal back (§5.7).
 - It's the only HTTP fallback: the agent checks in only while it has no authenticated stream for that identity, and with a working channel, config and renewal requests arrive through §7.3.
 - Scope: nothing else is delivered over HTTP; features that need push (e.g. PEDM policy) require a working agent channel.
+
+<a id="key-storage"></a>
+
+### 5.7 Key storage
+
+| Name                        | Key storage                                                                 | Can be available on    |
+| --------------------------- | --------------------------------------------------------------------------- | ---------------------- |
+| `file`                      | a key file that only the operating system's file permissions protect         | every platform         |
+| `windows_software_provider` | a non-exportable machine key of the Microsoft Software Key Storage Provider  | Windows                |
+| `tpm`                       | a non-exportable key held by the device's TPM 2.0                            | devices with a TPM 2.0 |
+
+A key storage is available on a device when the agent can create keys in it there.
+
+The key storage policy, `config.key_storage` (§5.2), is an object:
+
+```json
+{ "backends": ["tpm", "windows_software_provider"], "required": true }
+```
+
+- `backends` (required): an array of 1 to 8 distinct strings, each matching `^[a-z][a-z0-9_]{0,63}$`, in the authority's order of preference.
+  An authority sends only names from the table above.
+  The agent counts a well-formed name that it doesn't know as a key storage that isn't available, so that a name added to the table never invalidates an older agent's policy.
+- `required` (required): `false` lets the agent create a new key outside `backends` when none of them is available; `true` does not.
+- When `key_storage` is not an object, lacks `backends` or `required`, or holds a value outside these rules, the agent treats it as absent and uses the rest of the config, including its `revision`, as usual; this overrides §5.4's transient outcome for a field outside its domain, so that a malformed policy never blocks enrollment or renewal.
+- The agent creates each new key of the identity in the first of `backends` available on the device.
+- Without a policy, or when none of `backends` is available and `required` is `false`, the agent creates the key in an available key storage of its own choosing.
+  The key the agent enrolls with exists before the enrollment response, so it too is in a key storage of the agent's choosing.
+- While `required` is `true` and none of `backends` is available, the agent sends no `renew` request for the identity, whatever starts the renewal (§5.4, §5.6, §8.1), and keeps using its current key and certificate.
+  A renewal it holds back starts once one of `backends` becomes available, or once it stores a config whose policy no longer holds it back.
+  An expired certificate can no longer check in or open a stream, so such a config reaches the agent only before the current certificate's `notAfter`.
+- The agent also renews (§8.1) without waiting for its schedule or a renewal request when all of these hold: `required` is `true`, the key storage of its current key is not in `backends`, and one of `backends` is available.
+  It starts this renewal after any renewal of the identity in progress completes, and may delay it by up to 15 minutes, and until 10 minutes after it last completed a renewal of that identity.
 
 <a id="signatures"></a>
 
@@ -415,6 +452,7 @@ An authority never holds an effective config whose `ConfigUpdate` envelope would
    - `agent_channel_url` removed: it closes the stream and stops connecting;
    - `agent_channel_url` changed: it reconnects to the new URL, opening the new stream before closing the old one;
    - `agent_channel_url` added (only reachable through §5.6 check-in): it connects.
+   - `key_storage` added, changed or removed: it applies to the identity's next key, and may start or release a renewal (§5.7).
 
 - No server push or metadata update happens before step 4 succeeds.
 - Envelope `id` values are UUIDs.
@@ -443,7 +481,7 @@ An authority never holds an effective config whose `ConfigUpdate` envelope would
 
 ### 8.1 Agent renewal
 
-1. The agent renews on its own schedule, on `RenewRequested`, and when check-in returns `renewal_requested: true`.
+1. The agent renews on its own schedule, on `RenewRequested`, when check-in returns `renewal_requested: true`, and when its key storage policy calls for it; its key storage policy can also hold a renewal back (§5.7).
 2. `POST renew` with a CSR for a new key, signed with the current key; on failure, retry with the same CSR.
 3. `POST confirm` signed with the new key; retry with backoff.
    While the outcome of a `confirm` is unknown, the agent sends no other signed request to that authority and opens no stream; it retries `confirm` first, since `confirm` is idempotent.
