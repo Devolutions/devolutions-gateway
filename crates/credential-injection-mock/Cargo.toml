@@ -1,0 +1,26 @@
+[package]
+name = "credential-injection-mock"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "Fake RDP peers and KDC for the Gateway credential-injection tests"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+ironrdp-connector = "0.10"
+ironrdp-core = { version = "0.2", features = ["std"] }
+ironrdp-pdu = { version = "0.9", features = ["std"] }
+ironrdp-tokio = "0.10"
+kdc = "0.1"
+picky-asn1-der = "0.5"
+picky-krb = "0.12"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+tokio-rustls = { version = "0.26", features = ["ring"] }
+x509-cert = { version = "0.3", default-features = false, features = ["std"] }
