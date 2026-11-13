@@ -106,6 +106,7 @@ fn hello_fields() -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
     Arc::new(|| HelloFields {
         metadata: HashMap::from([("hostname".to_owned(), "test-host".to_owned())]),
         config_revision: 7,
+        capabilities: Vec::new(),
     })
 }
 
@@ -198,6 +199,7 @@ async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::
             hello_hostname.lock().expect("hostname lock").clone(),
         )]),
         config_revision: 7,
+        capabilities: Vec::new(),
     });
     let _channel =
         client(&authority, Settings::default())?.connect(identity.target_with_hello(&authority.url, hello))?;
