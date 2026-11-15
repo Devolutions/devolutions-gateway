@@ -50,6 +50,7 @@ The Agent answers each `DiscoverUniGetUiInstances` request with one report, `Uni
 It sends `UniGetUiInstances` only when the scan read every registration and resolved each registered endpoint as a reported instance or as absent, not owned by `UniGetUI.exe`, or elevated.
 That list replaces the previous instance set; an empty list means no instance.
 Otherwise, including when the whole channel envelope would exceed its size limit, the Agent sends `UniGetUiInstancesUnavailable`.
+An unresolved registration can make discovery unavailable for every user on the device.
 It is `DeviceManagementReport.unigetui_instances_unavailable` field 7, with `reason` field 1: `UNSPECIFIED` (0), `BUSY` (1), `COLLECTION_FAILED` (2) or `TOO_LARGE` (3).
 The Authority maps `UNSPECIFIED` and unrecognized reasons to generic unavailability, and an unavailable report preserves the previous instance set.
 The response envelope's `correlation_id` is the request UUID.

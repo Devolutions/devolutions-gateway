@@ -285,32 +285,36 @@ pub(super) async fn resolve_target(target_user_sid: &str) -> anyhow::Result<Targ
 pub(super) async fn instances() -> anyhow::Result<Vec<agent_channel_proto::UniGetUiInstance>> {
     #[cfg(windows)]
     {
-        let scan = discover_endpoints_with_identity().await?;
-        if !scan.complete {
-            bail!("UniGetUI discovery could not resolve every registered endpoint");
-        }
-        let mut instances: Vec<_> = scan
-            .found
-            .into_iter()
-            .map(|endpoint| agent_channel_proto::UniGetUiInstance {
-                user_sid: endpoint.identity.user_sid,
-                session_id: endpoint.identity.session_id,
-                display_name: endpoint.identity.display_name,
-                signature_verified: endpoint.identity.signature_verified,
-            })
-            .collect();
-        // Several registrations can name the same endpoint.
-        instances.sort_by(|a, b| {
-            (&a.user_sid, a.session_id, &a.display_name).cmp(&(&b.user_sid, b.session_id, &b.display_name))
-        });
-        instances.dedup();
-        Ok(instances)
+        instances_from_scan(discover_endpoints_with_identity().await?)
     }
 
     #[cfg(not(windows))]
     {
         bail!("UniGetUI discovery is only supported on Windows")
     }
+}
+
+#[cfg(windows)]
+fn instances_from_scan(scan: Scan<DiscoveredEndpoint>) -> anyhow::Result<Vec<agent_channel_proto::UniGetUiInstance>> {
+    if !scan.complete {
+        bail!("UniGetUI discovery could not resolve every registered endpoint");
+    }
+    let mut instances: Vec<_> = scan
+        .found
+        .into_iter()
+        .map(|endpoint| agent_channel_proto::UniGetUiInstance {
+            user_sid: endpoint.identity.user_sid,
+            session_id: endpoint.identity.session_id,
+            display_name: endpoint.identity.display_name,
+            signature_verified: endpoint.identity.signature_verified,
+        })
+        .collect();
+    // Several registrations can name the same endpoint.
+    instances.sort_by(|a, b| {
+        (&a.user_sid, a.session_id, &a.display_name).cmp(&(&b.user_sid, b.session_id, &b.display_name))
+    });
+    instances.dedup();
+    Ok(instances)
 }
 
 #[cfg(windows)]
@@ -418,10 +422,14 @@ enum Verification {
 
 #[cfg(windows)]
 fn discover_endpoints() -> anyhow::Result<Scan<Endpoint>> {
-    let directories = registration_directories()?;
+    Ok(discover_in(registration_directories()?))
+}
+
+#[cfg(windows)]
+fn discover_in(directories: Scan<PathBuf>) -> Scan<Endpoint> {
     let mut registrations = read_registrations(&directories.found);
     registrations.complete &= directories.complete;
-    Ok(registrations)
+    registrations
 }
 
 #[cfg(windows)]
@@ -1246,6 +1254,74 @@ mod tests {
             panic!("expected the pipe registration");
         };
         assert!(matches!(&endpoint.transport, Transport::NamedPipe(name) if name == DEFAULT_PIPE_NAME));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[cfg(windows)]
+    #[test]
+    fn incomplete_scan_is_never_reported_as_a_list() {
+        let scan = Scan {
+            found: vec![endpoint("one.json", "S-1-5-21-100")],
+            complete: false,
+        };
+
+        assert!(instances_from_scan(scan).is_err());
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[cfg(windows)]
+    #[test]
+    fn complete_scan_lists_all_instances() {
+        let scan = Scan {
+            found: vec![endpoint("b.json", "S-1-5-21-200"), endpoint("a.json", "S-1-5-21-100")],
+            complete: true,
+        };
+
+        let instances = instances_from_scan(scan).expect("complete scan");
+
+        assert_eq!(instances.len(), 2);
+        assert!(instances.iter().any(|instance| instance.user_sid == "S-1-5-21-100"));
+        assert!(instances.iter().any(|instance| instance.user_sid == "S-1-5-21-200"));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[cfg(windows)]
+    #[rstest::rstest]
+    #[case::unresolved_directories(false, false)]
+    #[case::resolved_directories(true, true)]
+    fn registration_scan_is_complete_only_when_directories_and_files_are(
+        #[case] directories_complete: bool,
+        #[case] expected_complete: bool,
+    ) {
+        let directory = tempfile::tempdir().expect("create registration directory");
+        std::fs::write(
+            directory.path().join("valid.json"),
+            r#"{"token":"secret","transport":"tcp","tcpPort":7058}"#,
+        )
+        .expect("write valid registration");
+        let directories = Scan {
+            found: vec![directory.path().to_path_buf()],
+            complete: directories_complete,
+        };
+
+        let scan = discover_in(directories);
+
+        assert_eq!(scan.complete, expected_complete);
+        assert_eq!(scan.found.len(), 1);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[cfg(windows)]
+    #[test]
+    fn malformed_registration_makes_discovery_incomplete_even_with_resolved_directories() {
+        let directory = tempfile::tempdir().expect("create registration directory");
+        std::fs::write(directory.path().join("partial.json"), r#"{"token":"#).expect("write partial registration");
+        let directories = Scan {
+            found: vec![directory.path().to_path_buf()],
+            complete: true,
+        };
+
+        assert!(!discover_in(directories).complete);
     }
 
     // oracle: spec Microsoft "File path formats on Windows" §Path normalization
