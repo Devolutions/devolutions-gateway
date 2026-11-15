@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn pending_catalog_transaction_recovers_before_stale_snapshot() {
-        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967826
+        // oracle: regression #2194
         let directory = tempfile::tempdir().expect("create catalog test directory");
         let identity_id = Uuid::new_v4();
         let old_document = r#"{"version":1,"catalogs":[{"name":"old"}]}"#;
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn pending_catalog_deletion_prevents_stale_snapshot_resurrection() {
-        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967826
+        // oracle: regression #2194
         let directory = tempfile::tempdir().expect("create catalog test directory");
         let identity_id = Uuid::new_v4();
         let old_document = r#"{"version":1,"catalogs":[{"name":"old"}]}"#;

@@ -282,7 +282,7 @@ async fn collect_inventory(target_user_sid: &str) -> Option<Inventory> {
 }
 
 fn run_package_operation(request: PackageOperationRequest) -> PackageOperationResult {
-    let operation_id = request.operation_id.clone();
+    let operation_id = request.operation_id;
     let error = "authorized UniGetUI broker routing is not available in this build".to_owned();
     warn!(%operation_id, %error, "Package operation rejected");
     PackageOperationResult {
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn oversized_package_prevents_an_incomplete_inventory_report() {
-        // oracle: channel.proto InventoryReport describes a complete inventory as the replacement unit.
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let inventory = Inventory {
             packages: vec![InstalledPackage {
                 manager: "winget".to_owned(),
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn oversized_inventory_metadata_is_rejected() {
-        // oracle: channel.proto InventoryReport describes a complete inventory as the replacement unit.
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let inventory = Inventory {
             packages: Vec::new(),
             managers: Vec::new(),

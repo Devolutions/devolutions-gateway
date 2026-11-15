@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn dropping_links_cancels_their_device_management_workers() {
-        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967639
+        // oracle: regression #2194
         let links = Links::<TestChannel>::new(Uuid::nil());
         let workers_shutdown = links.workers_shutdown.subscribe();
 

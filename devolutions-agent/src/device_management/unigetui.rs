@@ -230,9 +230,9 @@ pub(super) async fn resolve_target(target_user_sid: &str) -> anyhow::Result<Targ
         let endpoints = discover_endpoints_with_identity().await?;
         let endpoint = select_target_endpoint(&endpoints, target_user_sid)
             .context("no verified live UniGetUI instance belongs to the target user SID")?;
-        return Ok(TargetInstance {
+        Ok(TargetInstance {
             endpoint: endpoint.clone(),
-        });
+        })
     }
 
     #[cfg(not(windows))]
@@ -245,7 +245,7 @@ pub(super) async fn resolve_target(target_user_sid: &str) -> anyhow::Result<Targ
 pub(super) async fn instances() -> anyhow::Result<Vec<agent_channel_proto::UniGetUiInstance>> {
     #[cfg(windows)]
     {
-        return Ok(discover_endpoints_with_identity()
+        Ok(discover_endpoints_with_identity()
             .await?
             .into_iter()
             .map(|endpoint| agent_channel_proto::UniGetUiInstance {
@@ -254,7 +254,7 @@ pub(super) async fn instances() -> anyhow::Result<Vec<agent_channel_proto::UniGe
                 display_name: endpoint.identity.display_name,
                 signature_verified: endpoint.identity.signature_verified,
             })
-            .collect());
+            .collect())
     }
 
     #[cfg(not(windows))]
@@ -519,6 +519,11 @@ fn named_pipe_server_process_id(handle: std::os::windows::io::RawHandle) -> anyh
 }
 
 #[cfg(windows)]
+fn tcp_port(port: u32) -> Option<u16> {
+    u16::try_from(port).ok().map(u16::from_be)
+}
+
+#[cfg(windows)]
 fn tcp_listener_process_id(port: u16) -> anyhow::Result<u32> {
     let buffer = tcp_owner_table(TCP_TABLE_OWNER_PID_LISTENER)?;
     // SAFETY: `GetExtendedTcpTable` filled `buffer` with a MIB_TCPTABLE_OWNER_PID value.
@@ -526,7 +531,7 @@ fn tcp_listener_process_id(port: u16) -> anyhow::Result<u32> {
     // SAFETY: The table header is followed by `dwNumEntries` rows as specified by the API.
     let rows = unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
     rows.iter()
-        .find(|row| row.dwState == MIB_TCP_STATE_LISTEN.0 as u32 && u16::from_be(row.dwLocalPort as u16) == port)
+        .find(|row| row.dwState == MIB_TCP_STATE_LISTEN.0 as u32 && tcp_port(row.dwLocalPort) == Some(port))
         .map(|row| row.dwOwningPid)
         .filter(|process_id| *process_id != 0)
         .with_context(|| format!("no TCP listener owns UniGetUI port {port}"))
@@ -542,8 +547,8 @@ fn tcp_connection_process_id(local_port: u16, remote_port: u16) -> anyhow::Resul
     rows.iter()
         .find(|row| {
             row.dwState == MIB_TCP_STATE_ESTAB.0 as u32
-                && u16::from_be(row.dwLocalPort as u16) == local_port
-                && u16::from_be(row.dwRemotePort as u16) == remote_port
+                && tcp_port(row.dwLocalPort) == Some(local_port)
+                && tcp_port(row.dwRemotePort) == Some(remote_port)
         })
         .map(|row| row.dwOwningPid)
         .filter(|process_id| *process_id != 0)
@@ -560,8 +565,10 @@ fn tcp_owner_table(table_class: TCP_TABLE_CLASS) -> anyhow::Result<Vec<usize>> {
         bail!("failed to size the TCP owner table: {result}");
     }
 
-    let word_size = size_of::<usize>() as u32;
-    let mut buffer = vec![0usize; byte_count.div_ceil(word_size) as usize];
+    let word_count = usize::try_from(byte_count)
+        .context("TCP owner table size exceeds address space")?
+        .div_ceil(size_of::<usize>());
+    let mut buffer = vec![0usize; word_count];
     // SAFETY: `buffer` is aligned and large enough for the returned owner table.
     let result = unsafe {
         GetExtendedTcpTable(
@@ -843,7 +850,7 @@ mod tests {
 
     #[test]
     fn error_responses_do_not_echo_the_ipc_token() {
-        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967482
+        // oracle: regression #2194
         let response = b"HTTP/1.1 500 Error\r\nContent-Length: 12\r\n\r\nipc-secret-x";
 
         let error = parse_http_response(response).expect_err("error response is rejected");
@@ -942,7 +949,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn portable_registration_directory_uses_the_settings_configuration_path() {
-        // oracle: Devolutions/UniGetUI@da6be7b86100:AppPaths.ResolvePortableDataDirectory and IpcTransportOptions.EndpointMetadataDirectoryPath
+        // oracle: reference Devolutions/UniGetUI@da6be7b86100302a79a208e7ab4d5c6fcd695fd5:src/UniGetUI.Core.Logger/AppPaths.cs
+        // oracle: reference Devolutions/UniGetUI@da6be7b86100302a79a208e7ab4d5c6fcd695fd5:src/UniGetUI.Core.Data/CoreData.cs
+        // oracle: reference Devolutions/UniGetUI@da6be7b86100302a79a208e7ab4d5c6fcd695fd5:src/UniGetUI.Interface.IpcApi/IpcTransport.cs
         let installation_directory = tempfile::tempdir().expect("create portable installation directory");
         std::fs::write(installation_directory.path().join("ForceUniGetUIPortable"), "")
             .expect("create portable marker");
@@ -961,7 +970,7 @@ mod tests {
 
     #[test]
     fn enabled_loading_manager_defers_inventory() {
-        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967694
+        // oracle: regression #2194
         let manager: IpcManager =
             serde_json::from_str(r#"{"name":"npm","enabled":true,"ready":false,"health":{"state":"loading"}}"#)
                 .expect("deserialize loading manager");
@@ -971,7 +980,7 @@ mod tests {
 
     #[test]
     fn enabled_manager_not_found_does_not_defer_inventory() {
-        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967694
+        // oracle: regression #2194
         let manager: IpcManager =
             serde_json::from_str(r#"{"name":"npm","enabled":true,"ready":false,"health":{"state":"not-found"}}"#)
                 .expect("deserialize not-found manager");
@@ -981,7 +990,7 @@ mod tests {
 
     #[test]
     fn available_version_is_merged_into_the_matching_scope_only() {
-        // oracle: crates/agent-channel-proto/CONTRACT.package-management.md §inventory preserves scope in package identity.
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let mut packages = vec![
             InstalledPackage {
                 manager: "winget".to_owned(),
@@ -1022,7 +1031,7 @@ mod tests {
 
     #[test]
     fn unknown_available_scope_does_not_match_a_known_installation_scope() {
-        // oracle: crates/agent-channel-proto/CONTRACT.package-management.md §provisional-decisions leaves unknown scope unresolved.
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let mut packages = vec![InstalledPackage {
             manager: "winget".to_owned(),
             source: "winget".to_owned(),
@@ -1052,7 +1061,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn tcp_listener_lookup_reports_the_loopback_listener_owner() {
-        // oracle: spec GetExtendedTcpTable https://learn.microsoft.com/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable
+        // oracle: spec GetExtendedTcpTable §Remarks
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("bind a loopback listener");
@@ -1068,7 +1077,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn tcp_connection_lookup_reports_the_loopback_server_owner() {
-        // oracle: spec GetExtendedTcpTable https://learn.microsoft.com/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable
+        // oracle: spec GetExtendedTcpTable §Remarks
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("bind a loopback listener");
