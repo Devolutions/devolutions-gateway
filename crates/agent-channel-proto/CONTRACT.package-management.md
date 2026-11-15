@@ -50,7 +50,9 @@ The Authority stores and selects the target user SID, and displays it as `DOMAIN
 Every package operation includes a target user SID, including a machine-scope operation.
 The Agent resolves the target SID to a live instance when it executes the request.
 The Agent sends the write to exactly one resolved instance and does not retry against another endpoint.
-The package-management contract requires the Agent and Broker to support every package manager and scope exposed by UniGetUI; listing a manager in inventory alone does not satisfy this requirement.
+Inventory covers the package managers and scopes exposed by UniGetUI.
+Remote writes are limited to operations supported by the existing package broker and fail closed when unsupported.
+Remote writes never fall back to local package execution.
 
 <a id="inventory"></a>
 ## Inventory
@@ -58,7 +60,7 @@ The package-management contract requires the Agent and Broker to support every p
 Each package entry contains its manager, source, package ID, name, installed version, available version and scope.
 Every inventory request includes the target user SID, as do install, update and uninstall requests.
 Values with confirmed machine or user semantics distinguish those installations; other manager-relative values are not interpreted without a mapping.
-Scope values supported for package operations must include every value UniGetUI exposes, without conversion to a narrower set.
+Inventory preserves the scope values UniGetUI exposes without conversion to a narrower set.
 UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish device-wide ownership across managers.
 The scope-label definitions are in [UniGetUI package scope aliases].
 Unknown-scope handling and the placement of the reporting instance SID are listed in `CONTRACT.package-management.md §provisional-decisions`.
@@ -136,9 +138,8 @@ UniGetUI must add scope to its package model and installed IPC response while in
 UniGetUI must pass the Agent-minted operation token through IPC to the package broker's named pipe without elevating its process.
 UniGetUI must reject remote operations when broker routing is disabled, the manager is unsupported, the source cannot use broker routing, or the token does not authorize all execution-affecting fields; it must not fall back to local process execution.
 This fail-closed requirement covers the existing local-fallback paths in [PackageOperations.cs][UniGetUI operation fallback].
-UniGetUI must extend its broker mapping beyond the current fixed manager list to cover every exposed manager and scope.
 The current fixed mapping is in [`BrokerRequestBuilder.TryMapManagerName`][UniGetUI manager mapping] at commit `da6be7b86100302a79a208e7ab4d5c6fcd695fd5`.
-The UniGetUI `Installer` manager also requires feed-item resolution, installer hash, identity and signature verification, and installed-version receipt handling; adding a manager enum value alone is insufficient.
+A Broker route for the UniGetUI `Installer` manager requires feed-item resolution, installer hash, identity and signature verification, and installed-version receipt handling; adding a manager enum value alone is insufficient.
 These operations are implemented in the pinned [WinInstaller runner], [WinInstaller manager] and [Installer receipt] sources.
 DVLS must store the target user SID and package scope in its beta database schema.
 DVLS/RDM must show the Agent-reported user and session in an instance picker and send the selected target user SID with every operation.
