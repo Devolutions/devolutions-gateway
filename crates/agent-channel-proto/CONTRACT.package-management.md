@@ -407,8 +407,10 @@ The in-memory Broker record need not survive a restart.
 The .NET broker passes `--source` for install and for updates with an explicit source, which overrides NuGet configuration including Package Source Mapping.
 The source override is documented in [dotnet tool install].
 An operation result identifies the operation ID.
-When the outcome is known, it reports success or failure with an error value on failure.
+When the outcome is known, it reports success or failure with a nonempty error on failure.
 When the Agent cannot recover an operation's outcome, it reports `UNKNOWN`.
+The Agent treats a journal record of failure with an empty error as unrecoverable.
+The Authority treats a known-failure result with an absent or empty error as malformed, records `UNKNOWN`, and does not retry automatically.
 `PackageOperationResult.execution_started` is optional field 5.
 The Agent sets it to true only when the Broker's in-process record proves that the operation's process started; otherwise it is absent.
 The Authority treats false like absence; neither proves that the operation did not start or permits a retry.
