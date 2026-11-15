@@ -90,7 +90,6 @@ Every package operation includes a target user UUID, including a machine-scope o
 The Agent maps a known UUID to a user SID and resolves a live instance for that user when it executes the request.
 It rejects a missing, malformed, nil or unknown user UUID, or a request for a different registry epoch, before Broker execution.
 While its operation journal retains the operation ID, the Agent sends the write at most once to one resolved instance and does not retry it against that or another endpoint.
-When a write targets an existing installation, UniGetUI rejects it if that installation cannot be identified in the authorized scope.
 Inventory covers the package managers and scopes exposed by UniGetUI.
 Remote writes are limited to operations supported by the existing package broker and fail closed when unsupported.
 Remote writes never fall back to local package execution.
@@ -287,12 +286,18 @@ Omission from a snapshot does not prove that a package was uninstalled.
 The operation type is exactly one of `install`, `update` or `uninstall`.
 Remote writes allow install, update and uninstall in user scope for Broker-supported managers and in both scopes for WinGet.
 Unknown scope and other machine-scope requests are rejected without execution.
+User-scope operations run unelevated with the target user's token.
+When a Broker builder supports a scope selector, it passes the requested scope to the manager.
 An install may replace an existing installation when the manager cannot prevent it.
 The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope, target user UUID and registry epoch, but no bypass token.
 An install requires a nonempty canonical Broker source name, not the inventory display label.
 An update may name its current execution feed or leave the source empty to use the manager's normal default feed.
 Uninstall uses no feed and carries an empty source.
 Update and uninstall identify the installed package by manager, package ID and scope without proving its original source.
+UniGetUI rejects a write targeting an existing installation when it cannot identify the authorized row in the requested scope.
+When the manager cannot select the requested scope, UniGetUI checks its current installed list immediately before submission.
+It rejects the operation unless exactly one listed installation matches the manager and package ID and that installation is the authorized row.
+The installed list may omit an installation that the manager can act on, so the manager may affect another installation accessible to the target user's unelevated token.
 The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory.
 The grant binds the target user SID, operation type, manager, source, package ID, version, scope, requested elevation and Broker request ID.
 UniGetUI sends `POST /v1/package-operations/execute-grant` over the Broker's named pipe while running unelevated as the target user.
@@ -368,11 +373,8 @@ A Broker rejection establishes only that the rejected request started no work; i
 After a grant has been made available to UniGetUI, the Agent reports an unverified outcome as `UNKNOWN`, not a definite failure.
 The in-memory Broker record need not survive a restart.
 
-The npm broker always emits `--global`, while the .NET tool broker emits it when no custom install location is set; both reject explicit machine scope, so the current routes do not preserve UniGetUI's distinct `Local` and `Global` choices.
-The .NET broker passes `--source` for install and update, which overrides NuGet configuration including Package Source Mapping.
-The current Scoop broker rejects machine/global scope and elevated execution while its script is resolved from the target user's profile; those guards remain until a separately trusted route exists.
-The current scope behavior is visible in the [npm broker builder], [.NET tool broker builder] and [Scoop broker builder]; the source override is documented in [dotnet tool install].
-How each manager's remaining scope choices map to broker execution remains unresolved.
+The .NET broker passes `--source` for install and for updates with an explicit source, which overrides NuGet configuration including Package Source Mapping.
+The source override is documented in [dotnet tool install].
 An operation result identifies the operation ID.
 When the outcome is known, it reports success or failure with an error value on failure.
 When the Agent cannot recover an operation's outcome, it reports `UNKNOWN`.
@@ -491,7 +493,6 @@ The Authority opens a channel with a channel ID, extension name and version, and
 The Agent refuses an unknown extension or one disabled by local configuration.
 Data messages carry a channel ID and opaque payload, and either party may close a channel with a reason.
 Package management is the first separately versioned extension.
-How each manager's scope maps to broker execution remains unresolved.
 An operation result does not itself update package records.
 The requested-version field is optional where an operation does not use a version; its exact meaning for each operation is unresolved.
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
@@ -515,9 +516,6 @@ DVLS/RDM shows the Agent-reported user and session in an instance picker and sen
 [UniGetUI operation fallback]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Operations/PackageOperations.cs#L387-L514
 [UniGetUI broker request fields]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.AgentBroker/BrokerRequestBuilder.cs#L53-L84
 [UniGetUI package scope aliases]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Enums/Enums.cs#L11-L18
-[npm broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/npm.rs#L19-L50
-[.NET tool broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/dotnet.rs#L19-L86
-[Scoop broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/scoop.rs#L78-L86
 [dotnet tool install]: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install#options
 [WinInstaller runner]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/Internal/WinInstallerRunner.cs#L30-L106
 [WinInstaller manager]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/WinInstaller.cs
