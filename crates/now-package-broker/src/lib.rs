@@ -32,6 +32,8 @@ pub mod policy_store;
 #[cfg(windows)]
 pub mod policy_watcher;
 #[cfg(windows)]
+pub mod remote_grant;
+#[cfg(windows)]
 pub mod server;
 #[cfg(windows)]
 pub mod task;
