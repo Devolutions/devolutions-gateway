@@ -90,6 +90,8 @@ The Agent mints an opaque, short-lived, single-use grant, also called a bypass t
 The grant binds the target user SID, operation type, manager, source, package ID, version, scope, requested elevation and Broker request ID.
 UniGetUI sends `POST /v1/package-operations/execute-grant` over the Broker's named pipe while running unelevated as the target user.
 The request uses `Content-Type: application/json`, `Accept: application/json` and exactly one `X-Devolutions-Package-Grant` header.
+Before sending the grant, UniGetUI authenticates the pipe server as the live Broker service.
+The authentication mechanism remains unresolved; grant execution stays unavailable until it is established.
 The Broker accepts `application/json` content types with parameters, including `charset=utf-8`; the JSON body is UTF-8.
 The `Accept` value is exactly `application/json`, ignoring case and surrounding whitespace.
 The grant is 1 to 2,048 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._~:-]*`.
