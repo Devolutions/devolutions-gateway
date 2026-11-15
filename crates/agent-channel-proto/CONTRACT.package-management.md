@@ -85,16 +85,18 @@ When the canonical source name is unavailable, the operation is rejected without
 The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory.
 The grant binds the target user SID, operation type, manager, source, package ID, version, scope, requested elevation and Broker request ID.
 UniGetUI sends `POST /v1/package-operations/execute-grant` over the Broker's named pipe while running unelevated as the target user.
-The request uses `Accept: application/json` and carries the grant unchanged in exactly one `X-Devolutions-Package-Grant` header.
-The grant contains only visible ASCII characters, so it cannot inject another header.
+The request uses `Content-Type: application/json`, `Accept: application/json` and exactly one `X-Devolutions-Package-Grant` header.
+The Broker accepts `application/json` content types with parameters, including `charset=utf-8`; the JSON body is UTF-8.
+The `Accept` value is exactly `application/json`, ignoring case and surrounding whitespace.
+The grant is 1 to 2,048 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._~:-]*`.
+Header names are case-insensitive; duplicate grant or `Accept` headers are rejected.
+The client validates the grant before sending it and does not send it with any other Broker request.
 The Broker independently validates the decoded request and the pipe caller's SID against the grant before execution, and consumes a matching grant atomically.
 The Broker rejects an invalid, expired, reused or mismatched grant rather than applying local policy.
 The Broker rejects missing, duplicate, invalid or unsupported grant requests before consuming a grant or starting work.
+Once consumed, a grant is never restored, even if submission or response delivery fails.
 The legacy `POST /v1/package-operations/execute` route rejects any request carrying the grant header.
 If the grant route is unavailable, including an older Broker's 404 response, UniGetUI does not retry through the legacy route or execute locally.
-Grant-execution responses set `Authorization.Kind` to `RemoteGrant` without reporting a local policy, decision or rule.
-Responses contain no grant value, captured stdout or stderr, or command preview.
-The exact grant-execution JSON, error bodies and HTTP status codes remain unresolved.
 The Agent, UniGetUI and Broker reject execution-affecting fields not authorized by the grant.
 The Authority request does not authorize custom parameters, hooks or other execution options, so remote requests carrying them are rejected.
 UniGetUI's broker request builder maps source, custom parameters and pre-operation, post-operation and kill-before-operation commands into the request.
@@ -109,11 +111,14 @@ An empty requested scope requires an absent Broker `Options.Scope`.
 A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
 The Broker rejects any `Source.Url` the Authority has not authorized.
 The representation and manager-specific validation of authorized source URLs remain unresolved.
+Matching a source name or URL in the request alone does not establish the feed the manager uses.
+The Broker rejects an operation before submission when it cannot ensure that the manager's configured source-mapping restrictions remain effective throughout execution.
 It rejects `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
 It also rejects `Interactive`, `SkipHashCheck`, `PreRelease`, `UninstallPrevious` and `NoUpgrade` when true.
 Any future execution-affecting request field must be explicitly authorized or rejected.
 
 The Broker requires `RequestKind` to be `PackageRequest` and `RequestVersion` to be `1.0`.
+The request is a JSON `PackageRequest`; unknown or duplicate fields at any object level are rejected.
 The Agent generates a Broker request ID as a lowercase, hyphenated UUID and binds it to the grant.
 UniGetUI preserves that ID, and the Broker rejects a different `RequestId`.
 `CreatedAt` is excluded from the grant; the Broker parses it as an RFC 3339 timestamp and measures grant expiry independently of it.
@@ -125,11 +130,14 @@ Those two string values are excluded from the grant; their verified SID and imag
 The actual execution token must be elevated exactly when `Options.Scope` is `Machine` or the grant authorizes `RequestedElevation` as `Elevated`.
 The Broker rejects an elevated request unless the Authority's scope authorizes machine effects.
 `IncludeCommandPreview` must be false, and `CaptureOutput` must be true.
-Captured stdout and stderr go to the target user's Broker event channel and are not included in the Authority's operation result, including its error text.
+UniGetUI uses captured stdout and stderr only for local result parsing; it does not send them to the Agent or Authority or write them to logs.
+The existing event pipe permits access by the target user SID, SYSTEM and Administrators and does not authenticate the connecting process or session.
+The required privacy boundary for grant-operation output remains unresolved; remote execution must not begin until it is settled.
 
 The npm broker always emits `--global`, while the .NET tool broker emits it when no custom install location is set; both reject explicit machine scope, so the current routes do not preserve UniGetUI's distinct `Local` and `Global` choices.
+The .NET broker passes `--source` for install and update, which overrides NuGet configuration including Package Source Mapping.
 The current Scoop broker rejects machine/global scope and elevated execution while its script is resolved from the target user's profile; those guards remain until a separately trusted route exists.
-The current scope behavior is visible in the [npm broker builder], [.NET tool broker builder] and [Scoop broker builder].
+The current scope behavior is visible in the [npm broker builder], [.NET tool broker builder] and [Scoop broker builder]; the source override is documented in [dotnet tool install].
 How each manager's scope maps to broker execution remains unresolved.
 An operation result identifies the operation ID.
 When the outcome is known, it reports success or failure with an error value on failure.
@@ -144,10 +152,77 @@ When deduplication state cannot be recovered, the Agent does not treat an operat
 The Authority may submit a new operation ID after an `UNKNOWN` outcome only by explicitly accepting that the earlier operation may have completed.
 The Broker's request-ID replay tracking does not replace this Authority operation-ID tracking.
 The Broker status API requires the Broker-issued operation ID; if that ID is lost with the submission response and the outcome cannot otherwise be recovered, the Agent reports `UNKNOWN`.
-A confirmed rejection before submission is a failure, but a lost or malformed response after submission is not evidence of failure.
+A confirmed rejection before submission is a failure only when no earlier submission for that operation could have started.
+A lost or malformed response after submission is not evidence of failure.
 A missing or unrecoverable record is `UNKNOWN`, and any recovery query uses the same resolved instance.
 Local broker policy is bypassed only for a valid DVLS-authorized operation; local policy continues to govern user self-service operations.
 The exact requested-version semantics for each operation are provisional as described in `CONTRACT.package-management.md §provisional-decisions`.
+
+<a id="broker-grant-response"></a>
+## Broker grant response
+
+A successful grant execution returns HTTP 200, `Content-Type: application/json` and a JSON object with the following fields.
+All fields are required and non-null unless marked optional.
+Unknown or duplicate members are rejected at every object level.
+
+| Field | Value |
+| --- | --- |
+| `ResponseKind` | The string `GrantExecutionResponse`. |
+| `ResponseVersion` | The string `1.0`. |
+| `Server` | An object with `ServerVersion`, a string of 1 to 128 characters, and `Transport`, either `HttpNamedPipe` or `HttpLoopbackSimulator`. |
+| `RequestId` | The submitted Broker request ID. |
+| `ReceivedAt`, `CompletedAt` | RFC 3339 UTC timestamps. |
+| `Request` | An object with optional nullable `Manager` (Broker manager enum), `Source` (string), `PackageId` (package-identifier string) and `Operation` (`Install`, `Update` or `Uninstall`). |
+| `Authorization` | An object containing only `Kind`, whose value is `RemoteGrant`. |
+| `Operation` | An object containing `OperationId`, `Status`, `SubmittedAt` and optional nullable `EventChannel`. |
+| `Operation.OperationId` | The Broker-issued operation ID. |
+| `Operation.Status` | One of `Starting`, `Running`, `Canceling`, `Completed`, `Failed` or `Canceled`. |
+| `Operation.SubmittedAt` | An RFC 3339 UTC timestamp. |
+| `Operation.EventChannel` | When present, an object with `Kind: LocalPipe` and a `Path` string of 1 to 1,024 characters. |
+
+`Policy`, `Decision`, `RuleId` and `Diagnostics` are forbidden, including as null values.
+Responses contain no grant value, captured stdout or stderr, command preview or execution command line.
+The client checks the route, HTTP status, response kind, version, authorization, echoed request ID and operation before using the response.
+It does not rely on response headers, which the named-pipe transport may not expose.
+If required output is unavailable, truncated, overflowed, stolen or unparseable, the result is `UNKNOWN` unless another trusted source establishes the outcome.
+
+<a id="broker-grant-errors"></a>
+## Broker grant errors
+
+Except for an older Broker's 404, a rejected request returns an `ErrorResponse` JSON object with required `ResponseKind`, `ResponseVersion`, `Server`, `Code` and `Message` fields.
+`ResponseKind` is `ErrorResponse`, `ResponseVersion` is `1.0`, and `Server` has the same shape as in `CONTRACT.package-management.md §broker-grant-response`.
+`Message` is a nonempty string of at most 2,048 characters.
+An optional non-null `Details` array contains objects with optional nullable `Code` and `Path` strings of at most 128 and 512 characters, respectively, and a required nonempty `Message` of at most 2,048 characters.
+Unknown members, `Validation` and `Management` are rejected.
+Messages and details contain no grant value, captured output, command preview or execution command line.
+
+| Rejection | HTTP | `Code` |
+| --- | --- | --- |
+| Missing grant | 401 | `Unauthenticated` |
+| Duplicate, malformed, empty or oversized grant header | 400 | `BadRequest` |
+| Invalid, expired, consumed or mismatched grant, or unauthorized request fields | 403 | `Forbidden` |
+| Any grant header on legacy `/execute` | 400 | `BadRequest` |
+| Missing, duplicate or unsupported `Accept`, or unsupported request version | 400 | `BadRequest` |
+| Failed pipe-client authentication | 401 | `Unauthorized` |
+| Ambiguous source name or other non-policy security validation failure | 422 | `ValidationFailed` |
+| Malformed request JSON or unknown request field | 400 | `BadRequest` |
+| Request body over the Broker limit | 413 | `PayloadTooLarge` |
+| Unsupported request content type | 415 | `UnsupportedMediaType` |
+| Conflicting request or operation identity | 409 | `Conflict` |
+| Grant route not implemented by a rebuilt Broker | 501 | `UnsupportedEndpoint` |
+| Grant route absent on an older Broker | 404 | No structured body is required. |
+
+Each rejection starts no work for that request.
+It consumes no grant, except that a consumed grant may have been used by an earlier request.
+Another concurrent request may independently consume the same grant.
+`Forbidden` and `Conflict` do not establish that an earlier submission for the operation did not start.
+When several defects apply, the Broker may return any corresponding error from the table.
+An HTTP parser may close the connection or return a transport-level error for an oversized wire header.
+The client does not copy an untrusted response body or grant into exceptions, traces or logs.
+Other errors, disconnects, timeouts and malformed or lost responses do not prove that work did not start.
+The client reports an unresolvable outcome as `UNKNOWN` and does not retry either execute route.
+The shared SDK exposes `ExecuteGrant(request, grant, cancellationToken)` returning `GrantExecutionResponse`, and `OpenGrantEventChannel(response, cancellationToken)` returning an operation event channel.
+Existing status and cancellation requests use the Broker-issued operation ID without a grant header.
 
 <a id="provisional-errors"></a>
 ## Provisional error-code proposal
@@ -209,6 +284,7 @@ DVLS/RDM must show the Agent-reported user and session in an instance picker and
 [npm broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/npm.rs#L19-L50
 [.NET tool broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/dotnet.rs#L19-L86
 [Scoop broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/scoop.rs#L78-L86
+[dotnet tool install]: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install#options
 [WinInstaller runner]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/Internal/WinInstallerRunner.cs#L30-L106
 [WinInstaller manager]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/WinInstaller.cs
 [Installer receipt]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/Internal/InstallReceipts.cs
