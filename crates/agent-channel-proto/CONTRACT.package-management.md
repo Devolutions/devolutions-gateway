@@ -35,7 +35,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `UniGetUiInstancesUnavailable` | Agent to Authority | `reason` |
 | `UniGetUiInstance` | Agent to Authority | `user_uuid`, `display_name`, `session_id`, `signature_verified` |
 | `SyncInventory` | Authority to Agent | `target_user_uuid`, `registry_epoch` |
-| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_uuid`, `registry_epoch`, `page_index`, `page_count`, `packages`, `managers`, `sources` |
+| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_uuid`, `registry_epoch`, `page_index`, `page_count`, `scan_completed_at`, `packages`, `managers`, `sources` |
 | `InventoryUnavailable` | Agent to Authority | `target_user_uuid`, `registry_epoch`, `reason` |
 | `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope`, `reported_scope` |
 | `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_uuid`, `registry_epoch` |
@@ -214,10 +214,12 @@ Each package entry contains its manager, source, package ID, name, installed ver
 `source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity cannot be safely reported.
 UniGetUI supplies the canonical name as `sourceName`; the Agent does not derive it from the display label.
 Source names, URLs and labels containing credentials or local paths are not sent to the Authority.
+An inventory response copies UniGetUI's last completed scan, which may be stale.
 An inventory request does not start a package-manager scan, launch a package manager, change its state or log raw source details.
 UniGetUI does not use unclassified local tasks unless their isolation is established.
 When no endpoint can satisfy those requirements, it reports inventory unavailable without running the unsafe path.
-When any enabled, installed manager is unready, its scan failed or UniGetUI cannot establish that distinct reported scopes survived the scan, UniGetUI reports inventory unavailable without sending an empty replacement snapshot.
+When no completed scan exists, its completion time is unavailable, any enabled, installed manager is unready, its scan failed, or UniGetUI cannot establish that distinct reported scopes survived the scan, it reports inventory unavailable without sending a partial or empty replacement snapshot.
+All inventory data in a response comes from one consistent completed scan.
 Every inventory request includes the target user UUID, as do install, update and uninstall requests.
 The ownership `scope` is `USER`, `MACHINE` or `UNKNOWN`.
 The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping establishes that ownership; otherwise it is `UNKNOWN`.
@@ -235,6 +237,11 @@ It ignores stale, unsolicited, mismatched and already completed reports without 
 
 Each collection has a nonempty `report_id` identifying the snapshot independently of the request UUID.
 All pages of that collection carry the same `report_id` and `page_count`.
+`scan_completed_at` is `InventoryReport` field 11, a `google.protobuf.Timestamp` that is present and valid on every page.
+It is the completion time of the copied scan, not the time the Agent reads or sends the snapshot.
+The Agent carries UniGetUI's completion time unchanged, and all pages of the collection contain the same value.
+The Authority derives the scan age from this timestamp, not from the time of upload or the last successful sync.
+If the timestamp is in the Authority's future, the Authority reports the age as unknown.
 `page_index` and `page_count` are `InventoryReport` fields 7 and 8, respectively.
 `page_count` is at least one, including for an empty inventory, and `page_index` is zero-based and less than `page_count`.
 `last` is true exactly when `page_index` is the final index.
@@ -465,7 +472,6 @@ The Agent refuses an unknown extension or one disabled by local configuration.
 Data messages carry a channel ID and opaque payload, and either party may close a channel with a reason.
 Package management is the first separately versioned extension.
 How each manager's scope maps to broker execution remains unresolved.
-A proposed inventory response copies UniGetUI's last completed isolated scan and includes its age.
 An operation result does not itself update package records.
 The requested-version field is optional where an operation does not use a version; its exact meaning for each operation is unresolved.
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
