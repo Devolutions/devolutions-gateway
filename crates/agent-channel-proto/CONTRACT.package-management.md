@@ -2,7 +2,8 @@
 
 This draft defines the package-management interface between the Agent and DVLS, with UniGetUI and the package broker participating in operation execution.
 The provisional decisions below are proposals and are not normative until Benoit confirms them.
-`channel.proto` remains the wire-schema source; this draft proposes message names and fields but leaves protobuf types and framing unresolved.
+`channel.proto` defines the Agent-to-Authority package-management messages.
+The UniGetUI IPC and broker request details below describe cross-component behavior, not additional protobuf messages.
 
 <a id="definitions"></a>
 ## Definitions
@@ -12,7 +13,7 @@ The provisional decisions below are proposals and are not normative until Benoit
 - **Broker**: the Agent package broker, which validates authorization tokens and executes operations.
 - **Instance**: one running UniGetUI process and its IPC endpoint.
 - **Target user SID**: the Windows user SID whose session supplies the UniGetUI instance for an operation.
-- **Scope**: whether a package is installed for the machine or for a user.
+- **Scope**: a manager-reported package scope value; manager-relative labels do not by themselves establish machine-wide or user-specific installed ownership.
 
 <a id="channel"></a>
 ## Channel
@@ -23,16 +24,18 @@ Each report correlates with the request that caused it.
 Inventory, install, update and uninstall all use UniGetUI IPC, and package writes do not go directly to WinGet.
 UniGetUI runs unelevated in the target user's session.
 The beta wire format may change before final release, and the Authority's beta database schema includes the target user SID and package scope.
-The following message names and fields are the proposed beta payload shape, not protobuf definitions, and their types and encodings remain provisional until the schema is approved.
+The Agent-to-Authority messages in the following table are defined in `channel.proto`.
+The extension framing and the UniGetUI-to-Broker request details remain provisional.
 
 | Message | Direction | Fields |
 | --- | --- | --- |
-| `InstanceListReport` | Agent to Authority | `instances` |
-| `Instance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
-| `InventoryRequest` | Authority to Agent | `target_user_sid` |
-| `InventoryPage` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `packages`, `managers`, `sources` |
+| `DiscoverUniGetUiInstances` | Authority to Agent | none |
+| `UniGetUiInstances` | Agent to Authority | `instances` |
+| `UniGetUiInstance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
+| `SyncInventory` | Authority to Agent | `target_user_sid` |
+| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `packages`, `managers`, `sources` |
 | `InstalledPackage` | Agent to Authority | `manager`, `source`, `id`, `name`, `version`, `available_version`, `scope` |
-| `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version?`, `scope`, `target_user_sid` |
+| `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_sid` |
 | `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `bypass_token` |
 | `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `bypass_token` |
 | `PackageOperationResult` | Agent to Authority | `operation_id`, `success`, `error` |
@@ -47,20 +50,21 @@ The Authority stores and selects the target user SID, and displays it as `DOMAIN
 Every package operation includes a target user SID, including a machine-scope operation.
 The Agent resolves the target SID to a live instance when it executes the request.
 The Agent sends the write to exactly one resolved instance and does not retry against another endpoint.
-The Agent and Broker support every package manager and scope exposed by UniGetUI; listing a manager in inventory alone does not satisfy this rule.
+The package-management contract requires the Agent and Broker to support every package manager and scope exposed by UniGetUI; listing a manager in inventory alone does not satisfy this requirement.
 
 <a id="inventory"></a>
 ## Inventory
 
 Each package entry contains its manager, source, package ID, name, installed version, available version and scope.
 Every inventory request includes the target user SID, as do install, update and uninstall requests.
-Known `scope` values distinguish machine and user installations.
+Values with confirmed machine or user semantics distinguish those installations; other manager-relative values are not interpreted without a mapping.
 Scope values supported for package operations must include every value UniGetUI exposes, without conversion to a narrower set.
 UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish device-wide ownership across managers.
 The scope-label definitions are in [UniGetUI package scope aliases].
 Unknown-scope handling and the placement of the reporting instance SID are listed in `CONTRACT.package-management.md §provisional-decisions`.
 Pages in one complete inventory share a report ID, and the final page sets `last` to true.
-The Authority stores machine-scope entries once per device and user-scope entries once per device and target user SID.
+The Authority stores an entry once per device when a manager-specific mapping confirms machine-wide ownership, and once per device and target user SID when it confirms user ownership.
+An unmapped scope does not establish either ownership class.
 The exact inventory record key is provisional, but it must preserve manager, source, package ID and scope so machine and user installations are not collapsed.
 Inventory pagination and replacement semantics are provisional as described in `CONTRACT.package-management.md §provisional-decisions`.
 UniGetUI's current package model and `IpcPackageInfo` contain no scope property, while `IpcPackageActionRequest` accepts `Scope`.
