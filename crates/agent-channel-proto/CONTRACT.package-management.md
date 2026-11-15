@@ -38,18 +38,18 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_sid` |
 | `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `bypass_token` |
 | `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `bypass_token` |
-| `PackageOperationResult` | Agent to Authority | `operation_id`, `success`, `error` |
+| `PackageOperationResult` | Agent to Authority | `operation_id`, `success`, `error`, `status` |
 
 <a id="instances"></a>
 ## Instance discovery and targeting
 
-The Agent reports every running UniGetUI instance with its target user SID, session ID, display name and signature-verification result.
+The Agent reports discovered, unelevated UniGetUI instances in logged-on user sessions with their target user SID, session ID, display name and signature-verification result.
 The Agent obtains the SID and session ID from the Windows token of the endpoint-owning process, not from a value reported by UniGetUI.
-The Agent verifies the executable signature before accepting an instance as a target.
+The Agent verifies the executable signature before reporting an instance or accepting it as a target.
 The Authority stores and selects the target user SID, and displays it as `DOMAIN\user (session N)`.
 Every package operation includes a target user SID, including a machine-scope operation.
 The Agent resolves the target SID to a live instance when it executes the request.
-The Agent sends the write to exactly one resolved instance and does not retry against another endpoint.
+The Agent sends the write at most once to one resolved instance and does not retry it against that or another endpoint.
 Inventory covers the package managers and scopes exposed by UniGetUI.
 Remote writes are limited to operations supported by the existing package broker and fail closed when unsupported.
 Remote writes never fall back to local package execution.
@@ -78,20 +78,59 @@ These gaps are visible in the [UniGetUI package model], [UniGetUI IPC package ty
 
 The operation type is exactly one of `install`, `update` or `uninstall`.
 The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope and target user SID, but no bypass token.
-The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory and bound to the target user SID and exact typed Broker `PackageRequest`.
-UniGetUI sends the grant unchanged in the `X-Devolutions-Package-Grant` header of `POST /v1/package-operations/execute` over the Broker's named pipe while running unelevated as the target user.
-The Broker compares every field of the decoded typed request and the pipe caller's SID against the grant before execution, and consumes a matching grant atomically.
+The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory.
+The grant binds the target user SID, operation type, manager, source, package ID, version, scope, requested elevation and Broker request ID.
+UniGetUI sends the grant unchanged in the `X-Devolutions-Package-Grant` header of the Broker's grant-execution request over the named pipe while running unelevated as the target user.
+The grant contains only visible ASCII characters, so it cannot inject another header.
+The Broker independently validates the decoded request and the pipe caller's SID against the grant before execution, and consumes a matching grant atomically.
 The Broker rejects an invalid, expired, reused or mismatched grant rather than applying local policy.
-The request binding includes the type, manager, source, package ID, requested version, scope and every execution-affecting option.
-The Agent, UniGetUI and Broker reject an execution-affecting field that is not covered by the token.
-Remote operations do not carry custom parameters or pre-operation, post-operation or kill-before-operation commands unless the token explicitly authorizes them.
+The Agent, UniGetUI and Broker reject execution-affecting fields not authorized by the grant.
+The Authority request does not authorize custom parameters, hooks or other execution options, so remote requests carrying them are rejected.
 UniGetUI's broker request builder maps source, custom parameters and pre-operation, post-operation and kill-before-operation commands into the request.
 These execution-affecting fields are visible in the [UniGetUI broker request builder][UniGetUI broker request fields].
+
+The Broker request's `Operation` must match the Authority operation type.
+The Broker compares `Manager` to the authorized manager using ASCII case-insensitive comparison of the Broker enum spelling.
+An alias without an agreed mapping is rejected.
+`Source.Name`, `Package.Id` and a nonempty requested version are compared exactly as decoded Unicode strings, without trimming or case folding.
+An empty requested version requires an absent Broker `Package.Version`; a nonempty requested version must not be dropped or replaced.
+An empty requested scope requires an absent Broker `Options.Scope`.
+A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
+The Broker rejects `Source.Url`, `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
+It also rejects `Interactive`, `SkipHashCheck`, `PreRelease`, `UninstallPrevious` and `NoUpgrade` when true.
+Any future execution-affecting request field must be explicitly authorized or rejected.
+
+The Broker requires `RequestKind` to be `PackageRequest` and `RequestVersion` to be `1.0`.
+The Agent generates a Broker request ID as a lowercase, hyphenated UUID and binds it to the grant.
+UniGetUI preserves that ID, and the Broker rejects a different `RequestId`.
+`CreatedAt` is excluded from the grant; the Broker parses it as an RFC 3339 timestamp and measures grant expiry independently of it.
+The Broker's request-ID deduplication includes `CreatedAt` in its request fingerprint.
+The Broker requires `Client.Transport` to be `HttpNamedPipe` and `Client.RequestedElevation` to match the grant.
+It resolves `Client.EffectiveUser` to the authenticated pipe caller's SID and verifies `Client.ClientExecutablePath` against the retained process image.
+Those two string values are excluded from the grant; their verified SID and image must match the authenticated process, and the SID must match the grant.
+`Client.ClientVersion` is excluded from the grant and is not evidence of authorization.
+The actual execution token must be elevated exactly when `Options.Scope` is `Machine` or the grant authorizes `RequestedElevation` as `Elevated`.
+The Broker rejects an elevated request unless the Authority's scope authorizes machine effects.
+`IncludeCommandPreview` must be false, and `CaptureOutput` must be true.
+Captured stdout and stderr go to the target user's Broker event channel and are not included in the Authority's operation result, including its error text.
+
 The npm broker always emits `--global`, while the .NET tool broker emits it when no custom install location is set; both reject explicit machine scope, so the current routes do not preserve UniGetUI's distinct `Local` and `Global` choices.
 The current Scoop broker rejects machine/global scope and elevated execution while its script is resolved from the target user's profile; those guards remain until a separately trusted route exists.
 The current scope behavior is visible in the [npm broker builder], [.NET tool broker builder] and [Scoop broker builder].
 How each manager's scope maps to broker execution remains unresolved.
-An operation result identifies the operation ID and reports success or failure with an error value when it fails.
+An operation result identifies the operation ID.
+When the outcome is known, it reports success or failure with an error value on failure.
+When the Agent cannot recover an operation's outcome, it reports `UNKNOWN`.
+The Authority ignores `success` when the status is `UNKNOWN`.
+Agent and Authority versions must both understand `UNKNOWN` when they exchange operation results, including queued results after reconnect or rollback.
+Mixed versions that do not satisfy this requirement are unsupported.
+The Agent records an operation before submitting it and does not submit another operation for the same operation ID.
+Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
+A repeated operation ID with a different payload is rejected.
+The Broker's request-ID replay tracking does not replace this Authority operation-ID tracking.
+The Broker status API requires the Broker-issued operation ID; if that ID is lost with the submission response and the outcome cannot otherwise be recovered, the Agent reports `UNKNOWN`.
+A confirmed rejection before submission is a failure, but a lost or malformed response after submission is not evidence of failure.
+A missing or unrecoverable record is `UNKNOWN`, and any recovery query uses the same resolved instance.
 Local broker policy is bypassed only for a valid DVLS-authorized operation; local policy continues to govern user self-service operations.
 The exact requested-version semantics for each operation are provisional as described in `CONTRACT.package-management.md §provisional-decisions`.
 
@@ -130,7 +169,7 @@ The requested-version field is optional where an operation does not use a versio
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
 A transport disconnection does not prove that an operation failed.
 The Agent does not replay an operation automatically after disconnection or restart.
-When the Agent cannot establish an operation's outcome, its status is `UNKNOWN`, not a confirmed failure, and the Authority decides whether to resubmit with a new token.
+When the status is `UNKNOWN`, the Authority decides whether to resubmit with a new token.
 
 <a id="external-changes"></a>
 ## Required changes outside this repository
