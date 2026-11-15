@@ -313,6 +313,18 @@ fn lock_directory(dir: &Dir, rule: &Rule) -> anyhow::Result<File> {
 }
 
 #[cfg(test)]
+impl UserRegistry {
+    pub(super) fn open_for_test(dir: &Utf8Path) -> anyhow::Result<Self> {
+        Self::open_with_rule(
+            dir,
+            Rule::new()
+                .owner(Account::CurrentUser)
+                .grant(Account::CurrentUser, Access::Full),
+        )
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::fs;
 
@@ -364,12 +376,7 @@ mod tests {
 
     /// Opens the registry under a rule private to the current user, since only SYSTEM can create the production rule.
     fn open(dir: &Utf8Path) -> anyhow::Result<UserRegistry> {
-        UserRegistry::open_with_rule(
-            dir,
-            Rule::new()
-                .owner(Account::CurrentUser)
-                .grant(Account::CurrentUser, Access::Full),
-        )
+        UserRegistry::open_for_test(dir)
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances

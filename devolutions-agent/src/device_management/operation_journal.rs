@@ -30,8 +30,7 @@
 //! fails closed.
 //!
 //! A wholly missing journal is created, so operations recorded in a journal that was deleted whole may execute again.
-//! A journal directory that exists but lacks its records directory or journal.json while holding other content is
-//! corrupt, and opening it fails rather than creating a replacement.
+//! A journal directory that exists but lacks its records directory or journal.json is unrecoverable and is refused.
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read as _, Write as _};
@@ -48,6 +47,7 @@ use uuid::Uuid;
 
 const DIRECTORY_NAME: &str = "package-operations";
 const RECORDS_NAME: &str = "records";
+const INITIALIZATION_LOCK_NAME: &str = ".package-operations-initialization.lock";
 const LOCK_FILE_NAME: &str = ".lock";
 const INDEX_NAME: &str = "journal.json";
 const VERSION: u32 = 1;
@@ -170,16 +170,41 @@ struct JournalLock {
     _file: std::fs::File,
 }
 
-fn acquire_lock(data: &Dir, rule: &Rule) -> anyhow::Result<JournalLock> {
+fn lock_file(directory: &Dir, name: &str) -> anyhow::Result<std::fs::File> {
+    let busy = "package operation journal lock is in use or unavailable";
+    let file = directory
+        .open_or_create_file(
+            name,
+            &file_rule(),
+            FileOptions::new().read(true).write(true).share(Share::Exclusive),
+        )
+        .context(busy)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd as _;
+
+        ensure!(
+            // SAFETY: The file descriptor stays open until the lock is dropped.
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+            "{busy}: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    Ok(file)
+}
+
+fn acquire_lock(data: &Dir, rule: &Rule) -> anyhow::Result<(JournalLock, bool)> {
     let busy = "package operation journal is in use or unavailable";
     const EXCLUSIVE: Share = if cfg!(windows) { Share::Exclusive } else { Share::Shared };
 
-    let dir = match data
+    let (dir, was_missing) = match data
         .open_dir(DIRECTORY_NAME, rule, EXCLUSIVE)
         .context(busy)
         .context("open package operation journal directory")?
     {
-        Some(dir) => dir,
+        Some(dir) => (dir, false),
         None => {
             // The handle that creates the directory is not exclusive, so it is closed and the directory opened again
             // exclusively; the journal is read only after that, and a competing opener then fails the exclusive open or
@@ -188,30 +213,23 @@ fn acquire_lock(data: &Dir, rule: &Rule) -> anyhow::Result<JournalLock> {
                 data.create_dir(DIRECTORY_NAME, rule, Existing::Check)
                     .context("create package operation journal directory")?,
             );
-            data.open_dir(DIRECTORY_NAME, rule, EXCLUSIVE)
-                .context(busy)
-                .context("open created package operation journal directory")?
-                .context("package operation journal directory disappeared after its creation")?
+            (
+                data.open_dir(DIRECTORY_NAME, rule, EXCLUSIVE)
+                    .context(busy)
+                    .context("open created package operation journal directory")?
+                    .context("package operation journal directory disappeared after its creation")?,
+                true,
+            )
         }
     };
 
     #[cfg(unix)]
     {
-        use std::os::fd::AsRawFd as _;
-
-        let file = dir
-            .open_or_create_file(LOCK_FILE_NAME, &file_rule(), FileOptions::new().read(true).write(true))
-            .context("open package operation journal lock")?;
-        ensure!(
-            // SAFETY: The file descriptor stays open until the lock is dropped.
-            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-            "{busy}: {}",
-            std::io::Error::last_os_error()
-        );
-        Ok(JournalLock { dir, _file: file })
+        let file = lock_file(&dir, LOCK_FILE_NAME)?;
+        Ok((JournalLock { dir, _file: file }, was_missing))
     }
     #[cfg(windows)]
-    Ok(JournalLock { dir })
+    Ok((JournalLock { dir }, was_missing))
 }
 
 fn hashed(value: &str) -> String {
@@ -226,12 +244,16 @@ impl OperationJournal {
     /// Opens the journal, creating it when the data directory or the journal directory is missing.
     ///
     /// A journal deleted whole cannot be told from a first run, so operations recorded in it may execute again.
-    /// A journal directory holding anything but its lock file, without its records directory or `journal.json`, is
-    /// refused, as is one that is not private to the Agent's account.
+    /// An existing journal missing its records directory or `journal.json` is refused, as is one that is not private
+    /// to the Agent's account.
     pub(super) fn open(data_dir: &Utf8Path) -> anyhow::Result<Self> {
         let rule = directory_rule();
         let data = Dir::create_base(data_dir, &rule).context("open data directory")?;
-        let lock = acquire_lock(&data, &rule)?;
+        // UNTESTED: The initialization lock prevents another process from treating an existing journal as new.
+        // Tests contend in one process; check cross-process contention when changing this lock.
+        let _initialization_lock =
+            lock_file(&data, INITIALIZATION_LOCK_NAME).context("open package operation journal initialization lock")?;
+        let (lock, was_missing) = acquire_lock(&data, &rule)?;
         let directory = match lock
             .dir
             .open_dir(RECORDS_NAME, &rule, Share::Shared)
@@ -239,6 +261,7 @@ impl OperationJournal {
         {
             Some(directory) => directory,
             None => {
+                ensure!(was_missing, "package operation records directory is missing");
                 ensure!(
                     lock.dir
                         .entries()
@@ -262,17 +285,18 @@ impl OperationJournal {
             }),
             recorded: Condvar::new(),
         };
-        let admitted = journal.load_index()?;
+        let admitted = journal.load_index(was_missing)?;
         journal.state.get_mut().admitted = admitted;
         Ok(journal)
     }
 
-    fn load_index(&self) -> anyhow::Result<BTreeSet<String>> {
+    fn load_index(&self, was_missing: bool) -> anyhow::Result<BTreeSet<String>> {
         let Some(file) = self
             .directory
             .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
             .context("open package operation journal index")?
         else {
+            ensure!(was_missing, "package operation journal index is missing");
             ensure!(
                 self.directory
                     .entries()
@@ -919,18 +943,56 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_creation_is_completed() -> anyhow::Result<()> {
-        // oracle: mutant a journal left without its index by an interrupted creation is refused or loses later admissions
+    fn existing_journal_without_records_directory_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &request("op", "pkg"))?;
+        drop(journal);
+        std::fs::remove_dir_all(journal_path(&data))?;
+
+        assert!(OperationJournal::open(&data).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn existing_journal_without_index_or_records_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &request("op", "pkg"))?;
+        drop(journal);
+        std::fs::remove_file(record_path(&data, "op"))?;
+        std::fs::remove_file(journal_path(&data).join(INDEX_NAME))?;
+
+        assert!(OperationJournal::open(&data).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn interrupted_creation_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         drop(OperationJournal::open(&data)?);
         std::fs::remove_file(journal_path(&data).join(INDEX_NAME))?;
 
-        assert_eq!(
-            OperationJournal::open(&data)?.admit("authority", &request("op", "pkg"))?,
-            Admission::Admitted
-        );
+        assert!(OperationJournal::open(&data).is_err());
         Ok(())
     }
+
+    #[test]
+    fn concurrent_initialization_is_refused() -> anyhow::Result<()> {
+        // oracle: mutant overlapping initializers can treat an existing journal as newly created
+        let (_dir, data) = data_dir()?;
+        let parent = Dir::create_base(&data, &directory_rule())?;
+        let first = lock_file(&parent, INITIALIZATION_LOCK_NAME)?;
+
+        assert!(OperationJournal::open(&data).is_err());
+        drop(first);
+        assert!(OperationJournal::open(&data).is_ok());
+        Ok(())
+    }
+
     #[test]
     fn second_owner_is_refused_until_the_first_drops_and_history_survives() -> anyhow::Result<()> {
         let (_dir, data) = data_dir()?;

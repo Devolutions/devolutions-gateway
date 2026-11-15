@@ -344,6 +344,8 @@ async fn execute(context: DeviceManagementContext, pending: Pending) -> Settled 
         &issued.request_id,
         issued.grant.expose_secret(),
     );
+    // UNTESTED: Each operation ID reaches at most one endpoint, even on duplicate requests or delivery errors.
+    // This prevents duplicate side effects; count dispatches for duplicates and failed delivery when changing this path.
     if endpoint.request("ExecutePackageOperation", arguments).await.is_err() {
         debug!("ExecutePackageOperation produced no usable response");
     }

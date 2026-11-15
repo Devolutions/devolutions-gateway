@@ -87,9 +87,21 @@ impl DeviceManagementContext {
         broker: Arc<BrokerState>,
         data_dir: &Utf8Path,
     ) -> Self {
+        self.with_package_broker_using(registration, broker, data_dir, UserRegistry::open)
+    }
+
+    fn with_package_broker_using(
+        self,
+        registration: RegistrationHandle,
+        broker: Arc<BrokerState>,
+        data_dir: &Utf8Path,
+        open_users: fn(&Utf8Path) -> anyhow::Result<UserRegistry>,
+    ) -> Self {
         let directory = USER_REGISTRY_DIR
             .iter()
             .fold(data_dir.to_owned(), |path, leaf| path.join(leaf));
+        // UNTESTED: A journal-open failure must not disable live inventory, which shares this context.
+        // The context test has no authenticated UniGetUI client; request inventory with a corrupt journal when changing this.
         let journal = match OperationJournal::open(data_dir) {
             Ok(journal) => Some(Arc::new(journal)),
             Err(error) => {
@@ -102,7 +114,7 @@ impl DeviceManagementContext {
             }
         };
 
-        match UserRegistry::open(&directory) {
+        match open_users(&directory) {
             Ok(users) => Self {
                 registration: Some(registration),
                 broker: Some(broker),
@@ -147,12 +159,79 @@ impl DeviceManagementContext {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use agent_channel_proto::{PackageOperationRequest, PackageOperationStatus};
+    use std::time::Duration;
+
+    use agent_channel_proto::{PackageOperationRequest, PackageOperationStatus, PackageOperationType};
+    use now_package_broker::registration::run_registration_server;
+    use now_package_broker::task::{BrokerTask, BrokerTaskConfig};
     use uuid::Uuid;
 
     use super::*;
     use crate::device_management::operation;
     use crate::device_management::operation_journal::{Admission, Outcome, Settled};
+
+    #[tokio::test]
+    async fn corrupt_journal_disables_writes_but_not_discovery() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
+        let data = Utf8Path::from_path(root.path()).expect("data path is UTF-8");
+        let request = PackageOperationRequest {
+            operation_id: "operation-1".to_owned(),
+            r#type: PackageOperationType::Install.into(),
+            manager: "Pip".to_owned(),
+            source: "pip".to_owned(),
+            package_id: "six".to_owned(),
+            scope: "User".to_owned(),
+            target_user_uuid: Uuid::new_v4().to_string(),
+            registry_epoch: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let journal = OperationJournal::open(data)?;
+        journal.admit(&Uuid::nil().to_string(), &request)?;
+        drop(journal);
+        std::fs::remove_dir_all(data.join("package-operations").join("records"))?;
+
+        let broker = BrokerTask::new(BrokerTaskConfig {
+            policy_path: Some(data.join("missing-policy.json").to_string()),
+            ..Default::default()
+        });
+        let registration = broker.registration();
+        let pipe = format!(r"\\.\pipe\agent-journal-test-{}", Uuid::new_v4().simple());
+        let server_registration = registration.clone();
+        let server =
+            tokio::spawn(async move { run_registration_server(&server_registration, &pipe, Default::default()).await });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while registration.snapshot().is_err() && !server.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        registration.snapshot()?;
+
+        let context = DeviceManagementContext::default().with_package_broker_using(
+            registration,
+            broker.state(),
+            data,
+            UserRegistry::open_for_test,
+        );
+        let result = operation::run(&context, Uuid::nil(), request).await;
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+        assert_eq!(result.operation_id, "operation-1");
+        assert_eq!(result.execution_started, None);
+        assert!(matches!(
+            super::super::package_operation_report(result).report,
+            Some(agent_channel_proto::device_management_report::Report::PackageOperationUnknown(_))
+        ));
+        let discovered = super::super::collect_instances(&context).await?;
+        assert!(discovered.instances.is_empty());
+        assert_eq!(Uuid::parse_str(&discovered.registry_epoch)?.get_version_num(), 4);
+        server.abort();
+        Ok(())
+    }
 
     #[tokio::test]
     async fn recorded_failure_with_empty_error_is_unknown() -> anyhow::Result<()> {
