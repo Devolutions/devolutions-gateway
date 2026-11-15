@@ -243,7 +243,8 @@ The Agent reports `UNKNOWN` for every installation.
 `reported_scope` preserves UniGetUI's raw `reportedScope` value separately from ownership.
 When `reportedScope` is null or absent, `reported_scope` is empty.
 UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish ownership across managers.
-The Authority does not use `reported_scope` to deduplicate machine-wide installations or authorize machine-wide changes.
+The Agent does not use `reported_scope` to associate updates with installed rows.
+The Authority does not use `reported_scope` to merge inventory rows, deduplicate machine-wide installations or authorize machine-wide changes.
 The scope-label definitions are in [UniGetUI package scope aliases].
 For each Agent Identity and target user UUID, the Authority transactionally allocates a durable generation and records the identity, request UUID, target user UUID, registry epoch, epoch revision and generation as pending before enqueueing a sync request.
 Every retry after a timeout uses a new request UUID and generation.
