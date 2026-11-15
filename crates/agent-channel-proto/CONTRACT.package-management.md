@@ -178,18 +178,17 @@ An unlisted command receives `UnsupportedCommand` without starting work.
 
 | `command` | `arguments` | `result` |
 | --- | --- | --- |
-| `ListManagers` | none | the manager array with the redactions below |
 | `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
-`ListManagers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
+`GetInventorySnapshot.managers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
 `executablePath` and `executableArguments` are empty strings.
 `health.state` is `unknown`, `health.needsAttention` is false, `health.failingListing` and `health.reason` are null, and `health.consecutiveFailures` is zero.
 Each of `health.search`, `health.installed` and `health.updates` has null `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason`; false `lastFailureWasTimeout`; zero `consecutiveFailures`; and an empty `recentDurationsMs` array.
 These redactions keep executable paths, arguments and captured health output from reaching the Agent.
 
-The `managers`, `sources`, `installedPackages` and `updates` arrays use the item shapes of `GET /uniget/v1/managers`, `GET /uniget/v1/sources`, `GET /uniget/v1/packages/installed` and `GET /uniget/v1/packages/updates`, respectively.
-They apply the `ListManagers` redactions and the source-safety rules in `CONTRACT.package-management.md §inventory`.
+The `sources`, `installedPackages` and `updates` arrays use the item shapes of `GET /uniget/v1/sources`, `GET /uniget/v1/packages/installed` and `GET /uniget/v1/packages/updates`, respectively.
+The source-safety rules in `CONTRACT.package-management.md §inventory` apply.
 An installed-package item may omit `systemRestartPending` when no value was captured in memory.
 `GetInventorySnapshot` returns scan timestamps as RFC 3339 strings with UTC offset zero, at most nine fractional digits and no leap seconds.
 `updateCompletedAt` may be omitted or null when no complete update scan is available; in that case, `updates` is empty.
