@@ -11,7 +11,7 @@
     <Description>gRPC and Protobuf types for the Devolutions Agent channel</Description>
     <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
     <RootNamespace>Devolutions.Agent.Channel</RootNamespace>
-    <Version>2026.11.16-beta.1</Version>
+    <Version>2026.11.16</Version>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
