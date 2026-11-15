@@ -101,6 +101,8 @@ The Agent identifies the client with `GetNamedPipeClientProcessId` and keeps a h
 From that process's token it takes the user SID and session ID.
 It accepts the client only when the executable is a signature-verified `UniGetUI.exe`, the token is not elevated, and the session is a logged-on user session.
 Values that UniGetUI reports about itself are never used for identity or targeting.
+The client process ID identifies only the process that connected; same-user code that duplicates the connected handle can read and write later frames, including `Request` arguments that carry a grant.
+Registration therefore does not prove process-exclusive communication, and the Agent sends no `ExecutePackageOperation` over it until that security requirement is resolved.
 
 ### Framing
 
