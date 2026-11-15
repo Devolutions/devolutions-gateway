@@ -1,7 +1,7 @@
 # Package management contract
 
-This draft defines the package-management interface between the Agent and DVLS, with UniGetUI and the package broker participating in operation execution.
-The provisional decisions below are proposals and are not normative until Benoit confirms them.
+This contract defines the package-management interface between the Agent and DVLS, with UniGetUI and the package broker participating in operation execution.
+The provisional decisions below are proposals and are not normative until confirmed.
 `channel.proto` defines the Agent-to-Authority package-management messages.
 The UniGetUI IPC and broker request details below describe cross-component behavior, not additional protobuf messages.
 
@@ -23,58 +23,90 @@ The package-management payloads use their own namespace inside `agent-channel-pr
 Each report correlates with the request that caused it.
 Inventory, install, update and uninstall all use UniGetUI IPC, and package writes do not go directly to WinGet.
 UniGetUI runs unelevated in the target user's session.
-The beta wire format may change before final release, and the Authority's beta database schema includes the target user SID and package scope.
-The Agent-to-Authority messages in the following table are defined in `channel.proto`.
+The Authority-facing target is an opaque Agent-issued user UUID, not a platform SID.
+The SID fields in the current `channel.proto` do not implement that requirement and must not be used as the new wire contract.
+The following table describes the Agent-to-Authority messages.
 The extension framing and any UniGetUI-to-Broker request details not specified below remain provisional.
 
 | Message | Direction | Fields |
 | --- | --- | --- |
 | `DiscoverUniGetUiInstances` | Authority to Agent | none |
-| `UniGetUiInstances` | Agent to Authority | `instances` |
+| `UniGetUiInstances` | Agent to Authority | `instances`, `registry_epoch` |
 | `UniGetUiInstancesUnavailable` | Agent to Authority | `reason` |
-| `UniGetUiInstance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
-| `SyncInventory` | Authority to Agent | `target_user_sid` |
-| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `page_index`, `page_count`, `packages`, `managers`, `sources` |
-| `InventoryUnavailable` | Agent to Authority | `target_user_sid`, `reason` |
+| `UniGetUiInstance` | Agent to Authority | `user_uuid`, `display_name`, `session_id`, `signature_verified` |
+| `SyncInventory` | Authority to Agent | `target_user_uuid`, `registry_epoch` |
+| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_uuid`, `registry_epoch`, `page_index`, `page_count`, `packages`, `managers`, `sources` |
+| `InventoryUnavailable` | Agent to Authority | `target_user_uuid`, `registry_epoch`, `reason` |
 | `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope`, `reported_scope` |
-| `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_sid` |
-| `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `bypass_token` |
-| `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `bypass_token` |
-| `PackageOperationResult` | Agent to Authority | `operation_id`, `success`, `error`, `status` |
+| `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_uuid`, `registry_epoch` |
+| `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `grant` |
+| `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `grant` |
+| `PackageOperationResult` | Agent to Authority | `operation_id`, `success`, `error`, `status`, `execution_started` |
+
+User UUIDs and registry epochs are non-nil UUIDs encoded as lowercase hyphenated strings.
+The new fields use the following protobuf numbers; the former SID field numbers and names are reserved.
+
+| Message | User UUID field | Registry epoch field |
+| --- | --- | --- |
+| `UniGetUiInstances` | — | `registry_epoch` (2) |
+| `UniGetUiInstance` | `user_uuid` (5) | — |
+| `SyncInventory` | `target_user_uuid` (2) | `registry_epoch` (3) |
+| `InventoryReport` | `target_user_uuid` (9) | `registry_epoch` (10) |
+| `InventoryUnavailable` | `target_user_uuid` (3) | `registry_epoch` (4) |
+| `PackageOperationRequest` | `target_user_uuid` (9) | `registry_epoch` (10) |
+
+`UniGetUiInstance.user_sid` (1), `SyncInventory.target_user_sid` (1), `InventoryReport.target_user_sid` (6), `InventoryUnavailable.target_user_sid` (1) and `PackageOperationRequest.target_user_sid` (7) are reserved.
+Agent and Authority versions that do not both enforce the UUID and epoch fields are unsupported.
+
+Remote inventory and remote writes have separate Agent configuration switches, both enabled by default.
+When inventory is disabled, the Agent reports `SAFE_ENDPOINT_UNAVAILABLE` without querying UniGetUI.
+When writes are disabled, the Agent rejects a new operation without contacting UniGetUI or issuing a grant.
+Previously journaled operation IDs retain their recorded status.
+Neither switch disables discovery.
 
 <a id="instances"></a>
 ## Instance discovery and targeting
 
-The Agent reports discovered, unelevated UniGetUI instances in logged-on user sessions with their target user SID, session ID, display name and signature-verification result.
+The Agent reports discovered, unelevated UniGetUI instances in logged-on user sessions with their user UUID, session ID, display name and signature-verification result.
 The Agent answers each `DiscoverUniGetUiInstances` request with one report, `UniGetUiInstances` or `UniGetUiInstancesUnavailable`, never with a partial list.
-It sends `UniGetUiInstances` only when the scan read every registration and resolved each registered endpoint as a reported instance or as absent, not owned by `UniGetUI.exe`, or elevated.
+It sends `UniGetUiInstances` only when it can report the complete registered set.
 That list replaces the previous instance set; an empty list means no instance.
 Otherwise, including when the whole channel envelope would exceed its size limit, the Agent sends `UniGetUiInstancesUnavailable`.
-An unresolved registration can make discovery unavailable for every user on the device.
 It is `DeviceManagementReport.unigetui_instances_unavailable` field 7, with `reason` field 1: `UNSPECIFIED` (0), `BUSY` (1), `COLLECTION_FAILED` (2) or `TOO_LARGE` (3).
 The Authority maps `UNSPECIFIED` and unrecognized reasons to generic unavailability, and an unavailable report preserves the previous instance set.
 The response envelope's `correlation_id` is the request UUID.
-The Authority applies either report only to its current pending discovery request for that Agent Identity and ignores stale, unsolicited and duplicate reports; where it keeps that request is provisional.
+The Authority records the active epoch and its revision when it dispatches a discovery request.
+It applies either report only to its current pending discovery request for that Agent Identity when the active epoch and revision still match the recorded values, and ignores stale, unsolicited and duplicate reports.
+It uses those recorded values for a per-Agent compare-and-swap when changing the active registry epoch, incrementing the revision on each change.
+After a channel reconnect, the receiving Authority node disables targeting until it accepts a fresh complete discovery report from that connection.
+Pending requests on different Authority nodes are not globally fenced.
+An older stream can issue a new discovery, reinstate an earlier epoch, remove newer observations and enable targeting of its own instances.
 Reports can be lost when a stream closes, so the Authority times out discovery requests without a report.
 The Agent and Authority must both understand the unavailable report; mixed versions are unsupported.
-The Agent obtains the SID and session ID from the Windows token of the endpoint-owning process, not from a value reported by UniGetUI.
-The Agent verifies the executable signature before reporting an instance or accepting it as a target.
-The Agent allows at most identification-level impersonation when connecting to a UniGetUI named pipe.
-The Authority stores and selects the target user SID, and displays it as `DOMAIN\user (session N)`.
-Every package operation includes a target user SID, including a machine-scope operation.
-The Agent resolves the target SID to a live instance when it executes the request.
-The Agent sends the write at most once to one resolved instance and does not retry it against that or another endpoint.
+The Agent obtains the SID and session ID from the authenticated connection and verifies the endpoint-owning process as described in `CONTRACT.package-management.md §registration`.
+It verifies the executable signature before reporting an instance or accepting it as a target.
+The Authority stores and selects the target user UUID and may display a safe user name and session ID.
+Every package operation includes a target user UUID, including a machine-scope operation.
+The Agent maps a known UUID to a user SID and resolves a live instance for that user when it executes the request.
+It rejects a missing, malformed, nil or unknown user UUID, or a request for a different registry epoch, before Broker execution.
+While its operation journal retains the operation ID, the Agent sends the write at most once to one resolved instance and does not retry it against that or another endpoint.
 When a write targets an existing installation, UniGetUI rejects it if that installation cannot be identified in the authorized scope.
 Inventory covers the package managers and scopes exposed by UniGetUI.
 Remote writes are limited to operations supported by the existing package broker and fail closed when unsupported.
 Remote writes never fall back to local package execution.
 
-<a id="registration"></a>
-## UniGetUI registration (beta proposal)
+The Agent persists its SID-to-UUID mapping across restarts in state whose DACL allows only SYSTEM to read or write it.
+Each newly mapped user receives a random UUIDv4, and the Agent never reassigns a known UUID to a different user.
+The mapping store has its own random UUIDv4 registry epoch, created with the store.
+Discovery reports that epoch, and inventory and operation requests carry the epoch in which their target was discovered.
+Only a complete, current discovery report can establish or change the Authority's active epoch for an Agent Identity.
+When the active epoch changes, the Authority atomically removes that Agent's observations, sync state and instance rows from the previous epoch and replaces the instance set, while retaining operation and journal evidence.
+An unavailable discovery report does not change the active epoch.
+Within an unchanged epoch, an absent user remains historical and discovery absence does not prove its observations were removed.
+Restoring an older mapping store with the same epoch can lose mappings without a detectable epoch change; the Agent still rejects unknown UUIDs rather than remapping them.
 
-This section is a proposal for the beta.
-The device-management intent still names Agent-side endpoint discovery as the beta mechanism and registration as a future direction.
-This section becomes normative when that intent is updated; it then replaces the registration-file scan and endpoint-owner rules in `CONTRACT.package-management.md §instances`, while the discovery report rules there remain.
+<a id="registration"></a>
+## UniGetUI registration
 
 ### Endpoint
 
@@ -82,7 +114,7 @@ UniGetUI connects to `\\.\pipe\Devolutions.Now.PackageBroker.Registration.v1`, s
 It is separate from the Broker execution pipe, which serves one HTTP request per connection from a small shared pool, so held connections would starve it.
 Grant execution stays on the Broker execution pipe.
 The Agent creates the first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE`; if that fails, registration is unavailable and discovery reports `COLLECTION_FAILED`.
-The pipe DACL grants SYSTEM and Administrators full control and `BUILTIN\Users` only `FILE_GENERIC_READ` and `FILE_WRITE_DATA`, never `FILE_APPEND_DATA`, which for pipes is `FILE_CREATE_PIPE_INSTANCE`.
+The pipe rejects remote clients, and its DACL denies NETWORK access while granting SYSTEM and Administrators full control and `BUILTIN\Users` only `FILE_GENERIC_READ` and `FILE_WRITE_DATA`, never `FILE_APPEND_DATA`, which for pipes is `FILE_CREATE_PIPE_INSTANCE`.
 UniGetUI opens the pipe with `GENERIC_READ | FILE_WRITE_DATA` and `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`.
 
 ### Authentication
@@ -92,17 +124,23 @@ After connecting, it obtains the server process ID with `GetNamedPipeServerProce
 It then queries the `DevolutionsAgent` service with `QueryServiceStatusEx` and accepts the server only when the service is running, its process ID equals the server process ID, and the server session ID is 0.
 The service name is fixed in UniGetUI and never taken from the server.
 UniGetUI does not open the server process, because a standard user cannot obtain the process access needed to pin a SYSTEM service process.
-This check assumes that the Service Control Manager holds the service process handle until it reports the service stopped, so a running service's process ID cannot belong to another process.
 On any failure, UniGetUI closes the connection without sending data and retries under the reconnect rules.
 UniGetUI applies the same check to every Broker execution pipe connection before writing to it.
 On the execution pipe, a failed check is a transport failure that is never retried on another route; after the request was sent, the outcome is `UNKNOWN`.
-Same-user code can duplicate UniGetUI's pipe handles, so process-level output confidentiality remains an unresolved security requirement.
-The Agent identifies the client with `GetNamedPipeClientProcessId` and keeps a handle to that process for the life of the connection.
-From that process's token it takes the user SID and session ID.
-It accepts the client only when the executable is a signature-verified `UniGetUI.exe`, the token is not elevated, and the session is a logged-on user session.
+The issuing Broker keeps grants in memory, and a grant becomes invalid when that Broker instance stops.
+The grant client applies the same server check to the event connection and requires its server PID to match the execution connection; an event authentication failure after submission is `UNKNOWN`.
+Same-user code can duplicate UniGetUI's pipe handles, so these checks do not guarantee process-exclusive output confidentiality.
+The Agent obtains the connected process ID with `GetNamedPipeClientProcessId`, opens the process immediately and retains that handle for the connection.
+It reads only the bounded `Hello` before authenticating the client, and sends no response until authentication succeeds.
+The Agent impersonates the named-pipe client, reads its token SID and session ID, checks that the impersonation level permits identification, and reverts impersonation.
+It compares that SID and session ID with the retained process token before using them.
+It accepts the client only when the retained process image is a signature-verified `UniGetUI.exe`, the token is not elevated, and the session is a logged-on user session.
+Signature verification uses the retained image file and rejects a different signed file substituted at its path.
 Values that UniGetUI reports about itself are never used for identity or targeting.
-The client process ID identifies only the process that connected; same-user code that duplicates the connected handle can read and write later frames, including `Request` arguments that carry a grant.
-Registration therefore does not prove process-exclusive communication, and the Agent sends no `ExecutePackageOperation` over it until that security requirement is resolved.
+The client process ID identifies only the process that connected; same-user code may be able to duplicate the connected handle and read or write later frames, including `Request` arguments that carry a grant.
+Such a process may redeem a grant only for its bound SID and effectful payload.
+An operation response on this connection alone does not establish the operation's outcome.
+Registration does not prove which process sends a later frame.
 
 ### Framing
 
@@ -121,6 +159,7 @@ All identifiers are lowercase hyphenated UUIDs.
 | `Pong` | either | none |
 
 UniGetUI sends `Hello` with `protocolVersion` 1 within 10 seconds of connecting.
+The Agent closes the connection if it has not received the complete `Hello` within 10 seconds of connection.
 The Agent answers with `Welcome` after accepting the client identity, or closes the connection, including for any other `protocolVersion`.
 The instance is registered from `Welcome` until the connection closes.
 No `Request` is sent before `Welcome`.
@@ -144,8 +183,8 @@ Responses may arrive in any order, and the Agent has at most 8 outstanding reque
 `operation` is `Install`, `Update` or `Uninstall`; `version` and `scope` are empty when not requested.
 UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
 `Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
-A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless UniGetUI confirmed that no submission started.
-The Agent never resends an operation, on this or another connection.
+A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless trusted Broker evidence establishes the outcome.
+While its operation journal retains the operation ID, the Agent never resends it on this or another connection.
 
 ### Source identity
 
@@ -154,7 +193,7 @@ Every package and update entry carries `source`, a display label, and `sourceNam
 There is no separate opaque source reference.
 `GetPackageVersions` and `ExecutePackageOperation` require a nonempty `sourceName`.
 UniGetUI resolves it by ordinal comparison against the manager's source names and rejects the request with `InvalidArguments` when no source or more than one matches.
-For update and uninstall, it also rejects the request when the installed package's canonical source differs.
+For update and uninstall, it also rejects the request when the installed package's canonical source is unknown or differs.
 UniGetUI never substitutes another source or the display label.
 
 ### Liveness and duplicates
@@ -175,20 +214,23 @@ Each package entry contains its manager, source, package ID, name, installed ver
 `source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity cannot be safely reported.
 UniGetUI supplies the canonical name as `sourceName`; the Agent does not derive it from the display label.
 Source names, URLs and labels containing credentials or local paths are not sent to the Authority.
-The Agent does not use a UniGetUI inventory endpoint that can change package-manager state or log raw source details.
-When no safe endpoint is available, it reports inventory unavailable without sending an empty replacement snapshot.
-Every inventory request includes the target user SID, as do install, update and uninstall requests.
+An inventory request does not start a package-manager scan, launch a package manager, change its state or log raw source details.
+UniGetUI does not use unclassified local tasks unless their isolation is established.
+When no endpoint can satisfy those requirements, it reports inventory unavailable without running the unsafe path.
+When any enabled, installed manager is unready, its scan failed or UniGetUI cannot establish that distinct reported scopes survived the scan, UniGetUI reports inventory unavailable without sending an empty replacement snapshot.
+Every inventory request includes the target user UUID, as do install, update and uninstall requests.
 The ownership `scope` is `USER`, `MACHINE` or `UNKNOWN`.
 The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping establishes that ownership; otherwise it is `UNKNOWN`.
 `reported_scope` preserves UniGetUI's raw `reportedScope` value separately from ownership.
 UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish ownership across managers.
 The Authority does not use `reported_scope` to deduplicate machine-wide installations or authorize machine-wide changes.
 The scope-label definitions are in [UniGetUI package scope aliases].
-For each Agent Identity and target SID, the Authority transactionally allocates a durable generation and records the identity, request UUID, canonical SID and generation as pending before enqueueing a sync request.
+For each Agent Identity and target user UUID, the Authority transactionally allocates a durable generation and records the identity, request UUID, target user UUID, registry epoch, epoch revision and generation as pending before enqueueing a sync request.
 Every retry after a timeout uses a new request UUID and generation.
 The Agent sets the response envelope's `correlation_id` to the request UUID, including after a stream reconnect.
+Each page and unavailable response echoes the requested target user UUID and registry epoch.
 Reports can be lost when a stream closes, so the Authority times out requests without a terminal outcome.
-The Authority accepts a report only when its authenticated Agent Identity and correlation UUID match a pending request and its target SID matches that request's canonical SID.
+The Authority accepts a report only when its authenticated Agent Identity and correlation UUID match a pending request, its target user UUID and epoch match that request, and the active epoch and revision still match.
 It ignores stale, unsolicited, mismatched and already completed reports without changing inventory or newer requests.
 
 Each collection has a nonempty `report_id` identifying the snapshot independently of the request UUID.
@@ -197,10 +239,10 @@ All pages of that collection carry the same `report_id` and `page_count`.
 `page_count` is at least one, including for an empty inventory, and `page_index` is zero-based and less than `page_count`.
 `last` is true exactly when `page_index` is the final index.
 The Authority stages at most one collection for a request, bounds its staged page count and size, accepts identical duplicate pages and rejects conflicting duplicates.
-It replaces inventory and updates its last-successful sync only after all indexes for that collection are present.
+It atomically replaces observations for that Agent Identity and target user and updates that target's last-successful sync only after all indexes for that collection are present and the pending request, generation, active epoch and epoch revision still match.
 When staging is lost after restart or failover, the Authority abandons the incomplete attempt, ignores later pages from it and preserves the last completed inventory.
 
-The Agent sends `InventoryUnavailable` as `DeviceManagementReport.inventory_unavailable` field 6, with `target_user_sid` field 1 and `reason` field 2.
+The Agent sends `InventoryUnavailable` as `DeviceManagementReport.inventory_unavailable` field 6, with `target_user_uuid` field 3, `registry_epoch` field 4 and `reason` field 2.
 `reason` is `UNSPECIFIED` (0), `SAFE_ENDPOINT_UNAVAILABLE` (1), `BUSY` (2) or `COLLECTION_FAILED` (3).
 The Authority maps `UNSPECIFIED` and unrecognized reasons to generic unavailability, never success or authorization.
 It stores or displays only an allowlisted reason or a generic label, not raw diagnostics.
@@ -210,18 +252,21 @@ The Agent and Authority must both understand unavailable reports and complete-pa
 Any refresh after a package operation uses a new `SyncInventory` request with its own correlation and generation.
 Such a refresh neither determines the operation's outcome nor retries the write.
 Connection activity or a last-seen timestamp is not an inventory-sync outcome.
-The Authority stores an entry once per device when a manager-specific mapping confirms machine-wide ownership, and once per device and target user SID when it confirms user ownership.
+The Authority stores observations separately for each reporting target user for every scope, including `MACHINE`.
+It preserves multiple versions reported for a target and does not replace another target's observations.
+The device view keeps every observation in a separate row; a count of those rows is a count of observations, not confirmed distinct installations.
+Equal source names do not establish a shared feed or prove an installed package's origin.
 An unmapped scope does not establish either ownership class.
-The exact inventory record key is provisional, but it must preserve manager, source, package ID and scope so machine and user installations are not collapsed.
-UniGetUI's current package model and `IpcPackageInfo` contain no scope property, while `IpcPackageActionRequest` accepts `Scope`.
-The installed IPC list deduplicates with `GetPackageIdentity`, so adding a response property alone may not preserve both machine and user installations.
-These gaps are visible in the [UniGetUI package model], [UniGetUI IPC package types] and [installed-package identity implementation] at pinned source commit `da6be7b86100302a79a208e7ab4d5c6fcd695fd5`.
+Omission from a snapshot does not prove that a package was uninstalled.
 
 <a id="operations"></a>
 ## Package operations
 
 The operation type is exactly one of `install`, `update` or `uninstall`.
-The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope and target user SID, but no bypass token.
+Remote writes allow only `install`: user-scope installs for Broker-supported managers and machine-scope installs for WinGet.
+Update, uninstall, unknown scope and other machine-scope requests are rejected without execution.
+An install must not upgrade or remove an existing installation; if a manager cannot enforce that, the request is rejected without execution.
+The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope, target user UUID and registry epoch, but no bypass token.
 The operation's source is the nonempty canonical Broker source name, not the inventory display label.
 When the canonical source name is unavailable, the operation is rejected without execution.
 The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory.
@@ -229,20 +274,20 @@ The grant binds the target user SID, operation type, manager, source, package ID
 UniGetUI sends `POST /v1/package-operations/execute-grant` over the Broker's named pipe while running unelevated as the target user.
 The request uses `Content-Type: application/json`, `Accept: application/json` and exactly one `X-Devolutions-Package-Grant` header.
 Before sending the grant, UniGetUI authenticates the pipe server as the live Broker service.
-The authentication mechanism remains unresolved; grant execution stays unavailable until it is established.
+It uses the server authentication in `CONTRACT.package-management.md §registration`.
 The Broker accepts `application/json` content types with parameters, including `charset=utf-8`; the JSON body is UTF-8.
 The `Accept` value is exactly `application/json`, ignoring case and surrounding whitespace.
 The grant is 1 to 2,048 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._~:-]*`.
 Header names are case-insensitive; duplicate grant or `Accept` headers are rejected.
 The client validates the grant before sending it and does not send it with any other Broker request.
-The Broker independently validates the decoded request and the pipe caller's SID against the grant before execution, and consumes a matching grant atomically.
+The Broker independently validates the decoded request and the pipe caller's SID against the grant before execution, and atomically consumes a matching grant while creating its outcome record.
 The Broker rejects an invalid, expired, reused or mismatched grant rather than applying local policy.
 The Broker rejects missing, duplicate, invalid or unsupported grant requests before consuming a grant or starting work.
 Once consumed, a grant is never restored, even if submission or response delivery fails.
 The legacy `POST /v1/package-operations/execute` route rejects any request carrying the grant header.
 If the grant route is unavailable, including an older Broker's 404 response, UniGetUI does not retry through the legacy route or execute locally.
 The Agent, UniGetUI and Broker reject execution-affecting fields not authorized by the grant.
-The Authority request does not authorize custom parameters, hooks or other execution options, so remote requests carrying them are rejected.
+The Authority request does not authorize custom parameters or hooks, so remote requests carrying them are rejected.
 UniGetUI's broker request builder maps source, custom parameters and pre-operation, post-operation and kill-before-operation commands into the request.
 These execution-affecting fields are visible in the [UniGetUI broker request builder][UniGetUI broker request fields].
 
@@ -256,9 +301,11 @@ A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; o
 The Broker rejects any `Source.Url` the Authority has not authorized.
 The representation and manager-specific validation of authorized source URLs remain unresolved.
 Matching a source name or URL in the request alone does not establish the feed the manager uses.
-The Broker rejects an operation before submission when it cannot ensure that the manager's configured source-mapping restrictions remain effective throughout execution.
+For user-scope installs, the source name resolves through the target user's manager configuration and execution remains unelevated.
+For machine-scope installs, the Broker rejects the request when it cannot ensure that an unelevated user cannot alter the effective source mapping during execution.
 It rejects `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
-It also rejects `Interactive`, `SkipHashCheck`, `PreRelease`, `UninstallPrevious` and `NoUpgrade` when true.
+It also rejects `Interactive`, `SkipHashCheck`, `PreRelease` and `UninstallPrevious` when true.
+When the manager's Broker builder supports `NoUpgrade`, the Agent binds it as true and the Broker requires it for an install.
 Any future execution-affecting request field must be explicitly authorized or rejected.
 
 The Broker requires `RequestKind` to be `PackageRequest` and `RequestVersion` to be `1.0`.
@@ -275,39 +322,53 @@ The actual execution token must be elevated exactly when `Options.Scope` is `Mac
 The Broker rejects an elevated request unless the Authority's scope authorizes machine effects.
 `IncludeCommandPreview` must be false, and `CaptureOutput` must be true.
 UniGetUI uses captured stdout and stderr only for local result parsing; it does not send them to the Agent or Authority or write them to logs.
-For grant operations, the Broker sends event frames only to the verified process that submitted the operation.
-It authenticates the connecting process before sending any event frames, and rejects other processes without disclosing output.
-The grant client verifies that the event pipe belongs to the same live Broker instance that accepted the operation.
+For grant operations, the Broker authenticates the connecting process before sending any event frames and rejects an unverified connector without disclosing output.
+This check does not prevent another process with a duplicate connected handle from reading the frames.
+The grant client authenticates the event pipe as described in `CONTRACT.package-management.md §registration`.
 The legacy event pipe and its user-SID access rules remain unchanged.
 For grant operations, the Broker emits `Finish` only after both output readers have completed without losing data.
 On a read failure, reader panic, invalid UTF-8, output overflow or other loss, it closes the event stream without `Finish`.
-The grant client accepts output only after a valid `Hello` and `Finish` with no overflow or malformed frames.
-When the operation's verdict requires output that is unavailable or incomplete, UniGetUI reports `UNKNOWN`.
+The grant client accepts output only after a valid `Hello` and `Finish` with no overflow or malformed frames and only when it can establish that no output was lost or injected.
+The v1 event stream cannot establish completeness: another reader can consume whole frames without leaving a gap visible to the client.
+An exit code or output alone does not establish a package outcome.
+When the operation's verdict depends on either, the Agent reports `UNKNOWN`.
+
+The Broker atomically records consumption of each grant in memory before starting its authorized operation.
+The record is bound to the issued grant and Broker request ID and records positive evidence of process start and termination, including the exit code when available.
+The Agent reads the record in process; a registration response alone cannot establish start, failure or success.
+A missing, evicted or restart-lost record, a mismatch, or an outcome that cannot otherwise be verified is `UNKNOWN`.
+A Broker rejection establishes only that the rejected request started no work; it does not prove that another request did not or cannot consume the same grant.
+After a grant has been made available to UniGetUI, the Agent reports an unverified outcome as `UNKNOWN`, not a definite failure.
+The in-memory Broker record need not survive a restart.
 
 The npm broker always emits `--global`, while the .NET tool broker emits it when no custom install location is set; both reject explicit machine scope, so the current routes do not preserve UniGetUI's distinct `Local` and `Global` choices.
 The .NET broker passes `--source` for install and update, which overrides NuGet configuration including Package Source Mapping.
 The current Scoop broker rejects machine/global scope and elevated execution while its script is resolved from the target user's profile; those guards remain until a separately trusted route exists.
 The current scope behavior is visible in the [npm broker builder], [.NET tool broker builder] and [Scoop broker builder]; the source override is documented in [dotnet tool install].
-How each manager's scope maps to broker execution remains unresolved.
+How each manager's remaining scope choices map to broker execution remains unresolved.
 An operation result identifies the operation ID.
 When the outcome is known, it reports success or failure with an error value on failure.
 When the Agent cannot recover an operation's outcome, it reports `UNKNOWN`.
+`PackageOperationResult.execution_started` is optional field 5.
+The Agent sets it to true only when the Broker's in-process record proves that the operation's process started; otherwise it is absent.
+The Authority treats false like absence; neither proves that the operation did not start or permits a retry.
 The Agent sends an `UNKNOWN` result in `DeviceManagementReport.package_operation_unknown` with field number 5.
 It sends a known result with status `UNSPECIFIED` in `DeviceManagementReport.package_operation_result` with field number 2.
 The Authority does not record success or failure for a result whose field and status disagree.
 The Authority ignores `success` when the status is `UNKNOWN`.
 Agent and Authority versions must both understand `UNKNOWN` when they exchange operation results, including queued results after reconnect or rollback.
 Mixed versions that do not satisfy this requirement are unsupported.
-The Agent records an operation before submitting it and does not submit another operation for the same operation ID.
+The Agent durably records an operation before making a grant for it available and does not submit another operation for the same operation ID.
 Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
 A repeated operation ID with a different payload is rejected.
-When deduplication state cannot be recovered, the Agent does not treat an operation ID as new and reports `UNKNOWN`.
+When an existing journal's deduplication state cannot be recovered, the Agent does not treat an operation ID as new and reports `UNKNOWN`.
+When the operation journal is missing, the Agent creates a new one; operations recorded only in the missing journal may execute again.
 The Authority may submit a new operation ID after an `UNKNOWN` outcome only by explicitly accepting that the earlier operation may have completed.
 The Broker's request-ID replay tracking does not replace this Authority operation-ID tracking.
-The Broker status API requires the Broker-issued operation ID; if that ID is lost with the submission response and the outcome cannot otherwise be recovered, the Agent reports `UNKNOWN`.
-A confirmed rejection before submission is a failure only when no earlier submission for that operation could have started.
+The Broker-owned record is looked up by the issued grant and Broker request ID, not by an operation ID supplied in a registration response.
+A rejection is a failure only before a grant for that operation has been made available and when the journal confirms that no earlier submission could have started.
 A lost or malformed response after submission is not evidence of failure.
-A missing or unrecoverable record is `UNKNOWN`, and any recovery query uses the same resolved instance.
+An unrecoverable record in an existing journal is `UNKNOWN`, and any UniGetUI recovery query uses the same resolved instance.
 Local broker policy is bypassed only for a valid DVLS-authorized operation; local policy continues to govern user self-service operations.
 The exact requested-version semantics for each operation are provisional as described in `CONTRACT.package-management.md §provisional-decisions`.
 
@@ -368,7 +429,7 @@ Messages and details contain no grant value, captured output, command preview or
 Each rejection starts no work for that request.
 It consumes no grant, except that a consumed grant may have been used by an earlier request.
 Another concurrent request may independently consume the same grant.
-`Forbidden` and `Conflict` do not establish that an earlier submission for the operation did not start.
+No rejection establishes that the overall granted operation did not or cannot start.
 When several defects apply, the Broker may return any corresponding error from the table.
 An HTTP parser may close the connection or return a transport-level error for an oversized wire header.
 The client does not copy an untrusted response body or grant into exceptions, traces or logs.
@@ -396,39 +457,34 @@ The following codes are proposals only and must not be treated as a final wire c
 <a id="provisional-decisions"></a>
 ## Provisional decisions (confirm with Benoit)
 
-The following defaults are proposals and are not normative until Benoit confirms them.
-The operation target is the user SID alone, and the wire format omits an instance UUID.
+The following defaults are proposals and are not normative until confirmed.
 Extension framing lands after beta; beta package-management messages remain in their own namespace.
 The target extension framing has the Agent advertise each extension name and supported version range in `Hello`.
 The Authority opens a channel with a channel ID, extension name and version, and the Agent accepts or refuses the open.
 The Agent refuses an unknown extension or one disabled by local configuration.
 Data messages carry a channel ID and opaque payload, and either party may close a channel with a reason.
 Package management is the first separately versioned extension.
-UniGetUI must preserve reported scope in its package model and identity as well as its IPC response so distinct installations are not collapsed.
-The inventory key for unknown ownership and how each manager's scope maps to broker execution remain unresolved.
+How each manager's scope maps to broker execution remains unresolved.
+A proposed inventory response copies UniGetUI's last completed isolated scan and includes its age.
 An operation result does not itself update package records.
 The requested-version field is optional where an operation does not use a version; its exact meaning for each operation is unresolved.
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
 A transport disconnection does not prove that an operation failed.
-The Agent does not replay an operation automatically after disconnection or restart.
+While its operation journal retains the operation ID, the Agent does not replay it automatically after disconnection or restart.
 
 <a id="external-changes"></a>
 ## Required changes outside this repository
 
-UniGetUI must add `reportedScope` to its package model and installed IPC response while including it in package identity so distinct installations remain distinct.
-UniGetUI must expose each safely reportable canonical Broker source name as `sourceName` independently of its display label.
+UniGetUI must expose each safely reportable canonical Broker source name as `sourceName` independently of its display label, or leave `sourceName` empty when it cannot establish that identity.
 UniGetUI must pass the Agent-minted operation token through IPC to the package broker's named pipe without elevating its process.
 UniGetUI must reject remote operations when broker routing is disabled, the manager is unsupported, the source cannot use broker routing, or the token does not authorize all execution-affecting fields; it must not fall back to local process execution.
 This fail-closed requirement covers the existing local-fallback paths in [PackageOperations.cs][UniGetUI operation fallback].
 The current fixed mapping is in [`BrokerRequestBuilder.TryMapManagerName`][UniGetUI manager mapping] at commit `da6be7b86100302a79a208e7ab4d5c6fcd695fd5`.
 A Broker route for the UniGetUI `Installer` manager requires feed-item resolution, installer hash, identity and signature verification, and installed-version receipt handling; adding a manager enum value alone is insufficient.
 These operations are implemented in the pinned [WinInstaller runner], [WinInstaller manager] and [Installer receipt] sources.
-DVLS must store the target user SID and package scope in its beta database schema.
-DVLS/RDM must show the Agent-reported user and session in an instance picker and send the selected target user SID with every operation.
+DVLS stores the target user UUID and package scope without storing the target user SID.
+DVLS/RDM shows the Agent-reported user and session in an instance picker and sends the selected target user UUID and registry epoch with every operation.
 
-[UniGetUI IPC package types]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.Interface.IpcApi/IpcPackageApi.cs#L16-L35
-[UniGetUI package model]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Interfaces/IPackage.cs#L10-L42
-[installed-package identity implementation]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.Interface.IpcApi/IpcPackageApi.cs#L156-L164
 [UniGetUI manager mapping]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.AgentBroker/BrokerRequestBuilder.cs#L201-L221
 [UniGetUI operation fallback]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Operations/PackageOperations.cs#L387-L514
 [UniGetUI broker request fields]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.AgentBroker/BrokerRequestBuilder.cs#L53-L84
