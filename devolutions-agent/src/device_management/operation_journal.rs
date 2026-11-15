@@ -202,8 +202,8 @@ fn acquire_lock(data: &Dir, rule: &Rule) -> anyhow::Result<JournalLock> {
         let file = dir
             .open_or_create_file(LOCK_FILE_NAME, &file_rule(), FileOptions::new().read(true).write(true))
             .context("open package operation journal lock")?;
-        // SAFETY: The file descriptor stays open until the lock is dropped.
         ensure!(
+            // SAFETY: The file descriptor stays open until the lock is dropped.
             unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
             "{busy}: {}",
             std::io::Error::last_os_error()

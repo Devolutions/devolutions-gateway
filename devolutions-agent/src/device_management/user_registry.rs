@@ -157,6 +157,7 @@ fn is_random_uuid(uuid: &Uuid) -> bool {
 // UNTESTED: only SYSTEM can read or write the registry on Windows. Tests run as an ordinary user with a test rule.
 // Check, as SYSTEM, that the directory, the store and the lock file are owned by SYSTEM with a protected DACL that
 // grants only SYSTEM, and that an ordinary user and an administrator's token without SYSTEM cannot open them.
+#[cfg(windows)]
 fn system_rule() -> Rule {
     Rule::new().owner(Account::System).grant(Account::System, Access::Full)
 }
@@ -174,6 +175,7 @@ impl UserRegistry {
     ///
     /// Fails when another registry holds `dir`, when `dir` or an existing store is not private to SYSTEM, when the
     /// caller cannot create what only SYSTEM may own, and when an existing store cannot be read or is malformed.
+    #[cfg(windows)]
     pub(crate) fn open(dir: &Utf8Path) -> anyhow::Result<Self> {
         Self::open_with_rule(dir, system_rule())
     }

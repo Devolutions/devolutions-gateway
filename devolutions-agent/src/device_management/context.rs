@@ -63,6 +63,7 @@ impl DeviceManagementContext {
         self
     }
 
+    #[cfg(windows)]
     pub(super) fn remote_inventory_enabled(&self) -> bool {
         self.remote_inventory_enabled
     }
