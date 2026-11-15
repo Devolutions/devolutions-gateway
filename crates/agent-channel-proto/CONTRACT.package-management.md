@@ -24,7 +24,6 @@ Each report correlates with the request that caused it.
 Inventory, install, update and uninstall all use UniGetUI IPC, and package writes do not go directly to WinGet.
 UniGetUI runs unelevated in the target user's session.
 The Authority-facing target is an opaque Agent-issued user UUID, not a platform SID.
-The SID fields in the current `channel.proto` do not implement that requirement and must not be used as the new wire contract.
 The following table describes the Agent-to-Authority messages.
 The extension framing and any UniGetUI-to-Broker request details not specified below remain provisional.
 
@@ -182,10 +181,12 @@ Responses may arrive in any order, and the Agent has at most 8 outstanding reque
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
 The `GetInventorySnapshot` arrays use the item shapes of the corresponding list commands, subject to the source-safety rules in `CONTRACT.package-management.md §inventory`.
+An installed-package item may omit `systemRestartPending` when no value was captured in memory.
 `GetInventorySnapshot` returns timestamps as RFC 3339 UTC strings.
 `updateCompletedAt` may be omitted or null when no complete update scan is available; in that case, `updates` is empty.
 When UniGetUI cannot produce the installed snapshot required by `CONTRACT.package-management.md §inventory`, it answers `Failed` or `UnsupportedCommand` without a snapshot.
 `operation` is `Install`, `Update` or `Uninstall`; `version` and `scope` are empty when not requested.
+`sourceName` is empty for uninstall and may be empty for update, as specified in `CONTRACT.package-management.md §operations`.
 UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
 `Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
 A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless trusted Broker evidence establishes the outcome.
@@ -196,9 +197,9 @@ While its operation journal retains the operation ID, the Agent never resends it
 Every package and update entry carries `source`, a display label, and `sourceName`, the canonical Broker `Source.Name`.
 `sourceName` is empty when the canonical name is unknown, ambiguous within the manager, or unsafe to report.
 There is no separate opaque source reference.
-`GetPackageVersions` and `ExecutePackageOperation` require a nonempty `sourceName`.
-UniGetUI resolves it by ordinal comparison against the manager's source names and rejects the request with `InvalidArguments` when no source or more than one matches.
-For update and uninstall, it also rejects the request when the installed package's canonical source is unknown or differs.
+`GetPackageVersions` and an install require a nonempty `sourceName`.
+When a request names a source, UniGetUI resolves it by ordinal comparison against the manager's source names and rejects the request with `InvalidArguments` when no source or more than one matches.
+Update and uninstall do not require proof of the installed package's original source.
 UniGetUI never substitutes another source or the display label.
 
 ### Liveness and duplicates
@@ -222,6 +223,7 @@ Source names, URLs and labels containing credentials or local paths are not sent
 An inventory response copies UniGetUI's last completed installed-package scan, which may be stale.
 An inventory request does not start a package-manager scan, launch a package manager, change its state or log raw source details.
 UniGetUI does not use unclassified local tasks unless their isolation is established.
+It may copy already-finished local scan values without invoking, joining or inspecting those tasks during the request.
 When no endpoint can satisfy those requirements, it reports inventory unavailable without running the unsafe path.
 The installed scan covers every manager reported as both enabled and installed for that scan; disabled and uninstalled managers do not require a scan.
 When no completed installed scan exists, its completion time is unavailable, any required manager is unready, its scan failed, or UniGetUI cannot establish that distinct reported scopes survived the scan, it reports inventory unavailable without sending a partial or empty replacement snapshot.
@@ -282,12 +284,14 @@ Omission from a snapshot does not prove that a package was uninstalled.
 ## Package operations
 
 The operation type is exactly one of `install`, `update` or `uninstall`.
-Remote writes allow only `install`: user-scope installs for Broker-supported managers and machine-scope installs for WinGet.
-Update, uninstall, unknown scope and other machine-scope requests are rejected without execution.
-An install must not upgrade or remove an existing installation; if a manager cannot enforce that, the request is rejected without execution.
+Remote writes allow install, update and uninstall in user scope for Broker-supported managers and in both scopes for WinGet.
+Unknown scope and other machine-scope requests are rejected without execution.
+An install may replace an existing installation when the manager cannot prevent it.
 The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope, target user UUID and registry epoch, but no bypass token.
-The operation's source is the nonempty canonical Broker source name, not the inventory display label.
-When the canonical source name is unavailable, the operation is rejected without execution.
+An install requires a nonempty canonical Broker source name, not the inventory display label.
+An update may name its current execution feed or leave the source empty to use the manager's normal default feed.
+Uninstall uses no feed and carries an empty source.
+Update and uninstall identify the installed package by manager, package ID and scope without proving its original source.
 The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory.
 The grant binds the target user SID, operation type, manager, source, package ID, version, scope, requested elevation and Broker request ID.
 UniGetUI sends `POST /v1/package-operations/execute-grant` over the Broker's named pipe while running unelevated as the target user.
@@ -314,14 +318,16 @@ The Broker request's `Operation` must match the Authority operation type.
 The Broker compares `Manager` to the authorized manager using ASCII case-insensitive comparison of the Broker enum spelling.
 An alias without an agreed mapping is rejected.
 `Source.Name`, `Package.Id` and a nonempty requested version are compared exactly as decoded Unicode strings, without trimming or case folding.
+For an update with an empty source, `Source.Name` is empty and `Source.Url` is absent; the grant binds the choice of the manager's default feed.
+For uninstall, `Source.Name` is empty and `Source.Url` is absent.
 An empty requested version requires an absent Broker `Package.Version`; a nonempty requested version must not be dropped or replaced.
 An empty requested scope requires an absent Broker `Options.Scope`.
 A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
-The Broker rejects any `Source.Url` the Authority has not authorized.
-The representation and manager-specific validation of authorized source URLs remain unresolved.
+The Broker rejects any `Source.Url` the grant does not authorize.
 Matching a source name or URL in the request alone does not establish the feed the manager uses.
-For user-scope installs, the source name resolves through the target user's manager configuration and execution remains unelevated.
-For machine-scope installs, the Broker rejects the request when it cannot ensure that an unelevated user cannot alter the effective source mapping during execution.
+For install and update, the grant binds the effective feed or feeds, and the Broker rejects the operation when it cannot verify that execution uses only those feeds.
+For user-scope installs and updates, the feed resolves through the target user's manager configuration and execution remains unelevated.
+For machine-scope installs and updates, the Broker rejects the request when it cannot ensure that an unelevated user cannot alter the effective feed during execution.
 It rejects `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
 It also rejects `Interactive`, `SkipHashCheck`, `PreRelease` and `UninstallPrevious` when true.
 When the manager's Broker builder supports `NoUpgrade`, the Agent binds it as true and the Broker requires it for an install.
