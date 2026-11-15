@@ -58,6 +58,7 @@ The new fields use the following protobuf numbers; the former SID field numbers 
 Agent and Authority versions that do not both enforce the UUID and epoch fields are unsupported.
 
 Remote inventory and remote writes have separate Agent configuration switches, both enabled by default.
+They are `DeviceManagement.RemoteInventoryEnabled` and `DeviceManagement.RemoteWritesEnabled` in the Agent configuration.
 When inventory is disabled, the Agent reports `SAFE_ENDPOINT_UNAVAILABLE` without querying UniGetUI.
 When writes are disabled, the Agent rejects a new operation without contacting UniGetUI or issuing a grant.
 Previously journaled operation IDs retain their recorded status.
@@ -325,11 +326,9 @@ An empty requested scope requires an absent Broker `Options.Scope`.
 A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
 The Broker rejects any `Source.Url` the grant does not authorize.
 Matching a source name or URL in the request alone does not establish the feed the manager uses.
-For an unelevated install or update, the grant binds the requested source name or the choice of the target user's default feed.
-For an elevated install or update, the grant also binds a hash of the full canonicalized WinGet source export, including every field of every source.
-The Agent obtains that export using the same pinned WinGet executable, execution token and environment as the Broker uses for the operation.
-Immediately before launch, the Broker exports the sources again in that context and rejects the operation if the hash differs or cannot be verified.
-The Broker also rejects the operation when it cannot ensure that an unelevated user cannot alter the effective feed between that check and execution.
+For install and update, the grant binds the requested source name or the choice of the target user's default feed.
+Elevated operations are limited to WinGet in machine scope.
+Elevated WinGet installs and updates rely on WinGet's administrator-protected source configuration; the Agent and Broker do not verify the effective feed or whether the installed WinGet version enforces that protection.
 A user-scope operation that requires elevation is rejected.
 It rejects `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
 It also rejects `Interactive`, `SkipHashCheck`, `PreRelease` and `UninstallPrevious` when true.
