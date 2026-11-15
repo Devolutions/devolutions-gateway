@@ -13,10 +13,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use agent_channel_client::Reporter;
+use agent_channel_proto::device_management_report::Report;
+use agent_channel_proto::device_management_request::Request;
 use agent_channel_proto::{
     CatalogSyncResult, DeviceManagementReport, DeviceManagementRequest, InstalledPackage, InventoryReport,
     PackageManager, PackageOperationRequest, PackageOperationResult, PackageOperationType, PackageSource,
-    device_management_report::Report, device_management_request::Request,
 };
 use prost::Message as _;
 use uuid::Uuid;
