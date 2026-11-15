@@ -68,6 +68,98 @@ Inventory covers the package managers and scopes exposed by UniGetUI.
 Remote writes are limited to operations supported by the existing package broker and fail closed when unsupported.
 Remote writes never fall back to local package execution.
 
+<a id="registration"></a>
+## UniGetUI registration (beta proposal)
+
+This section is a proposal for the beta.
+The device-management intent still names Agent-side endpoint discovery as the beta mechanism and registration as a future direction.
+This section becomes normative when that intent is updated; it then replaces the registration-file scan and endpoint-owner rules in `CONTRACT.package-management.md §instances`, while the discovery report rules there remain.
+
+### Endpoint
+
+UniGetUI connects to `\\.\pipe\Devolutions.Now.PackageBroker.Registration.v1`, served by the Broker inside the `DevolutionsAgent` service.
+It is separate from the Broker execution pipe, which serves one HTTP request per connection from a small shared pool, so held connections would starve it.
+Grant execution stays on the Broker execution pipe.
+The Agent creates the first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE`; if that fails, registration is unavailable and discovery reports `COLLECTION_FAILED`.
+The pipe DACL grants SYSTEM and Administrators full control and `BUILTIN\Users` only `FILE_GENERIC_READ` and `FILE_WRITE_DATA`, never `FILE_APPEND_DATA`, which for pipes is `FILE_CREATE_PIPE_INSTANCE`.
+UniGetUI opens the pipe with `GENERIC_READ | FILE_WRITE_DATA` and at most identification-level impersonation.
+
+### Authentication
+
+Before sending any frame, UniGetUI authenticates the server.
+It obtains the server process ID with `GetNamedPipeServerProcessId`, opens that process with `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`, and keeps the handle open during the check.
+It then queries the `DevolutionsAgent` service with `QueryServiceStatusEx` and accepts the server only when the service is running and its process ID equals the server process ID.
+On any failure, UniGetUI closes the connection without sending data and retries under the reconnect rules.
+UniGetUI applies the same check to the Broker execution pipe before sending a grant.
+The Agent identifies the client with `GetNamedPipeClientProcessId` and keeps a handle to that process for the life of the connection.
+From that process's token it takes the user SID and session ID.
+It accepts the client only when the executable is a signature-verified `UniGetUI.exe`, the token is not elevated, and the session is a logged-on user session.
+Values that UniGetUI reports about itself are never used for identity or targeting.
+
+### Framing
+
+Each frame is a 4-byte unsigned little-endian length `N`, followed by `N` bytes of a UTF-8 JSON object.
+`N` is 1 to 1,048,576; a frame outside that range, invalid JSON, a missing `kind` or an unknown `kind` closes the connection.
+Unknown members are ignored.
+All identifiers are lowercase hyphenated UUIDs.
+
+| `kind` | Direction | Members |
+| --- | --- | --- |
+| `Hello` | UniGetUI to Agent | `protocolVersion` (integer), `clientVersion` (string, at most 128 characters) |
+| `Welcome` | Agent to UniGetUI | `protocolVersion` (integer) |
+| `Request` | Agent to UniGetUI | `id`, `command` (string), `arguments` (object) |
+| `Response` | UniGetUI to Agent | `id`, `ok` (boolean), `result` (any JSON value when `ok`), `error` (object when not `ok`) |
+| `Ping` | either | none |
+| `Pong` | either | none |
+
+UniGetUI sends `Hello` with `protocolVersion` 1 within 10 seconds of connecting.
+The Agent answers with `Welcome` after accepting the client identity, or closes the connection, including for any other `protocolVersion`.
+The instance is registered from `Welcome` until the connection closes.
+No `Request` is sent before `Welcome`.
+
+### Commands
+
+UniGetUI answers each `Request` with exactly one `Response` carrying the same `id`.
+Responses may arrive in any order, and the Agent has at most 8 outstanding requests per connection.
+`error` has a `code` string and a `message` string of at most 2,048 characters with no credentials, local paths or captured output.
+`code` is `UnsupportedCommand`, `InvalidArguments`, `Busy` or `Failed`.
+
+| `command` | `arguments` | `result` |
+| --- | --- | --- |
+| `ListInstalledPackages` | none | the JSON array served by UniGetUI IPC `GET /uniget/v1/packages/installed` |
+| `ListPackageUpdates` | none | the JSON array served by `GET /uniget/v1/packages/updates` |
+| `ListManagers` | none | the JSON array served by `GET /uniget/v1/managers` |
+| `ListSources` | none | the JSON array served by `GET /uniget/v1/sources` |
+| `GetPackageVersions` | `manager`, `sourceName`, `packageId` | `{ "versions": [string] }` |
+| `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
+
+`operation` is `Install`, `Update` or `Uninstall`; `version` and `scope` are empty when not requested.
+UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
+`Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
+A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless UniGetUI confirmed that no submission started.
+The Agent never resends an operation, on this or another connection.
+
+### Source identity
+
+Every package and update entry carries `source`, a display label, and `sourceName`, the canonical Broker `Source.Name`.
+`sourceName` is empty when the canonical name is unknown, ambiguous within the manager, or unsafe to report.
+There is no separate opaque source reference.
+`GetPackageVersions` and `ExecutePackageOperation` require a nonempty `sourceName`.
+UniGetUI resolves it by ordinal comparison against the manager's source names and rejects the request with `InvalidArguments` when no source or more than one matches.
+For update and uninstall, it also rejects the request when the installed package's canonical source differs.
+UniGetUI never substitutes another source or the display label.
+
+### Liveness and duplicates
+
+Either side sends `Ping` after 30 seconds without sending a frame and answers every `Ping` with `Pong`.
+Either side closes the connection after 90 seconds without receiving a frame.
+UniGetUI keeps one registration connection per process.
+After a close or failed attempt, it reconnects with exponential backoff from 1 to 60 seconds with random jitter, and authenticates the server and sends `Hello` again.
+When a process opens a new connection, the Agent closes its older one.
+Several processes may register for the same user SID and session.
+`UniGetUiInstances` lists one entry per registered user SID and session, and is complete by construction because the registered set is the Agent's own state.
+The Agent accepts at most 4 connections per user SID and 64 in total, and closes excess connections after identifying the client.
+
 <a id="inventory"></a>
 ## Inventory
 
