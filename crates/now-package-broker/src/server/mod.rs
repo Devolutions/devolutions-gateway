@@ -48,6 +48,73 @@ use responses::{
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
 };
 
+/// A live Windows process identity captured from its process token.
+///
+/// See the "Instance discovery and targeting" section of the [package-management contract][contract].
+///
+/// [contract]: https://github.com/Devolutions/devolutions-gateway/blob/68baca143ca85c34141a6464dae190998d1aedb2/crates/agent-channel-proto/CONTRACT.package-management.md#instances
+#[derive(Clone, Debug)]
+pub struct ProcessIdentity {
+    client: PipeClient,
+    signature_verified: bool,
+}
+
+impl ProcessIdentity {
+    /// Captures a process identity and records whether its executable signature is valid.
+    pub fn capture(process_id: u32) -> anyhow::Result<Self> {
+        let client = PipeClient::from_process_id_for_identity(process_id)?;
+        let signature_verified = client.validate_identity_signature().is_ok();
+        client.ensure_process_instance()?;
+        Ok(Self {
+            client,
+            signature_verified,
+        })
+    }
+
+    /// Returns the process ID captured during identity verification.
+    pub fn process_id(&self) -> u32 {
+        self.client.process_id()
+    }
+
+    /// Returns whether the process executable passed signature verification.
+    pub fn signature_verified(&self) -> bool {
+        self.signature_verified
+    }
+
+    /// Returns the executable path captured from the process image.
+    pub fn executable_path(&self) -> &std::path::Path {
+        self.client.executable_path()
+    }
+
+    /// Returns the user SID captured from the process token.
+    pub fn user_sid(&self) -> &Sid {
+        self.client.user_sid()
+    }
+
+    /// Returns the session ID captured from the process token.
+    pub fn session_id(&self) -> anyhow::Result<u32> {
+        self.client.session_id()
+    }
+
+    /// Resolves the account name under the captured process token.
+    pub fn display_name(&self) -> anyhow::Result<String> {
+        self.client.display_name()
+    }
+
+    /// Checks that the process instance remains live.
+    pub fn ensure_process_instance(&self) -> anyhow::Result<()> {
+        self.client.ensure_process_instance()
+    }
+
+    /// Checks that the process remains live and its executable signature is valid.
+    pub fn ensure_valid(&self) -> anyhow::Result<()> {
+        if !self.signature_verified {
+            anyhow::bail!("process executable signature is not verified");
+        }
+        self.client.validate_identity_signature()
+    }
+}
+
 // The unit value marks the scope in which an authenticated policy management request is dispatched.
 tokio::task_local! {
     static POLICY_MANAGEMENT_AUTHENTICATED: ();

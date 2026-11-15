@@ -350,6 +350,7 @@ async fn run_streams<C: LinkChannel>(
 /// authority would answer with the terminal `identity_unknown`.
 pub(super) struct Links<C> {
     identity_id: Uuid,
+    workers_shutdown: watch::Sender<bool>,
     want: Want,
     /// The stream in use.
     active: Option<Link<C>>,
@@ -399,6 +400,7 @@ impl<C: LinkChannel> Links<C> {
     pub(super) fn new(identity_id: Uuid) -> Self {
         Self {
             identity_id,
+            workers_shutdown: watch::channel(false).0,
             want: Want::Nothing,
             active: None,
             replacement: None,
@@ -574,7 +576,13 @@ impl<C: LinkChannel> Links<C> {
             },
             Some(Event::DeviceManagement { id, request }) => {
                 if let Some(reporter) = self.link(role).and_then(|link| link.channel.reporter()) {
-                    crate::device_management::handle(self.identity_id, id, request, reporter);
+                    crate::device_management::handle(
+                        self.identity_id,
+                        id,
+                        request,
+                        reporter,
+                        self.workers_shutdown.subscribe(),
+                    );
                 }
             }
             Some(Event::Closed { closure, reopen_after }) => self.closed(role, closure, reopen_after, now),
@@ -654,6 +662,12 @@ impl<C: LinkChannel> Links<C> {
             }
             Role::Replacement => self.replacement = None,
         }
+    }
+}
+
+impl<C> Drop for Links<C> {
+    fn drop(&mut self) {
+        self.workers_shutdown.send_replace(true);
     }
 }
 
@@ -1038,5 +1052,16 @@ mod tests {
 
         links.handle(link, Some(Event::Authenticated), closed_at + Duration::from_secs(6));
         assert_eq!(links.opening_at(), None);
+    }
+
+    #[test]
+    fn dropping_links_cancels_their_device_management_workers() {
+        // oracle: regression https://github.com/Devolutions/devolutions-gateway/pull/2194#discussion_r4563967639
+        let links = Links::<TestChannel>::new(Uuid::nil());
+        let workers_shutdown = links.workers_shutdown.subscribe();
+
+        drop(links);
+
+        assert!(*workers_shutdown.borrow());
     }
 }

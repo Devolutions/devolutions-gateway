@@ -1962,7 +1962,6 @@ dependencies = [
  "libc",
  "notify-debouncer-mini",
  "now-package-broker",
- "now-policy-api",
  "parking_lot",
  "prost 0.13.5",
  "prost-types",

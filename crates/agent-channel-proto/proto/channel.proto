@@ -74,6 +74,7 @@ message DeviceManagementRequest {
     SyncInventory sync_inventory = 1;
     PackageOperationRequest package_operation = 2;
     CatalogSync catalog_sync = 3;
+    DiscoverUniGetUiInstances discover_unigetui_instances = 4;
   }
 }
 
@@ -82,10 +83,26 @@ message DeviceManagementReport {
     InventoryReport inventory = 1;
     PackageOperationResult package_operation_result = 2;
     CatalogSyncResult catalog_sync_result = 3;
+    UniGetUiInstances unigetui_instances = 4;
   }
 }
 
-message SyncInventory {}
+message SyncInventory {
+  string target_user_sid = 1;
+}
+
+message DiscoverUniGetUiInstances {}
+
+message UniGetUiInstances {
+  repeated UniGetUiInstance instances = 1;
+}
+
+message UniGetUiInstance {
+  string user_sid = 1;
+  uint32 session_id = 2;
+  string display_name = 3;
+  bool signature_verified = 4;
+}
 
 // One part of an inventory. The agent splits an inventory so that each envelope stays under the
 // envelope limit. All parts of one inventory share report_id, and the last part has last = true.
@@ -96,6 +113,7 @@ message InventoryReport {
   repeated InstalledPackage packages = 3;
   repeated PackageManager managers = 4;
   repeated PackageSource sources = 5;
+  string target_user_sid = 6;
 }
 
 message InstalledPackage {
@@ -106,6 +124,8 @@ message InstalledPackage {
   string version = 5;
   // Newer version reported by the package manager. Empty when the package is up to date.
   string available_version = 6;
+  // Manager-relative scope. Empty when UniGetUI does not report it.
+  string scope = 7;
 }
 
 message PackageManager {
@@ -127,8 +147,7 @@ enum PackageOperationType {
   PACKAGE_OPERATION_TYPE_UNINSTALL = 2;
 }
 
-// Installs, updates or uninstalls one package through the agent's package broker.
-// An empty version means the latest version.
+// Requests one package operation for a live UniGetUI instance owned by target_user_sid.
 message PackageOperationRequest {
   string operation_id = 1;
   PackageOperationType type = 2;
@@ -136,6 +155,8 @@ message PackageOperationRequest {
   string source = 4;
   string package_id = 5;
   string version = 6;
+  string target_user_sid = 7;
+  string scope = 8;
 }
 
 // Answer to PackageOperationRequest. Error is set when success is false.

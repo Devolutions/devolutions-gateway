@@ -90,7 +90,6 @@ devolutions-pedm = { path = "../crates/devolutions-pedm" }
 notify-debouncer-mini = "0.6"
 chrono = "0.4"
 now-package-broker = { path = "../crates/now-package-broker" }
-now-policy-api = "0.7"
 sysevent-winevent = { path = "../crates/sysevent-winevent" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 rustls-platform-verifier = "0.7"
@@ -113,6 +112,9 @@ features = [
     # Used by `psu_agent::process_tree`, see its module documentation.
     "Win32_System_JobObjects",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Pipes",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
 ]
 
 [target.'cfg(unix)'.dependencies]

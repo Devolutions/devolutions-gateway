@@ -236,7 +236,6 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                 skip_signature_validation: conf.debug.skip_broker_signature_validation,
             };
             let broker = BrokerTask::new(broker_config);
-            devolutions_agent::device_management::set_broker(broker.state());
             tasks.register(broker);
         }
 
