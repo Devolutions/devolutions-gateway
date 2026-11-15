@@ -91,7 +91,10 @@ message DeviceManagementReport {
 }
 
 message SyncInventory {
-  string target_user_sid = 1;
+  reserved 1;
+  reserved "target_user_sid";
+  string target_user_uuid = 2;
+  string registry_epoch = 3;
 }
 
 message DiscoverUniGetUiInstances {}
@@ -99,6 +102,7 @@ message DiscoverUniGetUiInstances {}
 // Sent only for a complete discovery scan; it replaces the previous instance set.
 message UniGetUiInstances {
   repeated UniGetUiInstance instances = 1;
+  string registry_epoch = 2;
 }
 
 message UniGetUiInstancesUnavailable {
@@ -113,28 +117,40 @@ enum UniGetUiInstancesUnavailableReason {
 }
 
 message UniGetUiInstance {
-  string user_sid = 1;
+  reserved 1;
+  reserved "user_sid";
   uint32 session_id = 2;
   string display_name = 3;
   bool signature_verified = 4;
+  string user_uuid = 5;
 }
 
 // Inventory pages share a report ID and page count. Only the final index has last = true.
 // The first page carries the managers and sources. A complete inventory replaces the previous one.
 message InventoryReport {
+  reserved 6;
+  reserved "target_user_sid";
   string report_id = 1;
   bool last = 2;
   repeated InstalledPackage packages = 3;
   repeated PackageManager managers = 4;
   repeated PackageSource sources = 5;
-  string target_user_sid = 6;
   uint32 page_index = 7;
   uint32 page_count = 8;
+  string target_user_uuid = 9;
+  string registry_epoch = 10;
+  // Completion time of the installed-package scan, not the report time.
+  google.protobuf.Timestamp scan_completed_at = 11;
+  // Completion time of the update scan; absent when no complete update scan is available.
+  google.protobuf.Timestamp update_scan_completed_at = 12;
 }
 
 message InventoryUnavailable {
-  string target_user_sid = 1;
+  reserved 1;
+  reserved "target_user_sid";
   InventoryUnavailableReason reason = 2;
+  string target_user_uuid = 3;
+  string registry_epoch = 4;
 }
 
 enum InventoryUnavailableReason {
@@ -150,7 +166,7 @@ message InstalledPackage {
   string id = 3;
   string name = 4;
   string version = 5;
-  // Newer version reported by the package manager. Empty when the package is up to date.
+  // Advisory newer version. Empty when unavailable or when no update is reported.
   string available_version = 6;
   // Proven ownership: USER, MACHINE or UNKNOWN.
   string scope = 7;
@@ -184,16 +200,19 @@ enum PackageOperationStatus {
   PACKAGE_OPERATION_STATUS_UNKNOWN = 1;
 }
 
-// Requests one package operation for a live UniGetUI instance owned by target_user_sid.
+// Requests one package operation for a live UniGetUI instance owned by target_user_uuid.
 message PackageOperationRequest {
+  reserved 7;
+  reserved "target_user_sid";
   string operation_id = 1;
   PackageOperationType type = 2;
   string manager = 3;
   string source = 4;
   string package_id = 5;
   string version = 6;
-  string target_user_sid = 7;
   string scope = 8;
+  string target_user_uuid = 9;
+  string registry_epoch = 10;
 }
 
 // Answer to PackageOperationRequest.
@@ -203,6 +222,8 @@ message PackageOperationResult {
   bool success = 2;
   string error = 3;
   PackageOperationStatus status = 4;
+  // True is trusted evidence of start; false or absent does not prove that no work started.
+  optional bool execution_started = 5;
 }
 
 message CatalogSync {
