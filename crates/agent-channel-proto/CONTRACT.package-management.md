@@ -174,15 +174,12 @@ UniGetUI answers each `Request` with exactly one `Response` carrying the same `i
 Responses may arrive in any order, and the Agent has at most 8 outstanding requests per connection.
 `error` has a `code` string and a `message` string of at most 2,048 characters with no credentials, local paths or captured output.
 `code` is `UnsupportedCommand`, `InvalidArguments`, `Busy` or `Failed`.
+An unlisted command receives `UnsupportedCommand` without starting work.
 
 | `command` | `arguments` | `result` |
 | --- | --- | --- |
-| `ListInstalledPackages` | none | the JSON array served by UniGetUI IPC `GET /uniget/v1/packages/installed` |
-| `ListPackageUpdates` | none | the JSON array served by `GET /uniget/v1/packages/updates` |
 | `ListManagers` | none | the manager array with the redactions below |
-| `ListSources` | none | the JSON array served by `GET /uniget/v1/sources` |
 | `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
-| `GetPackageVersions` | `manager`, `sourceName`, `packageId` | `{ "versions": [string] }` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
 `ListManagers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
@@ -191,7 +188,8 @@ Responses may arrive in any order, and the Agent has at most 8 outstanding reque
 Each of `health.search`, `health.installed` and `health.updates` has null `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason`; false `lastFailureWasTimeout`; zero `consecutiveFailures`; and an empty `recentDurationsMs` array.
 These redactions keep executable paths, arguments and captured health output from reaching the Agent.
 
-The `GetInventorySnapshot` arrays use the item shapes of the corresponding list commands, subject to the source-safety rules in `CONTRACT.package-management.md §inventory`.
+The `managers`, `sources`, `installedPackages` and `updates` arrays use the item shapes of `GET /uniget/v1/managers`, `GET /uniget/v1/sources`, `GET /uniget/v1/packages/installed` and `GET /uniget/v1/packages/updates`, respectively.
+They apply the `ListManagers` redactions and the source-safety rules in `CONTRACT.package-management.md §inventory`.
 An installed-package item may omit `systemRestartPending` when no value was captured in memory.
 `GetInventorySnapshot` returns scan timestamps as RFC 3339 strings with UTC offset zero, at most nine fractional digits and no leap seconds.
 `updateCompletedAt` may be omitted or null when no complete update scan is available; in that case, `updates` is empty.
@@ -211,7 +209,7 @@ While its operation journal retains the operation ID, the Agent never resends it
 Every package and update entry carries `source`, a display label, and `sourceName`, the canonical Broker `Source.Name`.
 `sourceName` is empty when the canonical name is unknown, ambiguous within the manager, or unsafe to report.
 There is no separate opaque source reference.
-`GetPackageVersions` and an install require a nonempty `sourceName`.
+An install requires a nonempty `sourceName`.
 When a request names a source, UniGetUI resolves it by ordinal comparison against the manager's source names and rejects the request with `InvalidArguments` when no source or more than one matches.
 Update and uninstall do not require proof of the installed package's original source.
 UniGetUI never substitutes another source or the display label.
