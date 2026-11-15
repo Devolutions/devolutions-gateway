@@ -86,6 +86,7 @@ message DeviceManagementReport {
     UniGetUiInstances unigetui_instances = 4;
     PackageOperationResult package_operation_unknown = 5;
     InventoryUnavailable inventory_unavailable = 6;
+    UniGetUiInstancesUnavailable unigetui_instances_unavailable = 7;
   }
 }
 
@@ -95,8 +96,20 @@ message SyncInventory {
 
 message DiscoverUniGetUiInstances {}
 
+// Sent only for a complete discovery scan; it replaces the previous instance set.
 message UniGetUiInstances {
   repeated UniGetUiInstance instances = 1;
+}
+
+message UniGetUiInstancesUnavailable {
+  UniGetUiInstancesUnavailableReason reason = 1;
+}
+
+enum UniGetUiInstancesUnavailableReason {
+  UNI_GET_UI_INSTANCES_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  UNI_GET_UI_INSTANCES_UNAVAILABLE_REASON_BUSY = 1;
+  UNI_GET_UI_INSTANCES_UNAVAILABLE_REASON_COLLECTION_FAILED = 2;
+  UNI_GET_UI_INSTANCES_UNAVAILABLE_REASON_TOO_LARGE = 3;
 }
 
 message UniGetUiInstance {

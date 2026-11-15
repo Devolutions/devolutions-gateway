@@ -266,7 +266,7 @@ pub(super) async fn sources(instance: &TargetInstance) -> anyhow::Result<Vec<Pac
 pub(super) async fn resolve_target(target_user_sid: &str) -> anyhow::Result<TargetInstance> {
     #[cfg(windows)]
     {
-        let endpoints = discover_endpoints_with_identity().await?;
+        let endpoints = discover_endpoints_with_identity().await?.found;
         let endpoint = select_target_endpoint(&endpoints, target_user_sid)
             .context("no verified live UniGetUI instance belongs to the target user SID")?;
         Ok(TargetInstance {
@@ -281,11 +281,16 @@ pub(super) async fn resolve_target(target_user_sid: &str) -> anyhow::Result<Targ
     }
 }
 
+/// Lists every reportable instance, or fails when the scan cannot prove the list complete.
 pub(super) async fn instances() -> anyhow::Result<Vec<agent_channel_proto::UniGetUiInstance>> {
     #[cfg(windows)]
     {
-        Ok(discover_endpoints_with_identity()
-            .await?
+        let scan = discover_endpoints_with_identity().await?;
+        if !scan.complete {
+            bail!("UniGetUI discovery could not resolve every registered endpoint");
+        }
+        let mut instances: Vec<_> = scan
+            .found
             .into_iter()
             .map(|endpoint| agent_channel_proto::UniGetUiInstance {
                 user_sid: endpoint.identity.user_sid,
@@ -293,12 +298,18 @@ pub(super) async fn instances() -> anyhow::Result<Vec<agent_channel_proto::UniGe
                 display_name: endpoint.identity.display_name,
                 signature_verified: endpoint.identity.signature_verified,
             })
-            .collect())
+            .collect();
+        // Several registrations can name the same endpoint.
+        instances.sort_by(|a, b| {
+            (&a.user_sid, a.session_id, &a.display_name).cmp(&(&b.user_sid, b.session_id, &b.display_name))
+        });
+        instances.dedup();
+        Ok(instances)
     }
 
     #[cfg(not(windows))]
     {
-        Ok(Vec::new())
+        bail!("UniGetUI discovery is only supported on Windows")
     }
 }
 
@@ -388,176 +399,264 @@ async fn query_verified_endpoint(endpoint: &DiscoveredEndpoint, path_and_query: 
     Ok(body)
 }
 
+/// Items found by one discovery stage, and whether that stage resolved everything it inspected.
 #[cfg(windows)]
-fn discover_endpoints() -> anyhow::Result<Vec<Endpoint>> {
-    let mut endpoints = Vec::new();
-    for directory in registration_directories()? {
-        let entries = match std::fs::read_dir(&directory) {
+struct Scan<T> {
+    found: Vec<T>,
+    complete: bool,
+}
+
+/// How identity verification resolved one registered endpoint.
+#[cfg(windows)]
+enum Verification {
+    Verified(Box<DiscoveredEndpoint>),
+    /// The endpoint is conclusively not a reportable instance.
+    Excluded,
+    /// The endpoint might be a reportable instance.
+    Unresolved,
+}
+
+#[cfg(windows)]
+fn discover_endpoints() -> anyhow::Result<Scan<Endpoint>> {
+    let directories = registration_directories()?;
+    let mut registrations = read_registrations(&directories.found);
+    registrations.complete &= directories.complete;
+    Ok(registrations)
+}
+
+#[cfg(windows)]
+fn read_registrations(directories: &[PathBuf]) -> Scan<Endpoint> {
+    let mut scan = Scan {
+        found: Vec::new(),
+        complete: true,
+    };
+    for directory in directories {
+        let entries = match std::fs::read_dir(directory) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error).with_context(|| format!("failed to read {}", directory.display())),
+            Err(error) => {
+                warn!(
+                    directory = %directory.display(),
+                    error = %error,
+                    "Failed to read UniGetUI registration directory"
+                );
+                scan.complete = false;
+                continue;
+            }
         };
         for entry in entries {
-            let entry = entry.context("failed to read UniGetUI registration directory entry")?;
-            let path = entry.path();
+            let path = match entry {
+                Ok(entry) => entry.path(),
+                Err(error) => {
+                    warn!(
+                        directory = %directory.display(),
+                        error = %error,
+                        "Failed to read UniGetUI registration directory entry"
+                    );
+                    scan.complete = false;
+                    // A failed enumeration can fail again on every call, so stop reading this directory.
+                    break;
+                }
+            };
             if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")) {
                 continue;
             }
             match parse_registration(&path) {
-                Ok(Some(endpoint)) => endpoints.push(endpoint),
+                Ok(Some(endpoint)) => scan.found.push(endpoint),
                 Ok(None) => {}
                 Err(error) => {
-                    return Err(error).with_context(|| format!("failed to read {}", path.display()));
+                    warn!(
+                        file = %path.display(),
+                        error = format!("{error:#}"),
+                        "Failed to read UniGetUI registration"
+                    );
+                    scan.complete = false;
                 }
             }
         }
     }
-    endpoints.sort_by(|a, b| b.persisted_at.cmp(&a.persisted_at));
-    Ok(endpoints)
+    scan.found.sort_by(|a, b| b.persisted_at.cmp(&a.persisted_at));
+    scan
 }
 
 #[cfg(windows)]
-async fn discover_endpoints_with_identity() -> anyhow::Result<Vec<DiscoveredEndpoint>> {
-    let mut verified_endpoints = Vec::new();
-    for endpoint in discover_endpoints()? {
-        let process_id = match endpoint_owner_process_id(&endpoint).await {
-            Ok(process_id) => process_id,
-            Err(error) => {
-                warn!(
-                    file = %endpoint.file.display(),
-                    error = format!("{error:#}"),
-                    "Failed to identify UniGetUI endpoint owner"
-                );
-                continue;
-            }
-        };
-        let captured = tokio::task::spawn_blocking(move || {
-            // UNTESTED: Automated tests do not bind either endpoint owner PID to its token SID, session and signature, which could misattribute a target.
-            // Validate both transports with signed UniGetUI processes in multiple sessions before changing this path.
-            let process = ProcessIdentity::capture(process_id)?;
-            let user_sid = process.user_sid().to_string();
-            let session_id = process.session_id()?;
-            let display_name = process.display_name()?;
-            Ok::<_, anyhow::Error>((process, user_sid, session_id, display_name))
-        })
-        .await;
-        let (process, user_sid, session_id, display_name) = match captured {
-            Ok(Ok(identity)) => identity,
-            Ok(Err(error)) => {
-                warn!(
-                    file = %endpoint.file.display(),
-                    process_id,
-                    error = format!("{error:#}"),
-                    "UniGetUI endpoint owner did not pass identity verification"
-                );
-                continue;
-            }
-            Err(error) => {
-                warn!(
-                    file = %endpoint.file.display(),
-                    process_id,
-                    error = %error,
-                    "UniGetUI endpoint owner verification worker failed"
-                );
-                continue;
-            }
-        };
-        let is_unigetui = process
-            .executable_path()
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("UniGetUI.exe"));
-        if !is_unigetui {
+async fn discover_endpoints_with_identity() -> anyhow::Result<Scan<DiscoveredEndpoint>> {
+    let registrations = tokio::task::spawn_blocking(discover_endpoints)
+        .await
+        .context("UniGetUI registration worker failed")??;
+    let mut scan = Scan {
+        found: Vec::new(),
+        complete: registrations.complete,
+    };
+    for endpoint in registrations.found {
+        match verify_endpoint(endpoint).await {
+            Verification::Verified(endpoint) => scan.found.push(*endpoint),
+            Verification::Excluded => {}
+            Verification::Unresolved => scan.complete = false,
+        }
+    }
+    Ok(scan)
+}
+
+// UNTESTED: Automated tests do not run this classification against real UniGetUI processes.
+// Only an absent endpoint, a non-UniGetUI owner or an elevated owner may be excluded; any other doubt must stay
+// unresolved so that discovery never reports a partial list as complete. Check every early return when changing it.
+#[cfg(windows)]
+async fn verify_endpoint(endpoint: Endpoint) -> Verification {
+    let process_id = match endpoint_owner(&endpoint).await {
+        Ok(Some(process_id)) => process_id,
+        Ok(None) => {
+            debug!(file = %endpoint.file.display(), "UniGetUI endpoint is not listening");
+            return Verification::Excluded;
+        }
+        Err(error) => {
             warn!(
                 file = %endpoint.file.display(),
-                process_id,
-                executable = %process.executable_path().display(),
-                "UniGetUI endpoint owner is not UniGetUI.exe"
+                error = format!("{error:#}"),
+                "Failed to identify UniGetUI endpoint owner"
             );
-            continue;
+            return Verification::Unresolved;
         }
-        if !process.signature_verified() {
-            warn!(
-                file = %endpoint.file.display(),
-                process_id,
-                "UniGetUI endpoint owner signature is not verified"
-            );
-            continue;
-        }
-        // UNTESTED: A process can use another account within a logged-on session, so its SID must match the session user.
-        // Check mismatched and matching signed processes in real user sessions when changing this verification.
-        if let Err(error) = process.ensure_logged_on_session() {
+    };
+    let captured = tokio::task::spawn_blocking(move || {
+        // UNTESTED: Automated tests do not bind either endpoint owner PID to its token SID, session and signature, which could misattribute a target.
+        // Validate both transports with signed UniGetUI processes in multiple sessions before changing this path.
+        let process = ProcessIdentity::capture(process_id)?;
+        let user_sid = process.user_sid().to_string();
+        let session_id = process.session_id()?;
+        let display_name = process.display_name()?;
+        Ok::<_, anyhow::Error>((process, user_sid, session_id, display_name))
+    })
+    .await;
+    let (process, user_sid, session_id, display_name) = match captured {
+        Ok(Ok(identity)) => identity,
+        Ok(Err(error)) => {
             warn!(
                 file = %endpoint.file.display(),
                 process_id,
                 error = format!("{error:#}"),
-                "UniGetUI endpoint owner is not the logged-on session user"
+                "UniGetUI endpoint owner did not pass identity verification"
             );
-            continue;
+            return Verification::Unresolved;
         }
-        // UNTESTED: An elevated UniGetUI must not be reported or targeted, because remote operations require an unelevated client.
-        // Verify signed elevated and unelevated instances when changing process-token capture or this check.
-        if process.is_elevated() {
+        Err(error) => {
             warn!(
                 file = %endpoint.file.display(),
                 process_id,
-                "UniGetUI endpoint owner is elevated"
+                error = %error,
+                "UniGetUI endpoint owner verification worker failed"
             );
-            continue;
+            return Verification::Unresolved;
         }
+    };
 
-        match endpoint_owner_process_id(&endpoint).await {
-            Ok(confirmed_process_id) if confirmed_process_id == process_id => {}
-            Ok(_) => {
-                warn!(
-                    file = %endpoint.file.display(),
-                    process_id,
-                    "UniGetUI endpoint owner changed during identity capture"
-                );
-                continue;
-            }
-            Err(error) => {
-                warn!(
-                    file = %endpoint.file.display(),
-                    process_id,
-                    error = format!("{error:#}"),
-                    "Failed to confirm UniGetUI endpoint owner"
-                );
-                continue;
-            }
+    // The captured handle keeps the process ID from being reused, so a matching owner is the captured process.
+    match endpoint_owner(&endpoint).await {
+        Ok(Some(confirmed_process_id)) if confirmed_process_id == process_id => {}
+        Ok(_) => {
+            warn!(
+                file = %endpoint.file.display(),
+                process_id,
+                "UniGetUI endpoint owner changed during identity capture"
+            );
+            return Verification::Unresolved;
         }
-        if let Err(error) = process.ensure_process_instance() {
+        Err(error) => {
             warn!(
                 file = %endpoint.file.display(),
                 process_id,
                 error = format!("{error:#}"),
-                "UniGetUI process exited during identity capture"
+                "Failed to confirm UniGetUI endpoint owner"
             );
-            continue;
+            return Verification::Unresolved;
         }
-
-        verified_endpoints.push(DiscoveredEndpoint {
-            endpoint,
-            identity: EndpointIdentity {
-                user_sid,
-                session_id,
-                display_name: format!("{display_name} (session {session_id})"),
-                signature_verified: process.signature_verified(),
-            },
-            process: Some(process),
-        });
+    }
+    if let Err(error) = process.ensure_process_instance() {
+        warn!(
+            file = %endpoint.file.display(),
+            process_id,
+            error = format!("{error:#}"),
+            "UniGetUI process exited during identity capture"
+        );
+        return Verification::Unresolved;
     }
 
-    Ok(verified_endpoints)
+    let is_unigetui = process
+        .executable_path()
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("UniGetUI.exe"));
+    if !is_unigetui {
+        warn!(
+            file = %endpoint.file.display(),
+            process_id,
+            executable = %process.executable_path().display(),
+            "UniGetUI endpoint owner is not UniGetUI.exe"
+        );
+        return Verification::Excluded;
+    }
+    // UNTESTED: An elevated UniGetUI must not be reported or targeted, because remote operations require an unelevated client.
+    // Verify signed elevated and unelevated instances when changing process-token capture or this check.
+    if process.is_elevated() {
+        warn!(
+            file = %endpoint.file.display(),
+            process_id,
+            "UniGetUI endpoint owner is elevated"
+        );
+        return Verification::Excluded;
+    }
+    // A failed signature check cannot distinguish an invalid signature from a verification error.
+    if !process.signature_verified() {
+        warn!(
+            file = %endpoint.file.display(),
+            process_id,
+            "UniGetUI endpoint owner signature is not verified"
+        );
+        return Verification::Unresolved;
+    }
+    // UNTESTED: A process can use another account within a logged-on session, so its SID must match the session user.
+    // Check mismatched and matching signed processes in real user sessions when changing this verification.
+    if let Err(error) = process.ensure_logged_on_session() {
+        warn!(
+            file = %endpoint.file.display(),
+            process_id,
+            error = format!("{error:#}"),
+            "UniGetUI endpoint owner is not the logged-on session user"
+        );
+        return Verification::Unresolved;
+    }
+
+    Verification::Verified(Box::new(DiscoveredEndpoint {
+        endpoint,
+        identity: EndpointIdentity {
+            user_sid,
+            session_id,
+            display_name: format!("{display_name} (session {session_id})"),
+            signature_verified: process.signature_verified(),
+        },
+        process: Some(process),
+    }))
 }
 
 #[cfg(windows)]
 async fn endpoint_owner_process_id(endpoint: &Endpoint) -> anyhow::Result<u32> {
+    endpoint_owner(endpoint)
+        .await?
+        .context("UniGetUI endpoint is not listening")
+}
+
+/// Returns the process that owns `endpoint`, or `None` when nothing listens on it.
+#[cfg(windows)]
+async fn endpoint_owner(endpoint: &Endpoint) -> anyhow::Result<Option<u32>> {
     match &endpoint.transport {
-        Transport::Tcp(port) => tcp_listener_process_id(*port),
+        Transport::Tcp(port) => tcp_listener_owner(*port),
         Transport::NamedPipe(name) => {
             let pipe_path = format!(r"\\.\pipe\{name}");
-            let pipe = open_unigetui_pipe(&pipe_path).with_context(|| format!("failed to open {pipe_path}"))?;
-            named_pipe_server_process_id(pipe.as_raw_handle())
+            let pipe = match open_unigetui_pipe(&pipe_path) {
+                Ok(pipe) => pipe,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error).with_context(|| format!("failed to open {pipe_path}")),
+            };
+            named_pipe_server_process_id(pipe.as_raw_handle()).map(Some)
         }
     }
 }
@@ -593,18 +692,22 @@ fn tcp_port(port: u32) -> Option<u16> {
     u16::try_from(port).ok().map(u16::from_be)
 }
 
+/// Returns the process listening on `port`, or `None` when no IPv4 listener uses it.
 #[cfg(windows)]
-fn tcp_listener_process_id(port: u16) -> anyhow::Result<u32> {
+fn tcp_listener_owner(port: u16) -> anyhow::Result<Option<u32>> {
     let buffer = tcp_owner_table(TCP_TABLE_OWNER_PID_LISTENER)?;
     // SAFETY: `GetExtendedTcpTable` filled `buffer` with a MIB_TCPTABLE_OWNER_PID value.
     let table = unsafe { &*buffer.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>() };
     // SAFETY: The table header is followed by `dwNumEntries` rows as specified by the API.
     let rows = unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
-    rows.iter()
+    match rows
+        .iter()
         .find(|row| row.dwState == MIB_TCP_STATE_LISTEN.0 as u32 && tcp_port(row.dwLocalPort) == Some(port))
-        .map(|row| row.dwOwningPid)
-        .filter(|process_id| *process_id != 0)
-        .with_context(|| format!("no TCP listener owns UniGetUI port {port}"))
+    {
+        None => Ok(None),
+        Some(row) if row.dwOwningPid == 0 => bail!("the TCP listener on UniGetUI port {port} reports no owner"),
+        Some(row) => Ok(Some(row.dwOwningPid)),
+    }
 }
 
 #[cfg(windows)]
@@ -656,6 +759,7 @@ fn tcp_owner_table(table_class: TCP_TABLE_CLASS) -> anyhow::Result<Vec<usize>> {
     Ok(buffer)
 }
 
+/// Reads one endpoint registration, returning `None` when the file no longer exists.
 #[cfg(windows)]
 fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
     let text = match std::fs::read_to_string(path) {
@@ -663,20 +767,12 @@ fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).context("failed to read UniGetUI registration file"),
     };
-    let registration: Registration = match serde_json::from_str(text.trim_start_matches('\u{feff}')) {
-        Ok(registration) => registration,
-        Err(error) => {
-            warn!(
-                file = %path.display(),
-                error = %error,
-                "Ignoring invalid UniGetUI registration"
-            );
-            return Ok(None);
-        }
-    };
-    let Some(token) = registration.token.filter(|token| !token.is_empty()) else {
-        return Ok(None);
-    };
+    let registration: Registration =
+        serde_json::from_str(text.trim_start_matches('\u{feff}')).context("invalid UniGetUI registration")?;
+    let token = registration
+        .token
+        .filter(|token| !token.is_empty())
+        .context("UniGetUI registration has no token")?;
 
     let is_tcp = match registration.transport {
         Some(serde_json::Value::Number(number)) => number.as_u64() == Some(0),
@@ -691,6 +787,7 @@ fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
             .named_pipe_name
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned());
+        ensure_local_pipe_name(&name)?;
 
         Transport::NamedPipe(name)
     };
@@ -703,11 +800,28 @@ fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
     }))
 }
 
+/// Rejects a registered pipe name that Win32 path normalization could move outside the local pipe namespace.
 #[cfg(windows)]
-fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
+fn ensure_local_pipe_name(name: &str) -> anyhow::Result<()> {
+    // `\\.\pipe\` uses 9 of the 256 characters that a full pipe name allows.
+    const MAX_NAME_UTF16_UNITS: usize = 256 - 9;
+
+    let is_local = name.encode_utf16().count() <= MAX_NAME_UTF16_UNITS
+        && !name.trim_end_matches(['.', ' ']).is_empty()
+        && !name.chars().any(|c| matches!(c, '\\' | '/') || c.is_control());
+    if !is_local {
+        bail!("UniGetUI registration names a pipe outside the local pipe namespace");
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn registration_directories() -> anyhow::Result<Scan<PathBuf>> {
     const RELATIVE: [&str; 5] = ["AppData", "Local", "UniGetUI", "Configuration", "IpcApiEndpoints"];
 
     let mut dirs = Vec::new();
+    // A UniGetUI process that cannot be inspected might use a portable registration directory.
+    let mut complete = true;
 
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
         dirs.push(
@@ -726,6 +840,7 @@ fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
                     Ok(name) => name,
                     Err(error) => {
                         warn!(process_id, error = %error, "Failed to inspect process name for portable UniGetUI discovery");
+                        complete = false;
                         continue;
                     }
                 };
@@ -737,6 +852,7 @@ fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
                     Ok(process) => process,
                     Err(error) => {
                         warn!(process_id, error = %error, "Failed to inspect process path for portable UniGetUI discovery");
+                        complete = false;
                         continue;
                     }
                 };
@@ -744,6 +860,7 @@ fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
                     Ok(path) => path,
                     Err(error) => {
                         warn!(process_id, error = %error, "Failed to inspect process path for portable UniGetUI discovery");
+                        complete = false;
                         continue;
                     }
                 };
@@ -774,10 +891,13 @@ fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
                 }
             }
         }
-        Err(error) => warn!(
-            error = %error,
-            "Failed to enumerate processes for portable UniGetUI discovery"
-        ),
+        Err(error) => {
+            warn!(
+                error = %error,
+                "Failed to enumerate processes for portable UniGetUI discovery"
+            );
+            complete = false;
+        }
     }
 
     let system_drive = std::env::var("SystemDrive").context("SystemDrive is not set")?;
@@ -798,7 +918,7 @@ fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
         Err(error) => return Err(error).context("failed to read UniGetUI user profile directories"),
     }
 
-    Ok(dirs)
+    Ok(Scan { found: dirs, complete })
 }
 
 #[cfg(windows)]
@@ -1085,6 +1205,73 @@ mod tests {
         );
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[cfg(windows)]
+    #[test]
+    fn unreadable_registration_makes_the_scan_incomplete() {
+        let directory = tempfile::tempdir().expect("create registration directory");
+        std::fs::write(
+            directory.path().join("valid.json"),
+            r#"{"token":"secret","transport":"tcp","tcpPort":7058}"#,
+        )
+        .expect("write valid registration");
+        std::fs::write(directory.path().join("partial.json"), r#"{"token":"#).expect("write partial registration");
+        std::fs::write(directory.path().join("notes.txt"), "ignored").expect("write unrelated file");
+
+        let scan = read_registrations(&[directory.path().to_path_buf()]);
+
+        assert!(!scan.complete);
+        let [endpoint] = scan.found.as_slice() else {
+            panic!("expected only the valid registration");
+        };
+        assert!(matches!(endpoint.transport, Transport::Tcp(7058)));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[cfg(windows)]
+    #[test]
+    fn readable_registrations_complete_the_scan() {
+        let directory = tempfile::tempdir().expect("create registration directory");
+        std::fs::write(
+            directory.path().join("pipe.json"),
+            "\u{feff}{\"token\":\"secret\",\"transport\":\"namedpipe\"}",
+        )
+        .expect("write pipe registration");
+        let missing = directory.path().join("missing");
+
+        let scan = read_registrations(&[directory.path().to_path_buf(), missing]);
+
+        assert!(scan.complete);
+        let [endpoint] = scan.found.as_slice() else {
+            panic!("expected the pipe registration");
+        };
+        assert!(matches!(&endpoint.transport, Transport::NamedPipe(name) if name == DEFAULT_PIPE_NAME));
+    }
+
+    // oracle: spec Microsoft "File path formats on Windows" §Path normalization
+    #[cfg(windows)]
+    #[test]
+    fn registration_cannot_name_a_pipe_outside_the_local_pipe_namespace() {
+        let directory = tempfile::tempdir().expect("create registration directory");
+        for (file, name) in [
+            ("unc.json", r"..\\UNC\\example.invalid\\share\\x"),
+            ("slash.json", "../UNC/example.invalid/share/x"),
+            ("parent.json", ".."),
+            ("trimmed.json", ". ."),
+        ] {
+            std::fs::write(
+                directory.path().join(file),
+                format!(r#"{{"token":"secret","transport":"namedpipe","namedPipeName":"{name}"}}"#),
+            )
+            .expect("write registration");
+
+            assert!(
+                parse_registration(&directory.path().join(file)).is_err(),
+                "{name} must be rejected"
+            );
+        }
+    }
+
     #[test]
     fn enabled_loading_manager_defers_inventory() {
         // oracle: regression #2194
@@ -1260,12 +1447,12 @@ mod tests {
             .await
             .expect("bind a loopback listener");
         let port = listener.local_addr().expect("query loopback address").port();
-        let owner = tokio::task::spawn_blocking(move || tcp_listener_process_id(port))
+        let owner = tokio::task::spawn_blocking(move || tcp_listener_owner(port))
             .await
             .expect("TCP owner query worker")
             .expect("TCP listener owner");
 
-        assert_eq!(owner, std::process::id());
+        assert_eq!(owner, Some(std::process::id()));
     }
 
     #[cfg(windows)]

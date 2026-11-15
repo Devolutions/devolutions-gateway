@@ -11,7 +11,8 @@ use agent_channel_proto::device_management_request::Request;
 use agent_channel_proto::{
     CatalogSyncResult, DeviceManagementReport, DeviceManagementRequest, InstalledPackage, InventoryReport,
     InventoryUnavailable, InventoryUnavailableReason, PackageManager, PackageOperationRequest, PackageOperationResult,
-    PackageOperationStatus, PackageSource, UniGetUiInstances,
+    PackageOperationStatus, PackageSource, UniGetUiInstance, UniGetUiInstances, UniGetUiInstancesUnavailable,
+    UniGetUiInstancesUnavailableReason,
 };
 use anyhow::Context as _;
 use prost::Message as _;
@@ -131,7 +132,9 @@ fn reject_busy_request(id: &str, request: Request, mut send: impl FnMut(Option<S
             );
             return;
         }
-        Request::DiscoverUnigetuiInstances(_) => None,
+        Request::DiscoverUnigetuiInstances(_) => {
+            Some(instances_unavailable_report(UniGetUiInstancesUnavailableReason::Busy))
+        }
     };
     if let Some(report) = response {
         send(Some(id.to_owned()), report);
@@ -163,12 +166,20 @@ fn inventory_unavailable_report(target_user_sid: &str, reason: InventoryUnavaila
     }))
 }
 
+fn instances_unavailable_report(reason: UniGetUiInstancesUnavailableReason) -> DeviceManagementReport {
+    report(Report::UnigetuiInstancesUnavailable(UniGetUiInstancesUnavailable {
+        reason: reason.into(),
+    }))
+}
+
 /// Sends `report` only when its whole envelope, including the outer ID and correlation, fits the channel limit.
+///
+/// Returns whether the report was sent.
 fn send_bounded_report(
     correlation_id: &str,
     report: DeviceManagementReport,
     send: &mut impl FnMut(Option<String>, DeviceManagementReport),
-) {
+) -> bool {
     // The reporter assigns a hyphenated UUID, which encodes to the same length as the nil UUID.
     let envelope = agent_channel_proto::AgentMessage {
         id: Uuid::nil().to_string(),
@@ -184,9 +195,10 @@ fn send_bounded_report(
             correlation_id,
             "Cannot send device-management report because it exceeds the channel envelope limit"
         );
-        return;
+        return false;
     }
     send(Some(correlation_id.to_owned()), report);
+    true
 }
 
 /// Sends the inventory in parts that each fit in one channel envelope.
@@ -234,14 +246,35 @@ async fn send_inventory(
 }
 
 async fn send_instances(reporter: &Reporter, correlation_id: &str) {
-    match unigetui::instances().await {
-        Ok(instances) => send_bounded_report(
-            correlation_id,
-            report(Report::UnigetuiInstances(UniGetUiInstances { instances })),
-            &mut |correlation_id, report| reporter.send(correlation_id, report),
-        ),
-        Err(error) => warn!(error = format!("{error:#}"), "Failed to discover UniGetUI instances"),
-    }
+    report_instances(correlation_id, unigetui::instances().await, |correlation_id, report| {
+        reporter.send(correlation_id, report);
+    });
+}
+
+/// Reports a complete discovery as one bounded list, and anything else as unavailable.
+fn report_instances(
+    correlation_id: &str,
+    instances: anyhow::Result<Vec<UniGetUiInstance>>,
+    mut send: impl FnMut(Option<String>, DeviceManagementReport),
+) {
+    let reason = match instances {
+        Ok(instances) => {
+            let list = report(Report::UnigetuiInstances(UniGetUiInstances { instances }));
+            if send_bounded_report(correlation_id, list, &mut send) {
+                return;
+            }
+            UniGetUiInstancesUnavailableReason::TooLarge
+        }
+        Err(error) => {
+            warn!(
+                correlation_id,
+                error = format!("{error:#}"),
+                "UniGetUI discovery is unavailable"
+            );
+            UniGetUiInstancesUnavailableReason::CollectionFailed
+        }
+    };
+    send_bounded_report(correlation_id, instances_unavailable_report(reason), &mut send);
 }
 
 fn inventory_parts(inventory: Inventory, target_user_sid: &str) -> anyhow::Result<Vec<InventoryReport>> {
@@ -457,7 +490,7 @@ mod tests {
         let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
         let discovery = |name_len: usize| {
             report(Report::UnigetuiInstances(UniGetUiInstances {
-                instances: vec![agent_channel_proto::UniGetUiInstance {
+                instances: vec![UniGetUiInstance {
                     user_sid: "S-1-5-21-200".to_owned(),
                     session_id: 1,
                     display_name: "n".repeat(name_len),
@@ -494,6 +527,100 @@ mod tests {
         };
         assert_eq!(correlation_id.as_deref(), Some(request_id));
         assert_eq!(report, &discovery(largest));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[test]
+    fn busy_discovery_reports_unavailability_with_correlation() {
+        let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
+        let mut sent = Vec::new();
+
+        reject_busy_request(
+            request_id,
+            Request::DiscoverUnigetuiInstances(agent_channel_proto::DiscoverUniGetUiInstances {}),
+            |correlation_id, report| sent.push((correlation_id, report)),
+        );
+
+        assert_eq!(
+            sent,
+            [(
+                Some(request_id.to_owned()),
+                instances_unavailable_report(UniGetUiInstancesUnavailableReason::Busy)
+            )]
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[test]
+    fn incomplete_discovery_reports_unavailability_instead_of_a_list() {
+        let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
+        let mut sent = Vec::new();
+
+        report_instances(
+            request_id,
+            Err(anyhow::anyhow!("an endpoint is unresolved")),
+            |correlation_id, report| sent.push((correlation_id, report)),
+        );
+
+        assert_eq!(
+            sent,
+            [(
+                Some(request_id.to_owned()),
+                instances_unavailable_report(UniGetUiInstancesUnavailableReason::CollectionFailed)
+            )]
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[test]
+    fn oversized_discovery_reports_unavailability_instead_of_a_partial_list() {
+        let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
+        let instances = (0..2_000)
+            .map(|index| UniGetUiInstance {
+                user_sid: format!("S-1-5-21-1-2-3-{index}"),
+                session_id: index,
+                display_name: format!("DOMAIN\\user{index} (session {index})"),
+                signature_verified: true,
+            })
+            .collect();
+        let mut sent = Vec::new();
+
+        report_instances(request_id, Ok(instances), |correlation_id, report| {
+            sent.push((correlation_id, report));
+        });
+
+        assert_eq!(
+            sent,
+            [(
+                Some(request_id.to_owned()),
+                instances_unavailable_report(UniGetUiInstancesUnavailableReason::TooLarge)
+            )]
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+    #[test]
+    fn complete_discovery_reports_the_whole_list() {
+        let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
+        let instances = vec![UniGetUiInstance {
+            user_sid: "S-1-5-21-200".to_owned(),
+            session_id: 1,
+            display_name: "DOMAIN\\user (session 1)".to_owned(),
+            signature_verified: true,
+        }];
+        let mut sent = Vec::new();
+
+        report_instances(request_id, Ok(instances.clone()), |correlation_id, report| {
+            sent.push((correlation_id, report));
+        });
+
+        assert_eq!(
+            sent,
+            [(
+                Some(request_id.to_owned()),
+                report(Report::UnigetuiInstances(UniGetUiInstances { instances }))
+            )]
+        );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory

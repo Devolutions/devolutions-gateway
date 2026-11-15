@@ -31,6 +31,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | --- | --- | --- |
 | `DiscoverUniGetUiInstances` | Authority to Agent | none |
 | `UniGetUiInstances` | Agent to Authority | `instances` |
+| `UniGetUiInstancesUnavailable` | Agent to Authority | `reason` |
 | `UniGetUiInstance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
 | `SyncInventory` | Authority to Agent | `target_user_sid` |
 | `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `page_index`, `page_count`, `packages`, `managers`, `sources` |
@@ -45,6 +46,16 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 ## Instance discovery and targeting
 
 The Agent reports discovered, unelevated UniGetUI instances in logged-on user sessions with their target user SID, session ID, display name and signature-verification result.
+The Agent answers each `DiscoverUniGetUiInstances` request with one report, `UniGetUiInstances` or `UniGetUiInstancesUnavailable`, never with a partial list.
+It sends `UniGetUiInstances` only when the scan read every registration and resolved each registered endpoint as a reported instance or as absent, not owned by `UniGetUI.exe`, or elevated.
+That list replaces the previous instance set; an empty list means no instance.
+Otherwise, including when the whole channel envelope would exceed its size limit, the Agent sends `UniGetUiInstancesUnavailable`.
+It is `DeviceManagementReport.unigetui_instances_unavailable` field 7, with `reason` field 1: `UNSPECIFIED` (0), `BUSY` (1), `COLLECTION_FAILED` (2) or `TOO_LARGE` (3).
+The Authority maps `UNSPECIFIED` and unrecognized reasons to generic unavailability, and an unavailable report preserves the previous instance set.
+The response envelope's `correlation_id` is the request UUID.
+The Authority applies either report only to its current pending discovery request for that Agent Identity and ignores stale, unsolicited and duplicate reports; where it keeps that request is provisional.
+Reports can be lost when a stream closes, so the Authority times out discovery requests without a report.
+The Agent and Authority must both understand the unavailable report; mixed versions are unsupported.
 The Agent obtains the SID and session ID from the Windows token of the endpoint-owning process, not from a value reported by UniGetUI.
 The Agent verifies the executable signature before reporting an instance or accepting it as a target.
 The Agent allows at most identification-level impersonation when connecting to a UniGetUI named pipe.
