@@ -1739,6 +1739,12 @@ jobs:
             exit $exitCode
           }
 
+      # Installs the real `devolutions-agent` SCM service; only safe on this disposable hosted runner.
+      - name: Probe standard-user access to the LocalSystem Agent service
+        if: ${{ !cancelled() && steps.build-policy-executables.outcome == 'success' }}
+        shell: pwsh
+        run: ./ci/agent-service-standard-user-probe.ps1 -AgentPath ./target/debug/devolutions-agent.exe
+
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
         shell: pwsh
