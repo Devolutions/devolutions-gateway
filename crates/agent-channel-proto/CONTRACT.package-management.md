@@ -325,9 +325,12 @@ An empty requested scope requires an absent Broker `Options.Scope`.
 A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
 The Broker rejects any `Source.Url` the grant does not authorize.
 Matching a source name or URL in the request alone does not establish the feed the manager uses.
-For install and update, the grant binds the effective feed or feeds, and the Broker rejects the operation when it cannot verify that execution uses only those feeds.
-For user-scope installs and updates, the feed resolves through the target user's manager configuration and execution remains unelevated.
-For machine-scope installs and updates, the Broker rejects the request when it cannot ensure that an unelevated user cannot alter the effective feed during execution.
+For an unelevated install or update, the grant binds the requested source name or the choice of the target user's default feed.
+For an elevated install or update, the grant also binds a hash of the full canonicalized WinGet source export, including every field of every source.
+The Agent obtains that export using the same pinned WinGet executable, execution token and environment as the Broker uses for the operation.
+Immediately before launch, the Broker exports the sources again in that context and rejects the operation if the hash differs or cannot be verified.
+The Broker also rejects the operation when it cannot ensure that an unelevated user cannot alter the effective feed between that check and execution.
+A user-scope operation that requires elevation is rejected.
 It rejects `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
 It also rejects `Interactive`, `SkipHashCheck`, `PreRelease` and `UninstallPrevious` when true.
 When the manager's Broker builder supports `NoUpgrade`, the Agent binds it as true and the Broker requires it for an install.
