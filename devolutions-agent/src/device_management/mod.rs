@@ -124,7 +124,7 @@ fn reject_busy_request(id: &str, request: Request, mut send: impl FnMut(Option<S
             error,
         }))),
         Request::SyncInventory(request) => {
-            send_inventory_report(
+            send_bounded_report(
                 id,
                 inventory_unavailable_report(&request.target_user_sid, InventoryUnavailableReason::Busy),
                 &mut send,
@@ -163,11 +163,13 @@ fn inventory_unavailable_report(target_user_sid: &str, reason: InventoryUnavaila
     }))
 }
 
-fn send_inventory_report(
+/// Sends `report` only when its whole envelope, including the outer ID and correlation, fits the channel limit.
+fn send_bounded_report(
     correlation_id: &str,
     report: DeviceManagementReport,
     send: &mut impl FnMut(Option<String>, DeviceManagementReport),
 ) {
+    // The reporter assigns a hyphenated UUID, which encodes to the same length as the nil UUID.
     let envelope = agent_channel_proto::AgentMessage {
         id: Uuid::nil().to_string(),
         correlation_id: Some(correlation_id.to_owned()),
@@ -177,8 +179,11 @@ fn send_inventory_report(
     };
     if MAX_CHANNEL_ENVELOPE_BYTES < envelope.encoded_len() {
         // UNTESTED: The warning explains why the Authority will receive no report.
-        // The size test doesn't capture logs; retain the warning when changing this path.
-        warn!("Cannot send inventory report because it exceeds the channel envelope limit");
+        // The size tests don't capture logs; retain the warning when changing this path.
+        warn!(
+            correlation_id,
+            "Cannot send device-management report because it exceeds the channel envelope limit"
+        );
         return;
     }
     send(Some(correlation_id.to_owned()), report);
@@ -198,7 +203,7 @@ async fn send_inventory(
                 error = format!("{error:#}"),
                 "UniGetUI inventory is unavailable"
             );
-            send_inventory_report(
+            send_bounded_report(
                 correlation_id,
                 inventory_unavailable_report(target_user_sid, InventoryUnavailableReason::SafeEndpointUnavailable),
                 &mut send,
@@ -215,7 +220,7 @@ async fn send_inventory(
                 error = format!("{error:#}"),
                 "Failed to paginate UniGetUI inventory"
             );
-            send_inventory_report(
+            send_bounded_report(
                 correlation_id,
                 inventory_unavailable_report(target_user_sid, InventoryUnavailableReason::CollectionFailed),
                 &mut send,
@@ -224,15 +229,16 @@ async fn send_inventory(
         }
     };
     for part in parts {
-        send_inventory_report(correlation_id, report(Report::Inventory(part)), &mut send);
+        send_bounded_report(correlation_id, report(Report::Inventory(part)), &mut send);
     }
 }
 
 async fn send_instances(reporter: &Reporter, correlation_id: &str) {
     match unigetui::instances().await {
-        Ok(instances) => reporter.send(
-            Some(correlation_id.to_owned()),
+        Ok(instances) => send_bounded_report(
+            correlation_id,
             report(Report::UnigetuiInstances(UniGetUiInstances { instances })),
+            &mut |correlation_id, report| reporter.send(correlation_id, report),
         ),
         Err(error) => warn!(error = format!("{error:#}"), "Failed to discover UniGetUI instances"),
     }
@@ -443,6 +449,51 @@ mod tests {
             };
             assert!(envelope.encoded_len() <= 65_536);
         }
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn report_limit_counts_the_outer_id_and_correlation() {
+        let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
+        let discovery = |name_len: usize| {
+            report(Report::UnigetuiInstances(UniGetUiInstances {
+                instances: vec![agent_channel_proto::UniGetUiInstance {
+                    user_sid: "S-1-5-21-200".to_owned(),
+                    session_id: 1,
+                    display_name: "n".repeat(name_len),
+                    signature_verified: true,
+                }],
+            }))
+        };
+        // Measures the envelope the reporter sends: a fresh UUID ID plus the request correlation.
+        let envelope_len = |report: DeviceManagementReport| {
+            agent_channel_proto::AgentMessage {
+                id: Uuid::new_v4().to_string(),
+                correlation_id: Some(request_id.to_owned()),
+                payload: Some(agent_channel_proto::agent_message::Payload::DeviceManagement(report)),
+            }
+            .encoded_len()
+        };
+        let largest = (65_000..65_536)
+            .rev()
+            .find(|&name_len| envelope_len(discovery(name_len)) == 65_536)
+            .expect("a discovery report fills the envelope exactly");
+        assert_eq!(envelope_len(discovery(largest + 1)), 65_537);
+        // Without the outer fields, the over-limit report would still fit.
+        assert!(discovery(largest + 1).encoded_len() < 65_536);
+
+        let mut sent = Vec::new();
+        for name_len in [largest, largest + 1] {
+            send_bounded_report(request_id, discovery(name_len), &mut |correlation_id, report| {
+                sent.push((correlation_id, report));
+            });
+        }
+
+        let [(correlation_id, report)] = sent.as_slice() else {
+            panic!("expected only the report that fits");
+        };
+        assert_eq!(correlation_id.as_deref(), Some(request_id));
+        assert_eq!(report, &discovery(largest));
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
