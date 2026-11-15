@@ -25,7 +25,7 @@ Inventory, install, update and uninstall all use UniGetUI IPC, and package write
 UniGetUI runs unelevated in the target user's session.
 The beta wire format may change before final release, and the Authority's beta database schema includes the target user SID and package scope.
 The Agent-to-Authority messages in the following table are defined in `channel.proto`.
-The extension framing and the UniGetUI-to-Broker request details remain provisional.
+The extension framing and any UniGetUI-to-Broker request details not specified below remain provisional.
 
 | Message | Direction | Fields |
 | --- | --- | --- |
@@ -78,10 +78,11 @@ These gaps are visible in the [UniGetUI package model], [UniGetUI IPC package ty
 
 The operation type is exactly one of `install`, `update` or `uninstall`.
 The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope and target user SID, but no bypass token.
-The Agent mints a short-lived, single-use bypass token for that operation and sends it with the operation to UniGetUI over IPC.
-UniGetUI passes the operation and token to the Broker over a named pipe while running unelevated as the target user.
-The Broker validates the token and rejects the request when the pipe caller SID differs from its target user SID before executing the operation.
-The token is bound to the complete canonical operation request, including its type, manager, source, package ID, requested version, scope, target user SID and every execution-affecting option.
+The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory and bound to the target user SID and exact typed Broker `PackageRequest`.
+UniGetUI sends the grant unchanged in the `X-Devolutions-Package-Grant` header of `POST /v1/package-operations/execute` over the Broker's named pipe while running unelevated as the target user.
+The Broker compares every field of the decoded typed request and the pipe caller's SID against the grant before execution, and consumes a matching grant atomically.
+The Broker rejects an invalid, expired, reused or mismatched grant rather than applying local policy.
+The request binding includes the type, manager, source, package ID, requested version, scope and every execution-affecting option.
 The Agent, UniGetUI and Broker reject an execution-affecting field that is not covered by the token.
 Remote operations do not carry custom parameters or pre-operation, post-operation or kill-before-operation commands unless the token explicitly authorizes them.
 UniGetUI's broker request builder maps source, custom parameters and pre-operation, post-operation and kill-before-operation commands into the request.
@@ -97,7 +98,7 @@ The exact requested-version semantics for each operation are provisional as desc
 <a id="provisional-errors"></a>
 ## Provisional error-code proposal
 
-No error-code spelling or operation-status vocabulary is agreed yet.
+No error-code spelling or operation-status vocabulary other than `UNKNOWN` is agreed yet.
 The following codes are proposals only and must not be treated as a final wire contract:
 
 | Code | Proposed meaning |
@@ -129,7 +130,7 @@ The requested-version field is optional where an operation does not use a versio
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
 A transport disconnection does not prove that an operation failed.
 The Agent does not replay an operation automatically after disconnection or restart.
-When the Agent cannot establish an operation's outcome, the proposed status is `UNKNOWN`, not a confirmed failure, and the Authority decides whether to resubmit with a new token.
+When the Agent cannot establish an operation's outcome, its status is `UNKNOWN`, not a confirmed failure, and the Authority decides whether to resubmit with a new token.
 
 <a id="external-changes"></a>
 ## Required changes outside this repository
