@@ -12,6 +12,8 @@
 use anyhow::bail;
 use now_policy_api::{Elevation, Operation, PackageRequest, Scope};
 
+use super::uses_default_source;
+
 /// Build the vcpkg command line from a validated request.
 pub fn build_vcpkg_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_vcpkg_request(request)?;
@@ -43,7 +45,7 @@ fn validate_vcpkg_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.source.url.is_some() {
         bail!("vcpkg package sources with URLs are not supported by the broker");
     }
-    if !is_valid_triplet(&request.source.name) {
+    if !uses_default_source("vcpkg", request)? && !is_valid_triplet(&request.source.name) {
         bail!("vcpkg package source name must be a triplet");
     }
     if request.package.version.is_some() {
@@ -96,10 +98,13 @@ fn package_spec(request: &PackageRequest) -> anyhow::Result<String> {
         if port.is_empty() || package_triplet.is_empty() || package_triplet.contains(':') {
             bail!("vcpkg package id must be in the form '<port>[:<triplet>]'");
         }
-        if package_triplet != triplet {
+        if !triplet.is_empty() && package_triplet != triplet {
             bail!("vcpkg package triplet must match the request source");
         }
         Ok(package_id.to_owned())
+    } else if triplet.is_empty() {
+        // vcpkg would otherwise act on the default triplet, which may not be the installed one.
+        bail!("vcpkg package id must carry a triplet when the request has no source");
     } else {
         Ok(format!("{package_id}:{triplet}"))
     }
@@ -215,6 +220,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_source_requires_a_triplet_in_the_package_id() {
+        for (operation, verb) in [(Operation::Update, "upgrade"), (Operation::Uninstall, "remove")] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+
+            request.package.id = PackageIdentifier::from("zlib".to_owned());
+            build_vcpkg_command(&request).expect_err("default triplet is not the installed one");
+
+            request.package.id = PackageIdentifier::from("zlib:x64-windows".to_owned());
+            let cmd = build_vcpkg_command(&request).expect("explicit triplet");
+            assert_eq!(&cmd[..3], ["vcpkg.exe", verb, "zlib:x64-windows"]);
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        request.package.id = PackageIdentifier::from("zlib:x64-windows".to_owned());
+        build_vcpkg_command(&request).expect_err("install requires a source");
+    }
     #[test]
     fn install_appends_source_triplet() {
         let request = make_request();

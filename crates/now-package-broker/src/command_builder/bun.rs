@@ -10,7 +10,7 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
-use super::validate_npm_package_name;
+use super::{uses_default_source, validate_npm_package_name};
 
 const BUN_SOURCE_NAME: &str = "Bun";
 const BUN_SOURCE_URL: &str = "https://www.npmjs.com";
@@ -50,12 +50,13 @@ fn validate_bun_request(request: &PackageRequest) -> anyhow::Result<()> {
         bail!("machine-scope Bun package operations are not supported by the broker");
     }
 
-    if !request.source.name.eq_ignore_ascii_case(BUN_SOURCE_NAME)
-        || request
-            .source
-            .url
-            .as_ref()
-            .is_some_and(|url| !is_default_bun_source_url(url))
+    if !uses_default_source("Bun", request)?
+        && (!request.source.name.eq_ignore_ascii_case(BUN_SOURCE_NAME)
+            || request
+                .source
+                .url
+                .as_ref()
+                .is_some_and(|url| !is_default_bun_source_url(url)))
     {
         bail!("custom Bun package sources are not supported by the broker");
     }
@@ -191,6 +192,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            build_bun_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_bun_command(&request).expect_err("install requires a named source");
+
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = Some("https://example.test/".to_owned());
+            build_bun_command(&request).expect_err("empty source cannot carry a URL");
+        }
+    }
     #[test]
     fn bun_install_uses_add_global_with_version() {
         let request = make_request();

@@ -10,7 +10,7 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
-use super::{quote_powershell_literal, validate_npm_package_name, validate_package_version};
+use super::{quote_powershell_literal, uses_default_source, validate_npm_package_name, validate_package_version};
 
 /// npm version selectors that are inert when passed through the `npm.cmd` shim, such as `~1.2` or `1.x`.
 const NPM_VERSION_EXTRA_CHARACTERS: &[char] = &['~', '*'];
@@ -52,7 +52,7 @@ fn validate_npm_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.source.url.is_some() {
         bail!("npm package sources with URLs are not supported by the broker");
     }
-    if !request.source.name.eq_ignore_ascii_case("npm") {
+    if !uses_default_source("npm", request)? && !request.source.name.eq_ignore_ascii_case("npm") {
         bail!("npm package source must be 'npm'");
     }
     match request.package.architecture {
@@ -233,6 +233,27 @@ mod tests {
         &cmd[3]
     }
 
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            build_npm_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_npm_command(&request).expect_err("install requires a named source");
+
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = Some("https://example.test/".to_owned());
+            build_npm_command(&request).expect_err("empty source cannot carry a URL");
+        }
+    }
     #[test]
     fn install_uses_npm_install_with_versioned_specifier() {
         let request = make_request();

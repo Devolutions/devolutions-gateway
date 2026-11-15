@@ -1,20 +1,28 @@
 //! Handles device-management requests for UniGetUI discovery, package inventory and software catalogs.
 
-mod software_catalog;
+mod context;
+#[cfg(windows)]
+mod operation;
+#[cfg(any(windows, test))]
+mod operation_journal;
+#[cfg(any(windows, test))]
 mod unigetui;
-
-use std::sync::Mutex;
+#[cfg(any(windows, test))]
+mod user_registry;
 
 use agent_channel_client::Reporter;
+#[cfg(any(windows, test))]
+use agent_channel_proto::UniGetUiInstance;
 use agent_channel_proto::device_management_report::Report;
 use agent_channel_proto::device_management_request::Request;
 use agent_channel_proto::{
     CatalogSyncResult, DeviceManagementReport, DeviceManagementRequest, InstalledPackage, InventoryReport,
     InventoryUnavailable, InventoryUnavailableReason, PackageManager, PackageOperationRequest, PackageOperationResult,
-    PackageOperationStatus, PackageSource, UniGetUiInstance, UniGetUiInstances, UniGetUiInstancesUnavailable,
+    PackageOperationStatus, PackageSource, UniGetUiInstances, UniGetUiInstancesUnavailable,
     UniGetUiInstancesUnavailableReason,
 };
 use anyhow::Context as _;
+pub(crate) use context::DeviceManagementContext;
 use prost::Message as _;
 use tokio::sync::{Semaphore, SemaphorePermit, watch};
 use uuid::Uuid;
@@ -26,6 +34,15 @@ pub const CAPABILITY: &str = "device_management";
 const MAX_INVENTORY_PART_BYTES: usize = 60_000;
 const MAX_CHANNEL_ENVELOPE_BYTES: usize = 65_536;
 
+#[derive(Debug)]
+struct Snapshot {
+    packages: Vec<InstalledPackage>,
+    managers: Vec<PackageManager>,
+    sources: Vec<PackageSource>,
+    scan_completed_at: prost_types::Timestamp,
+    update_scan_completed_at: Option<prost_types::Timestamp>,
+}
+
 /// Maximum number of concurrent device-management request workers.
 const MAX_CONCURRENT_REQUESTS: usize = 8;
 // UNTESTED: This cap prevents request floods from spawning unbounded tasks.
@@ -33,11 +50,13 @@ const MAX_CONCURRENT_REQUESTS: usize = 8;
 
 /// Serves one device management request, answering the request message `id` through `reporter`.
 pub(crate) fn handle(
-    identity_id: Uuid,
+    context: DeviceManagementContext,
+    _identity_id: Uuid,
+    authority_id: Uuid,
     id: String,
     request: DeviceManagementRequest,
     reporter: Reporter,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
 ) {
     let Some(request) = request.request else {
         debug!(%id, "Device management request without content");
@@ -57,57 +76,39 @@ pub(crate) fn handle(
         if *shutdown.borrow() {
             return;
         }
+        let is_operation = matches!(&request, Request::PackageOperation(_));
+        let processing = async move {
+            match request {
+                Request::SyncInventory(request) => {
+                    send_inventory(&context, &id, &request, |correlation_id, report| {
+                        reporter.send(correlation_id, report);
+                    })
+                    .await;
+                }
+                Request::DiscoverUnigetuiInstances(_) => send_instances(&context, &reporter, &id).await,
+                Request::PackageOperation(request) => {
+                    let result = run_package_operation(&context, authority_id, request).await;
+                    reporter.send(Some(id), package_operation_report(result));
+                }
+                Request::CatalogSync(request) => {
+                    reporter.send(Some(id), catalog_unavailable_report(request.revision));
+                }
+            }
+        };
+        finish_request(is_operation, processing, shutdown).await;
+    });
+}
+
+async fn finish_request(is_operation: bool, processing: impl Future<Output = ()>, mut shutdown: watch::Receiver<bool>) {
+    if is_operation {
+        processing.await;
+    } else {
         tokio::select! {
             biased;
             _ = shutdown.changed() => {}
-            () = async move {
-                match request {
-                    Request::SyncInventory(request) => {
-                        send_inventory(&id, &request.target_user_sid, |correlation_id, report| {
-                            reporter.send(correlation_id, report);
-                        })
-                        .await;
-                    }
-                    Request::DiscoverUnigetuiInstances(_) => send_instances(&reporter, &id).await,
-                    Request::PackageOperation(request) => {
-                        let result = run_package_operation(request);
-                        reporter.send(Some(id.clone()), package_operation_report(result));
-                    }
-                    Request::CatalogSync(request) => {
-                        // Serializes catalog writes, because each request runs on its own task.
-                        static CATALOG_LOCK: Mutex<()> = Mutex::new(());
-
-                        let revision = request.revision;
-                        let result = tokio::task::spawn_blocking(move || {
-                            let _guard = CATALOG_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                            software_catalog::apply(identity_id, request)
-                        })
-                        .await
-                        .unwrap_or_else(|error| Err(anyhow::anyhow!("catalog synchronization worker failed: {error}")));
-                        let error = match &result {
-                            Ok(()) => String::new(),
-                            Err(error) => {
-                                warn!(
-                                    revision,
-                                    error = format!("{error:#}"),
-                                    "Software catalog synchronization failed"
-                                );
-                                format!("{error:#}")
-                            }
-                        };
-                        reporter.send(
-                            Some(id),
-                            report(Report::CatalogSyncResult(CatalogSyncResult {
-                                revision,
-                                ok: result.is_ok(),
-                                error,
-                            })),
-                        );
-                    }
-                }
-            } => {},
+            () = processing => {},
         }
-    });
+    }
 }
 
 fn reject_busy_request(id: &str, request: Request, mut send: impl FnMut(Option<String>, DeviceManagementReport)) {
@@ -118,6 +119,7 @@ fn reject_busy_request(id: &str, request: Request, mut send: impl FnMut(Option<S
             success: false,
             error,
             status: PackageOperationStatus::Unknown.into(),
+            execution_started: None,
         })),
         Request::CatalogSync(request) => Some(report(Report::CatalogSyncResult(CatalogSyncResult {
             revision: request.revision,
@@ -127,7 +129,11 @@ fn reject_busy_request(id: &str, request: Request, mut send: impl FnMut(Option<S
         Request::SyncInventory(request) => {
             send_bounded_report(
                 id,
-                inventory_unavailable_report(&request.target_user_sid, InventoryUnavailableReason::Busy),
+                inventory_unavailable_report(
+                    &request.target_user_uuid,
+                    &request.registry_epoch,
+                    InventoryUnavailableReason::Busy,
+                ),
                 &mut send,
             );
             return;
@@ -150,6 +156,14 @@ fn report(report: Report) -> DeviceManagementReport {
     DeviceManagementReport { report: Some(report) }
 }
 
+fn catalog_unavailable_report(revision: i64) -> DeviceManagementReport {
+    report(Report::CatalogSyncResult(CatalogSyncResult {
+        revision,
+        ok: false,
+        error: "software catalog synchronization is unavailable".to_owned(),
+    }))
+}
+
 fn package_operation_report(result: PackageOperationResult) -> DeviceManagementReport {
     let report = if result.status == i32::from(PackageOperationStatus::Unknown) {
         Report::PackageOperationUnknown(result)
@@ -159,9 +173,14 @@ fn package_operation_report(result: PackageOperationResult) -> DeviceManagementR
     DeviceManagementReport { report: Some(report) }
 }
 
-fn inventory_unavailable_report(target_user_sid: &str, reason: InventoryUnavailableReason) -> DeviceManagementReport {
+fn inventory_unavailable_report(
+    target_user_uuid: &str,
+    registry_epoch: &str,
+    reason: InventoryUnavailableReason,
+) -> DeviceManagementReport {
     report(Report::InventoryUnavailable(InventoryUnavailable {
-        target_user_sid: target_user_sid.to_owned(),
+        target_user_uuid: target_user_uuid.to_owned(),
+        registry_epoch: registry_epoch.to_owned(),
         reason: reason.into(),
     }))
 }
@@ -203,11 +222,12 @@ fn send_bounded_report(
 
 /// Sends the inventory in parts that each fit in one channel envelope.
 async fn send_inventory(
+    context: &DeviceManagementContext,
     correlation_id: &str,
-    target_user_sid: &str,
+    request: &agent_channel_proto::SyncInventory,
     mut send: impl FnMut(Option<String>, DeviceManagementReport),
 ) {
-    let inventory = match collect_inventory(target_user_sid).await {
+    let inventory = match collect_inventory(context, request).await {
         Ok(inventory) => inventory,
         Err(error) => {
             warn!(
@@ -217,14 +237,18 @@ async fn send_inventory(
             );
             send_bounded_report(
                 correlation_id,
-                inventory_unavailable_report(target_user_sid, InventoryUnavailableReason::SafeEndpointUnavailable),
+                inventory_unavailable_report(
+                    &request.target_user_uuid,
+                    &request.registry_epoch,
+                    InventoryUnavailableReason::SafeEndpointUnavailable,
+                ),
                 &mut send,
             );
             return;
         }
     };
 
-    let parts = match inventory_parts(inventory, target_user_sid) {
+    let parts = match inventory_parts(inventory, &request.target_user_uuid, &request.registry_epoch) {
         Ok(parts) => parts,
         Err(error) => {
             warn!(
@@ -234,7 +258,11 @@ async fn send_inventory(
             );
             send_bounded_report(
                 correlation_id,
-                inventory_unavailable_report(target_user_sid, InventoryUnavailableReason::CollectionFailed),
+                inventory_unavailable_report(
+                    &request.target_user_uuid,
+                    &request.registry_epoch,
+                    InventoryUnavailableReason::CollectionFailed,
+                ),
                 &mut send,
             );
             return;
@@ -245,21 +273,25 @@ async fn send_inventory(
     }
 }
 
-async fn send_instances(reporter: &Reporter, correlation_id: &str) {
-    report_instances(correlation_id, unigetui::instances().await, |correlation_id, report| {
-        reporter.send(correlation_id, report);
-    });
+async fn send_instances(context: &DeviceManagementContext, reporter: &Reporter, correlation_id: &str) {
+    report_instances(
+        correlation_id,
+        collect_instances(context).await,
+        |correlation_id, report| {
+            reporter.send(correlation_id, report);
+        },
+    );
 }
 
 /// Reports a complete discovery as one bounded list, and anything else as unavailable.
 fn report_instances(
     correlation_id: &str,
-    instances: anyhow::Result<Vec<UniGetUiInstance>>,
+    instances: anyhow::Result<UniGetUiInstances>,
     mut send: impl FnMut(Option<String>, DeviceManagementReport),
 ) {
     let reason = match instances {
         Ok(instances) => {
-            let list = report(Report::UnigetuiInstances(UniGetUiInstances { instances }));
+            let list = report(Report::UnigetuiInstances(instances));
             if send_bounded_report(correlation_id, list, &mut send) {
                 return;
             }
@@ -277,7 +309,11 @@ fn report_instances(
     send_bounded_report(correlation_id, instances_unavailable_report(reason), &mut send);
 }
 
-fn inventory_parts(inventory: Inventory, target_user_sid: &str) -> anyhow::Result<Vec<InventoryReport>> {
+fn inventory_parts(
+    inventory: Snapshot,
+    target_user_uuid: &str,
+    registry_epoch: &str,
+) -> anyhow::Result<Vec<InventoryReport>> {
     let report_id = Uuid::new_v4().to_string();
     let mut parts = Vec::new();
     // Reserve the largest page header, including the final-page flag, before assigning indexes.
@@ -287,7 +323,10 @@ fn inventory_parts(inventory: Inventory, target_user_sid: &str) -> anyhow::Resul
         packages: Vec::new(),
         managers: inventory.managers,
         sources: inventory.sources,
-        target_user_sid: target_user_sid.to_owned(),
+        target_user_uuid: target_user_uuid.to_owned(),
+        registry_epoch: registry_epoch.to_owned(),
+        scan_completed_at: Some(inventory.scan_completed_at),
+        update_scan_completed_at: inventory.update_scan_completed_at,
         page_index: u32::MAX,
         page_count: u32::MAX,
     };
@@ -309,7 +348,10 @@ fn inventory_parts(inventory: Inventory, target_user_sid: &str) -> anyhow::Resul
                 packages: Vec::new(),
                 managers: Vec::new(),
                 sources: Vec::new(),
-                target_user_sid: target_user_sid.to_owned(),
+                target_user_uuid: target_user_uuid.to_owned(),
+                registry_epoch: registry_epoch.to_owned(),
+                scan_completed_at: current.scan_completed_at,
+                update_scan_completed_at: current.update_scan_completed_at,
                 page_index: u32::MAX,
                 page_count: u32::MAX,
             };
@@ -332,98 +374,161 @@ fn inventory_parts(inventory: Inventory, target_user_sid: &str) -> anyhow::Resul
     Ok(parts)
 }
 
-struct Inventory {
-    packages: Vec<InstalledPackage>,
-    managers: Vec<PackageManager>,
-    sources: Vec<PackageSource>,
-}
-
-async fn collect_inventory(target_user_sid: &str) -> anyhow::Result<Inventory> {
-    collect_inventory_from(unigetui::resolve_target(target_user_sid)).await
-}
-
-async fn collect_inventory_from(
-    resolve: impl Future<Output = anyhow::Result<unigetui::TargetInstance>>,
-) -> anyhow::Result<Inventory> {
-    // The legacy inventory calls can modify manager state and expose source details.
-    // Replace them with a safe endpoint; removing this guard must not enable the legacy routes.
-    require_safe_inventory_endpoint()?;
-
-    let instance = resolve.await.context("failed to resolve UniGetUI target")?;
-    let (managers, managers_loading) = unigetui::managers(&instance)
-        .await
-        .context("failed to collect UniGetUI package managers")?;
-
-    if managers_loading {
-        anyhow::bail!("UniGetUI package managers are still loading");
-    }
-
-    // UniGetUI returns an empty list for a manager that is not ready, for example just after logon or wake.
-    if !managers.iter().any(|manager| manager.enabled && manager.installed) {
-        anyhow::bail!("no UniGetUI package manager is ready");
-    }
-
-    let packages = unigetui::installed_packages(&instance)
-        .await
-        .context("failed to collect UniGetUI inventory")?;
-    info!(count = packages.len(), "Collected UniGetUI inventory");
-    let sources = unigetui::sources(&instance)
-        .await
-        .context("failed to collect UniGetUI package sources")?;
-
-    Ok(Inventory {
-        packages,
-        managers,
-        sources,
+#[cfg(windows)]
+async fn collect_instances(context: &DeviceManagementContext) -> anyhow::Result<UniGetUiInstances> {
+    let registration = context
+        .registration()
+        .cloned()
+        .context("UniGetUI registration is unavailable")?;
+    let users = context.users().cloned().context("user registry is unavailable")?;
+    tokio::task::spawn_blocking(move || {
+        let instances = registration
+            .snapshot()?
+            .into_iter()
+            .map(|endpoint| {
+                let sid = user_registry::UserSid::parse(&endpoint.user_sid().to_string())?;
+                let user_uuid = users.get_or_create(&sid)?.as_uuid().to_string();
+                Ok(UniGetUiInstance {
+                    user_uuid,
+                    session_id: endpoint.session_id(),
+                    display_name: endpoint.display_name().unwrap_or_default().to_owned(),
+                    signature_verified: true,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(UniGetUiInstances {
+            instances,
+            registry_epoch: users.epoch().to_string(),
+        })
     })
+    .await
+    .context("UniGetUI discovery worker failed")?
 }
 
-fn require_safe_inventory_endpoint() -> anyhow::Result<()> {
-    anyhow::bail!("safe UniGetUI inventory endpoint is unavailable")
+#[cfg(not(windows))]
+async fn collect_instances(_context: &DeviceManagementContext) -> anyhow::Result<UniGetUiInstances> {
+    anyhow::bail!("UniGetUI registration is only supported on Windows")
 }
 
-fn run_package_operation(request: PackageOperationRequest) -> PackageOperationResult {
-    let operation_id = request.operation_id;
-    let error = "authorized UniGetUI broker routing is not available in this build".to_owned();
-    warn!(%operation_id, %error, "Package operation rejected");
+#[cfg(windows)]
+async fn resolve_target(
+    context: &DeviceManagementContext,
+    target_user_uuid: &str,
+    registry_epoch: &str,
+) -> anyhow::Result<now_package_broker::registration::RegisteredEndpoint> {
+    let target = Uuid::parse_str(target_user_uuid).context("invalid target user UUID")?;
+    anyhow::ensure!(!target.is_nil(), "target user UUID is nil");
+    let epoch = Uuid::parse_str(registry_epoch).context("invalid registry epoch")?;
+    let registration = context
+        .registration()
+        .cloned()
+        .context("UniGetUI registration is unavailable")?;
+    let users = context.users().cloned().context("user registry is unavailable")?;
+    tokio::task::spawn_blocking(move || {
+        anyhow::ensure!(epoch == users.epoch(), "registry epoch does not match");
+        let sid = users
+            .resolve(user_registry::UserId::from_uuid(target))
+            .context("unknown target user UUID")?;
+        registration
+            .snapshot()?
+            .into_iter()
+            .find(|endpoint| endpoint.user_sid().to_string() == sid.as_str())
+            .context("no live UniGetUI instance belongs to the target user")
+    })
+    .await
+    .context("UniGetUI target resolution worker failed")?
+}
+
+#[cfg(windows)]
+async fn collect_inventory(
+    context: &DeviceManagementContext,
+    request: &agent_channel_proto::SyncInventory,
+) -> anyhow::Result<Snapshot> {
+    anyhow::ensure!(context.remote_inventory_enabled(), "remote inventory is disabled");
+    let endpoint = resolve_target(context, &request.target_user_uuid, &request.registry_epoch).await?;
+    let snapshot = endpoint
+        .request("GetInventorySnapshot", serde_json::json!({}))
+        .await
+        .context("safe UniGetUI inventory snapshot is unavailable")?;
+    unigetui::parse_snapshot(snapshot)
+}
+
+#[cfg(not(windows))]
+async fn collect_inventory(
+    _context: &DeviceManagementContext,
+    _request: &agent_channel_proto::SyncInventory,
+) -> anyhow::Result<Snapshot> {
+    anyhow::bail!("UniGetUI inventory is only supported on Windows")
+}
+
+#[cfg(windows)]
+async fn run_package_operation(
+    context: &DeviceManagementContext,
+    authority_id: Uuid,
+    request: PackageOperationRequest,
+) -> PackageOperationResult {
+    operation::run(context, authority_id, request).await
+}
+
+#[cfg(not(windows))]
+async fn run_package_operation(
+    _context: &DeviceManagementContext,
+    _authority_id: Uuid,
+    request: PackageOperationRequest,
+) -> PackageOperationResult {
     PackageOperationResult {
-        operation_id,
+        operation_id: request.operation_id,
         success: false,
-        error,
-        status: PackageOperationStatus::Unspecified.into(),
+        error: String::new(),
+        status: PackageOperationStatus::Unknown.into(),
+        execution_started: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     use super::*;
 
-    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
-    #[tokio::test]
-    async fn unavailable_inventory_does_not_contact_unigetui() {
-        let attempted = AtomicBool::new(false);
-        let result = collect_inventory_from(async {
-            attempted.store(true, Ordering::SeqCst);
-            Err(anyhow::anyhow!("target unavailable"))
-        })
-        .await;
-
-        assert!(!attempted.load(Ordering::SeqCst), "inventory contacted UniGetUI");
-        assert!(result.is_err());
+    fn inventory(
+        packages: Vec<InstalledPackage>,
+        managers: Vec<PackageManager>,
+        sources: Vec<PackageSource>,
+    ) -> Snapshot {
+        Snapshot {
+            packages,
+            managers,
+            sources,
+            scan_completed_at: prost_types::Timestamp {
+                seconds: 1_704_067_200,
+                nanos: 0,
+            },
+            update_scan_completed_at: Some(prost_types::Timestamp {
+                seconds: 1_704_067_210,
+                nanos: 0,
+            }),
+        }
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
     #[tokio::test]
     async fn unavailable_inventory_reports_reason_and_request_correlation() {
-        let target_user_sid = "S-1-5-21-200";
+        let target_user_uuid = "bb195c19-20e1-4ad9-8eca-d8396c153881";
+        let registry_epoch = "e154c84b-c928-40b5-9171-c970d960bd16";
+        let request = agent_channel_proto::SyncInventory {
+            target_user_uuid: target_user_uuid.to_owned(),
+            registry_epoch: registry_epoch.to_owned(),
+        };
         let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
         let mut sent = Vec::new();
 
-        send_inventory(request_id, target_user_sid, |correlation_id, report| {
-            sent.push((correlation_id, report));
-        })
+        send_inventory(
+            &DeviceManagementContext::default(),
+            request_id,
+            &request,
+            |correlation_id, report| {
+                sent.push((correlation_id, report));
+            },
+        )
         .await;
 
         let [
@@ -438,7 +543,8 @@ mod tests {
             panic!("expected an unavailable report");
         };
         assert_eq!(correlation_id.as_deref(), Some(request_id));
-        assert_eq!(unavailable.target_user_sid, target_user_sid);
+        assert_eq!(unavailable.target_user_uuid, target_user_uuid);
+        assert_eq!(unavailable.registry_epoch, registry_epoch);
         assert_eq!(unavailable.reason, 1);
         assert_eq!(sent[0].1.encode_to_vec().first(), Some(&0x32));
     }
@@ -447,41 +553,65 @@ mod tests {
     #[tokio::test]
     async fn oversized_inventory_target_never_produces_an_oversized_report() {
         let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
-        let target_user_sid = "x".repeat(65_470);
+        let target_user_uuid = "x".repeat(65_440);
+        let sync = agent_channel_proto::SyncInventory {
+            target_user_uuid,
+            registry_epoch: "e154c84b-c928-40b5-9171-c970d960bd16".to_owned(),
+        };
         let mut sent = Vec::new();
         let request = agent_channel_proto::ServerMessage {
             id: request_id.to_owned(),
             correlation_id: None,
             payload: Some(agent_channel_proto::server_message::Payload::DeviceManagement(
                 DeviceManagementRequest {
-                    request: Some(Request::SyncInventory(agent_channel_proto::SyncInventory {
-                        target_user_sid: target_user_sid.clone(),
-                    })),
+                    request: Some(Request::SyncInventory(sync.clone())),
                 },
             )),
         };
         assert!(request.encoded_len() <= 65_536);
 
-        send_inventory(request_id, &target_user_sid, |correlation_id, report| {
-            sent.push((correlation_id, report));
-        })
-        .await;
-        reject_busy_request(
+        send_inventory(
+            &DeviceManagementContext::default(),
             request_id,
-            Request::SyncInventory(agent_channel_proto::SyncInventory { target_user_sid }),
+            &sync,
             |correlation_id, report| {
                 sent.push((correlation_id, report));
             },
-        );
+        )
+        .await;
+        reject_busy_request(request_id, Request::SyncInventory(sync), |correlation_id, report| {
+            sent.push((correlation_id, report));
+        });
 
-        for (correlation_id, report) in sent {
-            let envelope = agent_channel_proto::AgentMessage {
-                id: "888351ae-4a56-43a7-926e-cb461403b60d".to_owned(),
-                correlation_id,
-                payload: Some(agent_channel_proto::agent_message::Payload::DeviceManagement(report)),
-            };
-            assert!(envelope.encoded_len() <= 65_536);
-        }
+        assert!(sent.is_empty());
+    }
+
+    #[test]
+    fn catalog_sync_is_reported_unavailable() {
+        let response = catalog_unavailable_report(42);
+        let Some(Report::CatalogSyncResult(result)) = response.report else {
+            panic!("expected a catalog synchronization result");
+        };
+        assert_eq!(result.revision, 42);
+        assert!(!result.ok);
+        assert!(!result.error.is_empty());
+    }
+
+    #[tokio::test]
+    async fn package_operation_continues_after_stream_shutdown() {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(finish_request(
+            true,
+            async move { release_rx.await.expect("release signal is sent") },
+            shutdown_rx,
+        ));
+
+        shutdown_tx.send(true).expect("shutdown receiver is alive");
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        release_tx.send(()).expect("release receiver is alive");
+        task.await.expect("request task completes");
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
@@ -491,11 +621,12 @@ mod tests {
         let discovery = |name_len: usize| {
             report(Report::UnigetuiInstances(UniGetUiInstances {
                 instances: vec![UniGetUiInstance {
-                    user_sid: "S-1-5-21-200".to_owned(),
+                    user_uuid: "bb195c19-20e1-4ad9-8eca-d8396c153881".to_owned(),
                     session_id: 1,
                     display_name: "n".repeat(name_len),
                     signature_verified: true,
                 }],
+                registry_epoch: "e154c84b-c928-40b5-9171-c970d960bd16".to_owned(),
             }))
         };
         // Measures the envelope the reporter sends: a fresh UUID ID plus the request correlation.
@@ -575,14 +706,17 @@ mod tests {
     #[test]
     fn oversized_discovery_reports_unavailability_instead_of_a_partial_list() {
         let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
-        let instances = (0..2_000)
-            .map(|index| UniGetUiInstance {
-                user_sid: format!("S-1-5-21-1-2-3-{index}"),
-                session_id: index,
-                display_name: format!("DOMAIN\\user{index} (session {index})"),
-                signature_verified: true,
-            })
-            .collect();
+        let instances = UniGetUiInstances {
+            instances: (0..2_000)
+                .map(|index| UniGetUiInstance {
+                    user_uuid: Uuid::new_v4().to_string(),
+                    session_id: index,
+                    display_name: format!("DOMAIN\\user{index} (session {index})"),
+                    signature_verified: true,
+                })
+                .collect(),
+            registry_epoch: Uuid::new_v4().to_string(),
+        };
         let mut sent = Vec::new();
 
         report_instances(request_id, Ok(instances), |correlation_id, report| {
@@ -602,12 +736,15 @@ mod tests {
     #[test]
     fn complete_discovery_reports_the_whole_list() {
         let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
-        let instances = vec![UniGetUiInstance {
-            user_sid: "S-1-5-21-200".to_owned(),
-            session_id: 1,
-            display_name: "DOMAIN\\user (session 1)".to_owned(),
-            signature_verified: true,
-        }];
+        let instances = UniGetUiInstances {
+            instances: vec![UniGetUiInstance {
+                user_uuid: "bb195c19-20e1-4ad9-8eca-d8396c153881".to_owned(),
+                session_id: 1,
+                display_name: "DOMAIN\\user (session 1)".to_owned(),
+                signature_verified: true,
+            }],
+            registry_epoch: "e154c84b-c928-40b5-9171-c970d960bd16".to_owned(),
+        };
         let mut sent = Vec::new();
 
         report_instances(request_id, Ok(instances.clone()), |correlation_id, report| {
@@ -618,7 +755,7 @@ mod tests {
             sent,
             [(
                 Some(request_id.to_owned()),
-                report(Report::UnigetuiInstances(UniGetUiInstances { instances }))
+                report(Report::UnigetuiInstances(instances))
             )]
         );
     }
@@ -626,10 +763,12 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
     #[test]
     fn busy_inventory_request_reports_unavailability_with_correlation() {
-        let target_user_sid = "S-1-5-21-200";
+        let target_user_uuid = "bb195c19-20e1-4ad9-8eca-d8396c153881";
+        let registry_epoch = "e154c84b-c928-40b5-9171-c970d960bd16";
         let request_id = "91948c6a-7c54-409d-bbd6-a42dd9b73e32";
         let request = Request::SyncInventory(agent_channel_proto::SyncInventory {
-            target_user_sid: target_user_sid.to_owned(),
+            target_user_uuid: target_user_uuid.to_owned(),
+            registry_epoch: registry_epoch.to_owned(),
         });
         let mut sent = Vec::new();
 
@@ -649,7 +788,8 @@ mod tests {
             panic!("expected an unavailable report");
         };
         assert_eq!(correlation_id.as_deref(), Some(request_id));
-        assert_eq!(unavailable.target_user_sid, target_user_sid);
+        assert_eq!(unavailable.target_user_uuid, target_user_uuid);
+        assert_eq!(unavailable.registry_epoch, registry_epoch);
         assert_eq!(unavailable.reason, 2);
     }
 
@@ -668,13 +808,9 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
     #[test]
     fn empty_inventory_has_one_complete_page() {
-        let inventory = Inventory {
-            packages: Vec::new(),
-            managers: Vec::new(),
-            sources: Vec::new(),
-        };
+        let inventory = inventory(Vec::new(), Vec::new(), Vec::new());
 
-        let pages = inventory_parts(inventory, "S-1-5-21-200").expect("inventory fits in one page");
+        let pages = inventory_parts(inventory, "user", "epoch").expect("inventory fits in one page");
 
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].page_count, 1);
@@ -697,6 +833,7 @@ mod tests {
             success: false,
             error: String::new(),
             status: PackageOperationStatus::Unknown.into(),
+            execution_started: None,
         });
 
         assert!(matches!(report.report, Some(Report::PackageOperationUnknown(_))));
@@ -714,6 +851,7 @@ mod tests {
             success: true,
             error: String::new(),
             status: PackageOperationStatus::Unspecified.into(),
+            execution_started: None,
         });
 
         assert!(matches!(report.report, Some(Report::PackageOperationResult(_))));
@@ -727,8 +865,19 @@ mod tests {
     #[test]
     fn inventory_pages_identify_a_complete_collection() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
-        let inventory = Inventory {
-            packages: (0..500)
+        let manager = PackageManager {
+            name: "winget".to_owned(),
+            installed: true,
+            enabled: true,
+            version: String::new(),
+        };
+        let source = PackageSource {
+            manager: "winget".to_owned(),
+            name: "winget".to_owned(),
+            url: String::new(),
+        };
+        let inventory = inventory(
+            (0..500)
                 .map(|index| InstalledPackage {
                     manager: "winget".to_owned(),
                     source: "winget".to_owned(),
@@ -741,16 +890,27 @@ mod tests {
                     reported_scope: String::new(),
                 })
                 .collect(),
-            managers: Vec::new(),
-            sources: Vec::new(),
-        };
-        let target_user_sid = "S-1-5-21-200";
+            vec![manager.clone()],
+            vec![source.clone()],
+        );
+        let target_user_uuid = "bb195c19-20e1-4ad9-8eca-d8396c153881";
+        let registry_epoch = "e154c84b-c928-40b5-9171-c970d960bd16";
 
-        let pages = inventory_parts(inventory, target_user_sid).expect("inventory fits in pages");
+        let pages = inventory_parts(inventory, target_user_uuid, registry_epoch).expect("inventory fits in pages");
 
         assert!(pages.len() > 1);
+        assert_eq!(pages[0].managers, [manager]);
+        assert_eq!(pages[0].sources, [source]);
+        assert!(
+            pages[1..]
+                .iter()
+                .all(|page| page.managers.is_empty() && page.sources.is_empty())
+        );
         for (index, page) in pages.iter().enumerate() {
-            assert_eq!(page.target_user_sid, target_user_sid);
+            assert_eq!(page.target_user_uuid, target_user_uuid);
+            assert_eq!(page.registry_epoch, registry_epoch);
+            assert_eq!(page.scan_completed_at, pages[0].scan_completed_at);
+            assert_eq!(page.update_scan_completed_at, pages[0].update_scan_completed_at);
             assert_eq!(page.report_id, pages[0].report_id);
             assert_eq!(usize::try_from(page.page_index).expect("page index fits"), index);
             assert_eq!(usize::try_from(page.page_count).expect("page count fits"), pages.len());
@@ -772,26 +932,26 @@ mod tests {
     // oracle: mutant omitted page header from the size check
     #[test]
     fn package_must_fit_with_the_next_page_header() {
-        let inventory = Inventory {
-            packages: vec![InstalledPackage {
+        let inventory = inventory(
+            vec![InstalledPackage {
                 id: "p".repeat(59_950),
                 ..Default::default()
             }],
-            managers: vec![PackageManager {
+            vec![PackageManager {
                 name: "m".repeat(1_000),
                 ..Default::default()
             }],
-            sources: Vec::new(),
-        };
+            Vec::new(),
+        );
 
-        assert!(inventory_parts(inventory, "S-1-5-21-200").is_err());
+        assert!(inventory_parts(inventory, "user", "epoch").is_err());
     }
 
     #[test]
     fn oversized_package_prevents_an_incomplete_inventory_report() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
-        let inventory = Inventory {
-            packages: vec![InstalledPackage {
+        let inventory = inventory(
+            vec![InstalledPackage {
                 manager: "winget".to_owned(),
                 source: "winget".to_owned(),
                 source_name: "winget".to_owned(),
@@ -802,26 +962,26 @@ mod tests {
                 scope: "UNKNOWN".to_owned(),
                 reported_scope: String::new(),
             }],
-            managers: Vec::new(),
-            sources: Vec::new(),
-        };
+            Vec::new(),
+            Vec::new(),
+        );
 
-        assert!(inventory_parts(inventory, "S-1-5-21-200").is_err());
+        assert!(inventory_parts(inventory, "user", "epoch").is_err());
     }
 
     #[test]
     fn oversized_inventory_metadata_is_rejected() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
-        let inventory = Inventory {
-            packages: Vec::new(),
-            managers: Vec::new(),
-            sources: vec![PackageSource {
+        let inventory = inventory(
+            Vec::new(),
+            Vec::new(),
+            vec![PackageSource {
                 manager: "winget".to_owned(),
                 name: "n".repeat(MAX_INVENTORY_PART_BYTES),
                 url: String::new(),
             }],
-        };
+        );
 
-        assert!(inventory_parts(inventory, "S-1-5-21-200").is_err());
+        assert!(inventory_parts(inventory, "user", "epoch").is_err());
     }
 }

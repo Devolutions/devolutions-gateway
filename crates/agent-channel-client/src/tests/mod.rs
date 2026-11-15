@@ -1560,14 +1560,16 @@ async fn unavailable_inventory_keeps_request_correlation_across_reopening() -> a
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
     let request_id = new_id();
-    let target_user_sid = "S-1-5-21-200";
+    let target_user_uuid = "bb195c19-20e1-4ad9-8eca-d8396c153881";
+    let registry_epoch = "e154c84b-c928-40b5-9171-c970d960bd16";
     first
         .send(
             &request_id,
             None,
             Payload::DeviceManagement(DeviceManagementRequest {
                 request: Some(Request::SyncInventory(SyncInventory {
-                    target_user_sid: target_user_sid.to_owned(),
+                    target_user_uuid: target_user_uuid.to_owned(),
+                    registry_epoch: registry_epoch.to_owned(),
                 })),
             }),
         )
@@ -1585,7 +1587,8 @@ async fn unavailable_inventory_keeps_request_correlation_across_reopening() -> a
         Some(request_id.clone()),
         DeviceManagementReport {
             report: Some(Report::InventoryUnavailable(InventoryUnavailable {
-                target_user_sid: target_user_sid.to_owned(),
+                target_user_uuid: target_user_uuid.to_owned(),
+                registry_epoch: registry_epoch.to_owned(),
                 reason: InventoryUnavailableReason::SafeEndpointUnavailable.into(),
             })),
         },
@@ -1600,10 +1603,11 @@ async fn unavailable_inventory_keeps_request_correlation_across_reopening() -> a
         message.payload,
         Some(agent_message::Payload::DeviceManagement(DeviceManagementReport {
             report: Some(Report::InventoryUnavailable(InventoryUnavailable {
-                target_user_sid: sid,
+                target_user_uuid: user_uuid,
+                registry_epoch: epoch,
                 reason: 1,
             })),
-        })) if sid == target_user_sid
+        })) if user_uuid == target_user_uuid && epoch == registry_epoch
     ));
     Ok(())
 }

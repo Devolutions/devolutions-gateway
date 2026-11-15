@@ -31,10 +31,12 @@ use tokio::time::sleep;
 use self::config::{IdentityDebugConf, IdentityKeyBackend};
 use self::runner::{Runners, Shared};
 use crate::config::{Conf, ConfHandle};
+use crate::device_management::DeviceManagementContext;
 
 pub struct IdentityTask {
     conf_handle: ConfHandle,
     system_events: Arc<dyn SystemEventSink>,
+    device_management: DeviceManagementContext,
 }
 
 impl IdentityTask {
@@ -42,7 +44,34 @@ impl IdentityTask {
         Self {
             conf_handle,
             system_events: Arc::clone(&crate::SYSTEM_LOGGER),
+            device_management: DeviceManagementContext::default(),
         }
+    }
+
+    /// Sets whether the Authority may request inventory and package writes.
+    #[must_use]
+    pub fn with_remote_device_management(mut self, inventory_enabled: bool, writes_enabled: bool) -> Self {
+        self.device_management = self
+            .device_management
+            .with_remote_features(inventory_enabled, writes_enabled);
+        self
+    }
+
+    /// Serves device-management requests through a running package broker.
+    ///
+    /// Opens the Agent's user registry once for every identity, which does blocking file I/O.
+    /// When the registry cannot be opened, device management stays unavailable and the task still runs.
+    #[cfg(windows)]
+    #[must_use]
+    pub fn with_package_broker(
+        mut self,
+        registration: now_package_broker::registration::RegistrationHandle,
+        broker: Arc<now_package_broker::server::BrokerState>,
+    ) -> Self {
+        self.device_management = self
+            .device_management
+            .with_package_broker(registration, broker, &get_data_dir());
+        self
     }
 }
 
@@ -56,6 +85,7 @@ impl Task for IdentityTask {
             &self.conf_handle.get_conf(),
             get_data_dir(),
             self.system_events.as_ref(),
+            self.device_management,
             shutdown,
         )
         .await
@@ -66,6 +96,7 @@ async fn run_identity(
     conf: &Conf,
     data_dir: Utf8PathBuf,
     system_events: &dyn SystemEventSink,
+    device_management: DeviceManagementContext,
     mut shutdown: ShutdownSignal,
 ) -> anyhow::Result<()> {
     let settings = conf.debug.identity.clone().unwrap_or_default();
@@ -163,6 +194,7 @@ async fn run_identity(
             client,
             channels,
             settings: settings.clone(),
+            device_management: device_management.clone(),
         });
         let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
         match shared.store.list_identities() {
@@ -538,7 +570,13 @@ mod tests {
 
         let outcome = tokio::time::timeout(
             Duration::from_secs(10),
-            run_identity(&conf, data_dir.clone(), &events, shutdown),
+            run_identity(
+                &conf,
+                data_dir.clone(),
+                &events,
+                DeviceManagementContext::default(),
+                shutdown,
+            ),
         )
         .await;
         let leftovers = std::fs::read_dir(&data_dir)?.count();
@@ -664,6 +702,7 @@ mod tests {
             client: Client::new(conf.proxy.to_proxy_config(), None)?,
             channels: channel_client(&conf, &settings)?,
             settings,
+            device_management: DeviceManagementContext::default(),
         }))
     }
 
@@ -693,7 +732,16 @@ mod tests {
         let task = tokio::spawn({
             let conf = test_conf()?;
             let data_dir = data_dir.0.clone();
-            async move { run_identity(&conf, data_dir, &RecordingSink::default(), shutdown).await }
+            async move {
+                run_identity(
+                    &conf,
+                    data_dir,
+                    &RecordingSink::default(),
+                    DeviceManagementContext::default(),
+                    shutdown,
+                )
+                .await
+            }
         });
 
         sleep(Duration::from_millis(500)).await;

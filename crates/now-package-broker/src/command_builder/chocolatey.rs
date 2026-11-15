@@ -3,7 +3,9 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
 
-use super::{set_if_true, validate_batch_arguments, validate_package_version, validate_source_name};
+use super::{
+    set_if_true, uses_default_source, validate_batch_arguments, validate_package_version, validate_source_name,
+};
 
 /// Build the Chocolatey command line from a validated request.
 ///
@@ -28,8 +30,10 @@ pub fn build_chocolatey_command(request: &PackageRequest) -> anyhow::Result<Vec<
 
     if matches!(request.operation, Operation::Install | Operation::Update) {
         command.push("--no-progress".to_owned());
-        command.push("--source".to_owned());
-        command.push(chocolatey_source(request)?.to_owned());
+        if let Some(source) = chocolatey_source(request)? {
+            command.push("--source".to_owned());
+            command.push(source.to_owned());
+        }
 
         if request.package.architecture == Some(Architecture::X86) {
             command.push("--forcex86".to_owned());
@@ -152,13 +156,17 @@ fn validate_chocolatey_package_id(id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn chocolatey_source(request: &PackageRequest) -> anyhow::Result<&str> {
+/// The named source for `--source`, or `None` to use Chocolatey's configured default sources.
+fn chocolatey_source(request: &PackageRequest) -> anyhow::Result<Option<&str>> {
+    if uses_default_source("Chocolatey", request)? {
+        return Ok(None);
+    }
     let source = request.source.name.trim();
     if source.is_empty() {
         bail!("Chocolatey package source name is required");
     }
     validate_source_name("Chocolatey", source)?;
-    Ok(source)
+    Ok(Some(source))
 }
 
 #[cfg(test)]
@@ -212,6 +220,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_source_update_omits_source_flag() {
+        let mut request = make_request();
+        request.operation = Operation::Update;
+        request.source.name = String::new();
+        let cmd = build_chocolatey_command(&request).expect("empty source");
+        assert!(!cmd.contains(&"--source".to_owned()));
+    }
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            build_chocolatey_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_chocolatey_command(&request).expect_err("install requires a named source");
+
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = Some("https://example.test/".to_owned());
+            build_chocolatey_command(&request).expect_err("empty source cannot carry a URL");
+        }
+    }
     #[test]
     fn install_matches_chocolatey_semantics() {
         let request = make_request();

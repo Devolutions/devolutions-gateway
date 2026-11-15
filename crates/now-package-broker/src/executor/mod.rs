@@ -29,9 +29,8 @@ pub enum TokenElevationCheck {
     /// pre/post operation commands are checked against it.
     #[default]
     Unchecked,
-    /// The launching token must be elevated exactly when the operation requires elevation
-    /// (`Elevated` or machine scope), including UAC-disabled sessions whose regular token is
-    /// already elevated. Any mismatch fails before a process is started.
+    /// The launching token must match the requested elevation, independently of the manager scope.
+    /// A mismatch, including an already-elevated token with UAC disabled, fails before a process starts.
     Exact,
 }
 
@@ -67,7 +66,7 @@ pub struct ExecutionContext {
     pub user_sid: Sid,
     /// Requested elevation level.
     pub elevation: Elevation,
-    /// Installation scope (machine scope requires elevation).
+    /// Installation scope passed to the manager.
     pub scope: Option<Scope>,
     /// Whether the actual launching token's elevation must match the requirement exactly.
     pub token_elevation_check: TokenElevationCheck,
@@ -88,6 +87,14 @@ pub struct ExecutionContext {
     /// chunks to the sink when [`ExecutionContext::capture_output`] is true. All
     /// sink calls are non-blocking and best-effort.
     pub event_sink: Option<OperationEventSink>,
+}
+
+impl ExecutionContext {
+    #[cfg(windows)]
+    fn requires_elevation(&self) -> bool {
+        self.elevation == Elevation::Elevated
+            || (self.token_elevation_check == TokenElevationCheck::Unchecked && self.scope == Some(Scope::Machine))
+    }
 }
 
 /// Marker error reported by executors when an operation was terminated because its

@@ -84,7 +84,7 @@ impl CommandExecutor for WindowsExecutor {
         ctx: &ExecutionContext,
         process_started: Option<ProcessStartedCallback>,
     ) -> anyhow::Result<ExecutionOutput> {
-        let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+        let requires_elevation = ctx.requires_elevation();
         reject_unsupported_vcpkg_elevation(ctx)?;
 
         // SECURITY: Defense in depth — the broker server already rejects such
@@ -226,7 +226,7 @@ fn execute_as_system(
     ctx: &ExecutionContext,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
-    let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+    let requires_elevation = ctx.requires_elevation();
 
     info!(
         effective_user = %ctx.effective_user,
@@ -365,7 +365,7 @@ fn run_plan(
         return Err(anyhow::Error::new(OperationCanceled));
     }
 
-    let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+    let requires_elevation = ctx.requires_elevation();
     if requires_elevation && command_is_bun(&ctx.command) {
         bail!("elevated Bun package operations are not supported by the broker");
     }
@@ -2339,6 +2339,32 @@ mod tests {
         verify_token_elevation(true, false).expect_err("regular token cannot satisfy an elevated requirement");
         // Covers UAC-disabled sessions, where the regular session token is already elevated.
         verify_token_elevation(false, true).expect_err("elevated token cannot satisfy a regular requirement");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn grant_elevation_is_independent_of_the_manager_scope() {
+        let mut ctx = ExecutionContext {
+            kill_processes: Vec::new(),
+            pre_command: None,
+            command: vec!["pwsh.exe".to_owned()],
+            post_command: None,
+            effective_user: "user".to_owned(),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("create world SID"),
+            elevation: Elevation::Standard,
+            scope: Some(Scope::Machine),
+            token_elevation_check: TokenElevationCheck::Exact,
+            capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
+        };
+        assert!(!ctx.requires_elevation());
+
+        ctx.token_elevation_check = TokenElevationCheck::Unchecked;
+        assert!(ctx.requires_elevation());
+        ctx.token_elevation_check = TokenElevationCheck::Exact;
+        ctx.elevation = Elevation::Elevated;
+        assert!(ctx.requires_elevation());
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations

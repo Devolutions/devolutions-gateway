@@ -7,7 +7,7 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
-use super::quote_powershell_literal;
+use super::{quote_powershell_literal, uses_default_source};
 
 /// Build a Scoop command from a validated request.
 ///
@@ -84,7 +84,7 @@ fn validate_scoop_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.options.scope == Some(Scope::Machine) {
         bail!("Scoop machine/global scope is not supported by the broker");
     }
-    if request.source.name.trim().is_empty() {
+    if !uses_default_source("Scoop", request)? && request.source.name.trim().is_empty() {
         bail!("Scoop package source name is required");
     }
     if request.package.version.is_some() {
@@ -130,7 +130,8 @@ fn scoop_package_ref(request: &PackageRequest) -> anyhow::Result<String> {
     validate_script_argument(source)?;
     validate_package_id(&request.package.id.0)?;
 
-    if source_is_direct_manifest(source) {
+    // Update and uninstall without a bucket act on the installed app by name.
+    if source.is_empty() || source_is_direct_manifest(source) {
         Ok(request.package.id.0.clone())
     } else {
         Ok(format!("{source}/{}", request.package.id.0))
@@ -296,6 +297,28 @@ mod tests {
         &cmd[5]
     }
 
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = None;
+            build_scoop_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_scoop_command(&request).expect_err("install requires a named source");
+
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = Some("https://example.test/".to_owned());
+            build_scoop_command(&request).expect_err("empty source cannot carry a URL");
+        }
+    }
     #[test]
     fn install_uses_bucket_package_ref_and_architecture() {
         let mut request = make_request();

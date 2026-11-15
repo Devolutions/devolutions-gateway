@@ -20,7 +20,7 @@ use windows::Win32::Security::Authorization::SET_ACCESS;
 use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
 
 use crate::auth::PipeClient;
-use crate::server::{BrokerState, build_router_for_client, serve_connection};
+use crate::server::{BrokerState, PipeIdentity, build_router_for_pipe, serve_connection};
 
 /// Default pipe name for the package broker.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\Devolutions.Now.PackageBroker.v1";
@@ -134,7 +134,7 @@ async fn accept_connections(
                     };
 
                     info!("Client connected to named pipe");
-                    let router = build_router_for_client(state, client);
+                    let router = build_router_for_pipe(state, client, PipeIdentity::of(&server));
                     serve_connection(server, router).await;
                     info!("Client disconnected from named pipe");
                 };
@@ -381,7 +381,10 @@ async fn wait_for_connections(connections: &mut tokio::task::JoinSet<()>, grace:
     }
 }
 
-fn spawn_bounded_capture<T, F>(permit: OwnedSemaphorePermit, capture: F) -> JoinHandle<(OwnedSemaphorePermit, T)>
+pub(crate) fn spawn_bounded_capture<T, F>(
+    permit: OwnedSemaphorePermit,
+    capture: F,
+) -> JoinHandle<(OwnedSemaphorePermit, T)>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,

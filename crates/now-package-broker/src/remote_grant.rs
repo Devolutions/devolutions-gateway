@@ -24,6 +24,7 @@ use win_api_wrappers::identity::sid::Sid;
 
 const GRANT_LIFETIME: Duration = Duration::from_secs(60);
 const MAX_PENDING_GRANTS: usize = 256;
+const MAX_RECORDS: usize = 1024;
 
 /// Opaque bearer secret authorizing one request; never logged or included in errors.
 ///
@@ -48,7 +49,7 @@ impl fmt::Debug for RemoteGrant {
 pub struct GrantSpec {
     pub operation: Operation,
     pub manager: ManagerName,
-    /// Canonical, nonempty broker `Source.Name`; compared exactly, without Unicode normalization.
+    /// Broker `Source.Name`, compared exactly without Unicode normalization; empty selects the default or no feed.
     pub source_name: String,
     /// Authority-authorized `Source.Url`, compared exactly; `None` authorizes no URL.
     /// Whether a manager honors or safely handles it is for the integration to decide.
@@ -60,6 +61,10 @@ pub struct GrantSpec {
     pub requested_elevation: Elevation,
     /// SID of the user the operation runs as, taken from the authority's selection.
     pub target_sid: Sid,
+    /// Fixed `Options.NoUpgrade` value the request must carry.
+    ///
+    /// The Agent sets it for WinGet installs so an install cannot upgrade an existing package.
+    pub no_upgrade: bool,
 }
 
 /// A newly issued grant and the broker request ID it is bound to.
@@ -92,8 +97,9 @@ pub enum IssueError {
     Full,
     /// The request has no canonical representation.
     Unserializable,
-    /// The source name is empty.
-    EmptySourceName,
+    /// The source does not fit the operation: an install needs a source name, an uninstall has no source,
+    /// and an update with an empty name has no URL.
+    InvalidSource,
 }
 
 impl fmt::Display for IssueError {
@@ -101,7 +107,7 @@ impl fmt::Display for IssueError {
         match self {
             Self::Full => f.write_str("too many pending grants"),
             Self::Unserializable => f.write_str("request cannot be serialized"),
-            Self::EmptySourceName => f.write_str("source name is empty"),
+            Self::InvalidSource => f.write_str("source does not fit the operation"),
         }
     }
 }
@@ -125,13 +131,118 @@ impl std::error::Error for GrantDenied {}
 struct Entry {
     sid: Sid,
     request: Value,
+    request_id: Uuid,
     expires_at: Instant,
+}
+
+/// What the Broker has positively observed about the one operation a grant authorized.
+///
+/// The states are ordered: a record only moves forward.
+/// There is deliberately no "not started" or "failed" state, because the Broker cannot prove either.
+/// An exit code alone does not establish a package outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OutcomeSummary {
+    /// No matching record exists: never consumed, evicted, lost in a restart or bound to another request.
+    Unknown,
+    /// The grant was consumed; work may or may not have started.
+    Consumed,
+    /// The Broker started the operation's process.
+    Started,
+    /// The Broker observed the started process exit with this code.
+    Exited { exit_code: i32 },
+}
+
+struct Record {
+    request_id: Uuid,
+    state: OutcomeSummary,
+    /// INVARIANT: strictly increasing across records, so the smallest value is the oldest.
+    sequence: u64,
+}
+
+#[derive(Default)]
+struct State {
+    grants: HashMap<[u8; 32], Entry>,
+    records: HashMap<[u8; 32], Record>,
+    next_sequence: u64,
+}
+
+impl State {
+    /// Inserts a record, evicting one when the table is full.
+    ///
+    /// Eviction prefers finished records, then the oldest.
+    /// Evicting a record never restores its grant, which was removed when the record was created.
+    fn insert_record(&mut self, key: [u8; 32], request_id: Uuid) {
+        if MAX_RECORDS <= self.records.len() {
+            let victim = self
+                .records
+                .iter()
+                .min_by_key(|(_, record)| (!matches!(record.state, OutcomeSummary::Exited { .. }), record.sequence))
+                .map(|(key, _)| *key);
+
+            if let Some(victim) = victim {
+                self.records.remove(&victim);
+            }
+        }
+
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+
+        self.records.insert(
+            key,
+            Record {
+                request_id,
+                state: OutcomeSummary::Consumed,
+                sequence,
+            },
+        );
+    }
+}
+
+/// The Broker execution path's handle for recording what it observes for one consumed grant.
+///
+/// Only [`RemoteGrantStore::consume`] creates one, and it is not `Clone`.
+/// Updates are monotonic and are dropped silently when the record was evicted.
+pub struct ExecutionRecord {
+    store: RemoteGrantStore,
+    key: [u8; 32],
+}
+
+impl ExecutionRecord {
+    /// Records that the operation's process started; returns whether the record advanced.
+    ///
+    /// Call this only after the process was actually created.
+    pub fn mark_started(&self) -> bool {
+        self.advance(OutcomeSummary::Consumed, OutcomeSummary::Started)
+    }
+
+    /// Records that the started process exited with `exit_code`; returns whether the record advanced.
+    pub fn mark_exited(&self, exit_code: i32) -> bool {
+        self.advance(OutcomeSummary::Started, OutcomeSummary::Exited { exit_code })
+    }
+
+    fn advance(&self, from: OutcomeSummary, to: OutcomeSummary) -> bool {
+        let mut state = self.store.state.lock();
+
+        match state.records.get_mut(&self.key) {
+            Some(record) if record.state == from => {
+                record.state = to;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Debug for ExecutionRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExecutionRecord").finish_non_exhaustive()
+    }
 }
 
 /// Shared handle to the in-memory grant store; clones refer to the same store.
 #[derive(Clone, Default)]
 pub struct RemoteGrantStore {
-    entries: Arc<Mutex<HashMap<[u8; 32], Entry>>>,
+    state: Arc<Mutex<State>>,
 }
 
 impl fmt::Debug for RemoteGrantStore {
@@ -150,16 +261,42 @@ impl RemoteGrantStore {
         self.issue_at(Instant::now(), spec)
     }
 
-    /// Atomically verifies and consumes the grant for `caller` and `request`.
+    /// Atomically verifies and consumes the grant for `caller` and `request`, creating its outcome record.
     ///
+    /// Call this before starting any process; the returned handle is the only way to update the record.
     /// A grant presented with a different caller or request stays valid for its rightful holder.
-    pub fn consume(&self, grant: &str, caller: &VerifiedCaller, request: &PackageRequest) -> Result<(), GrantDenied> {
+    pub fn consume(
+        &self,
+        grant: &str,
+        caller: &VerifiedCaller,
+        request: &PackageRequest,
+    ) -> Result<ExecutionRecord, GrantDenied> {
         self.consume_at(Instant::now(), grant, caller, request)
     }
 
+    /// Reads the non-secret outcome summary for an issued grant without changing it.
+    ///
+    /// Anything other than a record for this exact grant and Broker request ID is [`OutcomeSummary::Unknown`].
+    pub fn outcome(&self, grant: &RemoteGrant, request_id: &Uuid) -> OutcomeSummary {
+        let Ok(secret) = hex::decode(grant.expose_secret()) else {
+            return OutcomeSummary::Unknown;
+        };
+
+        match self.state.lock().records.get(&digest(&secret)) {
+            Some(record) if record.request_id == *request_id => record.state,
+            _ => OutcomeSummary::Unknown,
+        }
+    }
+
     fn issue_at(&self, now: Instant, spec: GrantSpec) -> Result<IssuedGrant, IssueError> {
-        if spec.source_name.is_empty() {
-            return Err(IssueError::EmptySourceName);
+        // An empty name authorizes the manager's default feed (update) or no feed at all (uninstall); never an install.
+        let source_fits = match spec.operation {
+            Operation::Install => !spec.source_name.is_empty(),
+            Operation::Update => !spec.source_name.is_empty() || spec.source_url.is_none(),
+            Operation::Uninstall => spec.source_name.is_empty() && spec.source_url.is_none(),
+        };
+        if !source_fits {
+            return Err(IssueError::InvalidSource);
         }
 
         let request_id = Uuid::new_v4();
@@ -169,18 +306,19 @@ impl RemoteGrantStore {
         secret[..16].copy_from_slice(Uuid::new_v4().as_bytes());
         secret[16..].copy_from_slice(Uuid::new_v4().as_bytes());
 
-        let mut entries = self.entries.lock();
-        entries.retain(|_, entry| entry.expires_at > now);
+        let mut state = self.state.lock();
+        state.grants.retain(|_, entry| entry.expires_at > now);
 
-        if entries.len() >= MAX_PENDING_GRANTS {
+        if state.grants.len() >= MAX_PENDING_GRANTS {
             return Err(IssueError::Full);
         }
 
-        entries.insert(
+        state.grants.insert(
             digest(&secret),
             Entry {
                 sid: spec.target_sid,
                 request,
+                request_id,
                 expires_at: now + GRANT_LIFETIME,
             },
         );
@@ -197,18 +335,25 @@ impl RemoteGrantStore {
         grant: &str,
         caller: &VerifiedCaller,
         request: &PackageRequest,
-    ) -> Result<(), GrantDenied> {
+    ) -> Result<ExecutionRecord, GrantDenied> {
         let secret = hex::decode(grant).map_err(|_| GrantDenied)?;
         let request = comparable(request).ok_or(GrantDenied)?;
         let key = digest(&secret);
 
-        let mut entries = self.entries.lock();
-        entries.retain(|_, entry| entry.expires_at > now);
+        // The grant is removed and its record created under one lock, so concurrent duplicates cannot both win.
+        let mut state = self.state.lock();
+        state.grants.retain(|_, entry| entry.expires_at > now);
 
-        match entries.get(&key) {
+        match state.grants.get(&key) {
             Some(entry) if entry.sid == caller.sid && entry.request == request => {
-                entries.remove(&key);
-                Ok(())
+                let request_id = entry.request_id;
+                state.grants.remove(&key);
+                state.insert_record(key, request_id);
+
+                Ok(ExecutionRecord {
+                    store: self.clone(),
+                    key,
+                })
             }
             _ => Err(GrantDenied),
         }
@@ -250,7 +395,7 @@ fn canonical_request(spec: &GrantSpec, request_id: &Uuid) -> PackageRequest {
             post_operation_command: None,
             kill_before_operation: Vec::new(),
             uninstall_previous: false,
-            no_upgrade: false,
+            no_upgrade: spec.no_upgrade,
         },
         client: api::ClientContext {
             transport: api::Transport::HttpNamedPipe,
@@ -296,6 +441,15 @@ mod tests {
         Sid::from_well_known(kind, None).expect("well-known SID")
     }
 
+    fn try_consume(
+        store: &RemoteGrantStore,
+        grant: &str,
+        caller: &VerifiedCaller,
+        request: &PackageRequest,
+    ) -> Result<(), GrantDenied> {
+        store.consume(grant, caller, request).map(drop)
+    }
+
     fn caller() -> VerifiedCaller {
         VerifiedCaller::new(sid(WinWorldSid))
     }
@@ -311,6 +465,7 @@ mod tests {
             scope: Some(Scope::User),
             requested_elevation: Elevation::Standard,
             target_sid: sid(WinWorldSid),
+            no_upgrade: false,
         }
     }
 
@@ -344,7 +499,7 @@ mod tests {
                 post_operation_command: None,
                 kill_before_operation: Vec::new(),
                 uninstall_previous: false,
-                no_upgrade: false,
+                no_upgrade: spec.no_upgrade,
             },
             client: api::ClientContext {
                 transport: Transport::HttpNamedPipe,
@@ -371,7 +526,7 @@ mod tests {
         mutate(&mut request);
 
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
     }
@@ -384,7 +539,7 @@ mod tests {
         let request = matching_request(&spec, &issued.request_id);
 
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
     }
@@ -418,9 +573,12 @@ mod tests {
     fn matching_request_is_consumed_once() {
         let (store, issued, request) = issued();
 
-        assert_eq!(store.consume(issued.grant.expose_secret(), &caller(), &request), Ok(()));
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
+            Ok(())
+        );
+        assert_eq!(
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
     }
@@ -434,7 +592,10 @@ mod tests {
         request.client.effective_user = "OTHER\\name".to_owned();
         request.client.client_executable_path = "D:\\elsewhere.exe".to_owned();
 
-        assert_eq!(store.consume(issued.grant.expose_secret(), &caller(), &request), Ok(()));
+        assert_eq!(
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
+            Ok(())
+        );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -448,7 +609,10 @@ mod tests {
         let issued = store.issue(spec.clone()).expect("issue");
         let request = matching_request(&spec, &issued.request_id);
 
-        assert_eq!(store.consume(issued.grant.expose_secret(), &caller(), &request), Ok(()));
+        assert_eq!(
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
+            Ok(())
+        );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -462,7 +626,7 @@ mod tests {
         request.source.url = Some("https://example.test/feed".to_owned());
 
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
     }
@@ -478,7 +642,7 @@ mod tests {
         request.source.url = Some(String::new());
 
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
     }
@@ -494,21 +658,49 @@ mod tests {
         let request = matching_request(&spec, &issued.request_id);
 
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
-    fn empty_source_name_cannot_be_issued() {
-        let mut spec = spec();
-        spec.source_name = String::new();
+    fn install_needs_a_source_and_uninstall_has_none() {
+        let store = RemoteGrantStore::new();
 
+        let mut install = spec();
+        install.source_name = String::new();
+        install.source_url = None;
         assert_eq!(
-            RemoteGrantStore::new().issue(spec).expect_err("empty name"),
-            IssueError::EmptySourceName
+            store.issue(install).expect_err("empty install"),
+            IssueError::InvalidSource
         );
+
+        let mut uninstall = spec();
+        uninstall.operation = Operation::Uninstall;
+        assert_eq!(
+            store.issue(uninstall.clone()).expect_err("uninstall source"),
+            IssueError::InvalidSource
+        );
+
+        uninstall.source_name = String::new();
+        uninstall.source_url = None;
+        store.issue(uninstall).expect("sourceless uninstall");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn update_may_choose_the_default_feed_but_not_a_url_without_a_name() {
+        let store = RemoteGrantStore::new();
+
+        let mut update = spec();
+        update.operation = Operation::Update;
+        update.source_name = String::new();
+        update.source_url = None;
+        store.issue(update.clone()).expect("default-feed update");
+
+        update.source_url = Some("https://example.invalid/feed".to_owned());
+        assert_eq!(store.issue(update).expect_err("url only"), IssueError::InvalidSource);
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -536,7 +728,8 @@ mod tests {
         let (store, issued, request) = issued();
 
         assert_eq!(
-            store.consume(
+            try_consume(
+                &store,
                 issued.grant.expose_secret(),
                 &VerifiedCaller::new(sid(WinLocalSystemSid)),
                 &request
@@ -550,8 +743,11 @@ mod tests {
     fn unknown_and_malformed_grants_are_denied() {
         let (store, _, request) = issued();
 
-        assert_eq!(store.consume(&"00".repeat(32), &caller(), &request), Err(GrantDenied));
-        assert_eq!(store.consume("not hex", &caller(), &request), Err(GrantDenied));
+        assert_eq!(
+            try_consume(&store, &"00".repeat(32), &caller(), &request),
+            Err(GrantDenied)
+        );
+        assert_eq!(try_consume(&store, "not hex", &caller(), &request), Err(GrantDenied));
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -564,15 +760,17 @@ mod tests {
         let request = matching_request(&spec, &issued.request_id);
 
         assert_eq!(
-            store.consume_at(
-                start + GRANT_LIFETIME,
-                issued.grant.expose_secret(),
-                &caller(),
-                &request
-            ),
+            store
+                .consume_at(
+                    start + GRANT_LIFETIME,
+                    issued.grant.expose_secret(),
+                    &caller(),
+                    &request
+                )
+                .map(drop),
             Err(GrantDenied)
         );
-        assert!(store.entries.lock().is_empty());
+        assert!(store.state.lock().grants.is_empty());
     }
 
     // oracle: mutant removing the pending cap or expiry purge lets the store grow without bound
@@ -592,7 +790,7 @@ mod tests {
         store
             .issue_at(start + GRANT_LIFETIME, spec())
             .expect("expired grants make room");
-        assert_eq!(store.entries.lock().len(), 1);
+        assert_eq!(store.state.lock().grants.len(), 1);
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -604,7 +802,7 @@ mod tests {
 
         let successes = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..16)
-                .map(|_| scope.spawn(|| store.consume(&secret, &caller, &request).is_ok()))
+                .map(|_| scope.spawn(|| try_consume(&store, &secret, &caller, &request).is_ok()))
                 .collect();
             handles
                 .into_iter()
@@ -624,10 +822,13 @@ mod tests {
         request.capture_output = false;
 
         assert_eq!(
-            store.consume(issued.grant.expose_secret(), &caller(), &request),
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
             Err(GrantDenied)
         );
-        assert_eq!(store.consume(issued.grant.expose_secret(), &caller(), &genuine), Ok(()));
+        assert_eq!(
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &genuine),
+            Ok(())
+        );
     }
 
     // oracle: mutant Debug reveals the grant secret
@@ -705,4 +906,176 @@ mod tests {
         Some(api::Architecture::X64));
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     request_is_denied!(channel_is_denied, |r| r.package.channel = Some("beta".to_owned()));
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    spec_is_denied!(changed_no_upgrade_is_denied, |s| s.no_upgrade = true);
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn install_bound_to_no_upgrade_requires_it() {
+        let store = RemoteGrantStore::new();
+        let mut spec = spec();
+        spec.no_upgrade = true;
+        let issued = store.issue(spec.clone()).expect("issue");
+        let mut request = matching_request(&spec, &issued.request_id);
+        request.options.no_upgrade = false;
+
+        assert_eq!(
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
+            Err(GrantDenied)
+        );
+
+        request.options.no_upgrade = true;
+
+        assert_eq!(
+            try_consume(&store, issued.grant.expose_secret(), &caller(), &request),
+            Ok(())
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn concurrent_duplicates_create_one_record() {
+        let (store, issued, request) = issued();
+        let secret = issued.grant.expose_secret().to_owned();
+        let caller = caller();
+
+        let winners: Vec<ExecutionRecord> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| scope.spawn(|| store.consume(&secret, &caller, &request).ok()))
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().expect("join"))
+                .collect()
+        });
+
+        assert_eq!(winners.len(), 1);
+        assert_eq!(
+            store.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Consumed
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn outcome_is_unknown_until_consumed_and_denial_creates_no_record() {
+        let (store, issued, mut request) = issued();
+
+        assert_eq!(
+            store.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unknown
+        );
+
+        request.capture_output = false;
+        assert!(
+            store
+                .consume(issued.grant.expose_secret(), &caller(), &request)
+                .is_err()
+        );
+
+        assert_eq!(
+            store.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unknown
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn outcome_lookup_requires_the_issued_grant_and_request_id() {
+        let (store, issued, request) = issued();
+        let other = store.issue(spec()).expect("issue");
+        let _record = store
+            .consume(issued.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+
+        assert_eq!(
+            store.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Consumed
+        );
+        assert_eq!(store.outcome(&issued.grant, &Uuid::new_v4()), OutcomeSummary::Unknown);
+        assert_eq!(store.outcome(&other.grant, &issued.request_id), OutcomeSummary::Unknown);
+        assert_eq!(store.outcome(&other.grant, &other.request_id), OutcomeSummary::Unknown);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn outcome_only_moves_forward_with_positive_evidence() {
+        let (store, issued, request) = issued();
+        let record = store
+            .consume(issued.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+        let read = || store.outcome(&issued.grant, &issued.request_id);
+
+        assert!(!record.mark_exited(0), "exit without a started process is not evidence");
+        assert_eq!(read(), OutcomeSummary::Consumed);
+
+        assert!(record.mark_started());
+        assert!(!record.mark_started());
+        assert_eq!(read(), OutcomeSummary::Started);
+        assert_eq!(read(), OutcomeSummary::Started, "reading does not mutate");
+
+        assert!(record.mark_exited(3));
+        assert!(!record.mark_exited(0));
+        assert!(!record.mark_started());
+        assert_eq!(read(), OutcomeSummary::Exited { exit_code: 3 });
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn outcome_is_unknown_after_restart() {
+        let (store, issued, request) = issued();
+        let record = store
+            .consume(issued.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+        record.mark_started();
+
+        let restarted = RemoteGrantStore::new();
+
+        assert_eq!(
+            restarted.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unknown
+        );
+        assert_eq!(
+            try_consume(&restarted, issued.grant.expose_secret(), &caller(), &request),
+            Err(GrantDenied)
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn evicted_active_record_is_unknown_and_its_grant_stays_spent() {
+        let (store, first, request) = issued();
+        let first_record = store
+            .consume(first.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+        first_record.mark_started();
+
+        let mut newest = None;
+        for _ in 0..10_000 {
+            let spec = spec();
+            let issued = store.issue(spec.clone()).expect("issue");
+            let request = matching_request(&spec, &issued.request_id);
+            let record = store
+                .consume(issued.grant.expose_secret(), &caller(), &request)
+                .expect("consume");
+            newest = Some((issued, record));
+        }
+        let (newest, _newest_record) = newest.expect("at least one grant");
+
+        assert_eq!(store.outcome(&first.grant, &first.request_id), OutcomeSummary::Unknown);
+        assert_eq!(
+            store.outcome(&newest.grant, &newest.request_id),
+            OutcomeSummary::Consumed
+        );
+        assert_eq!(
+            try_consume(&store, first.grant.expose_secret(), &caller(), &request),
+            Err(GrantDenied)
+        );
+        assert!(
+            !first_record.mark_exited(0),
+            "a late update must not resurrect an evicted record"
+        );
+        assert_eq!(store.outcome(&first.grant, &first.request_id), OutcomeSummary::Unknown);
+    }
 }

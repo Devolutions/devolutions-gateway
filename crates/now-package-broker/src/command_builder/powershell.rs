@@ -20,7 +20,7 @@
 use anyhow::bail;
 use now_policy_api::{ManagerName, Operation, PackageRequest, Scope};
 
-use super::{quote_powershell_literal, validate_package_version, validate_source_name};
+use super::{quote_powershell_literal, uses_default_source, validate_package_version, validate_source_name};
 
 /// Version range syntax accepted by PSResourceGet, such as `[1.0, 2.0)` or `1.*`.
 const POWERSHELL7_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',', '*', ' '];
@@ -32,7 +32,7 @@ const INVARIANT_CULTURE_PREFIX: &str =
 
 /// Build a Windows PowerShell 5.x (PowerShellGet) command from a validated request.
 pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
-    validate_powershell_request(request)?;
+    validate_powershell_request(request, false)?;
 
     let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
@@ -93,7 +93,20 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
 
 /// Build a PowerShell 7.x (PSResourceGet) command from a validated request.
 pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
-    validate_powershell_request(request)?;
+    build_powershell7(request, false)
+}
+
+/// Build a PowerShell 7.x command for a remote grant.
+///
+/// Unlike [`build_powershell7_command`], this accepts an update with an empty source and
+/// passes an authorized installed scope to uninstall.
+/// The caller must enforce the grant's target-user token and requested elevation.
+pub(super) fn build_powershell7_remote_grant_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
+    build_powershell7(request, true)
+}
+
+fn build_powershell7(request: &PackageRequest, remote_grant: bool) -> anyhow::Result<Vec<String>> {
+    validate_powershell_request(request, remote_grant)?;
 
     let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
@@ -113,8 +126,10 @@ pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
-    if request.operation != Operation::Uninstall {
-        append_repository(&mut script, request)?;
+    if request.operation != Operation::Uninstall
+        && let Some(repository) = repository(request)?
+    {
+        append_flag_value(&mut script, "-Repository", repository);
     }
     append_raw(&mut script, "-Confirm:$false");
 
@@ -143,6 +158,12 @@ pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec
             Some(Scope::Machine) => append_raw(&mut script, "-Scope AllUsers"),
             Some(Scope::User) | None => append_raw(&mut script, "-Scope CurrentUser"),
         }
+    } else if remote_grant {
+        match request.options.scope {
+            Some(Scope::Machine) => append_raw(&mut script, "-Scope AllUsers"),
+            Some(Scope::User) => append_raw(&mut script, "-Scope CurrentUser"),
+            None => {}
+        }
     }
 
     Ok(vec![
@@ -153,18 +174,26 @@ pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec
     ])
 }
 
-fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
+fn validate_powershell_request(request: &PackageRequest, allow_default_update_source: bool) -> anyhow::Result<()> {
     if request.source.url.is_some() {
         bail!("PowerShell package sources with URLs are not supported by the broker");
     }
-    if request.source.name.trim().is_empty() {
-        bail!("PowerShell package source name is required");
+    let repository = repository(request)?;
+    // Update-PSResource without -Repository searches every registered repository and the script trusts them.
+    if repository.is_none()
+        && !allow_default_update_source
+        && request.manager == ManagerName::PowerShell7
+        && request.operation == Operation::Update
+    {
+        bail!("PowerShell 7 updates require a named package source");
     }
     // `Update-Module -Name` and PSResourceGet accept wildcard patterns.
     if request.package.id.0.contains(['*', '?', '[', ']']) {
         bail!("PowerShell module names cannot contain wildcard characters");
     }
-    validate_source_name("PowerShell", request.source.name.trim())?;
+    if let Some(repository) = repository {
+        validate_source_name("PowerShell", repository)?;
+    }
     // Uninstall ignores the version, so only versions that reach the command are restricted.
     if request.operation != Operation::Uninstall
         && let Some(version) = request.package.version.as_deref()
@@ -187,11 +216,22 @@ fn validate_powershell_request(request: &PackageRequest) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn append_repository(script: &mut String, request: &PackageRequest) -> anyhow::Result<()> {
+/// The repository name, or `None` when update or uninstall leaves the source to the manager.
+fn repository(request: &PackageRequest) -> anyhow::Result<Option<&str>> {
+    if uses_default_source("PowerShell", request)? {
+        return Ok(None);
+    }
     let repository = request.source.name.trim();
     if repository.is_empty() {
         bail!("PowerShell package source name is required");
     }
+    Ok(Some(repository))
+}
+
+fn append_repository(script: &mut String, request: &PackageRequest) -> anyhow::Result<()> {
+    let Some(repository) = repository(request)? else {
+        bail!("PowerShell package source name is required");
+    };
     append_flag_value(script, "-Repository", repository);
     Ok(())
 }
@@ -199,15 +239,15 @@ fn append_repository(script: &mut String, request: &PackageRequest) -> anyhow::R
 /// Fail the script unless every installed version that `lookup` lists was installed from
 /// the requested source, so a command without `-Repository` only acts on modules from the
 /// source that policy evaluation matched.
+/// An empty source acts on the installed module whatever repository it came from.
 fn append_installed_repository_check(
     script: &mut String,
     lookup: &str,
     request: &PackageRequest,
 ) -> anyhow::Result<()> {
-    let repository = request.source.name.trim();
-    if repository.is_empty() {
-        bail!("PowerShell package source name is required");
-    }
+    let Some(repository) = repository(request)? else {
+        return Ok(());
+    };
     append_raw(
         script,
         &format!(
@@ -293,6 +333,98 @@ mod tests {
         script.split_at(script.find(verb).expect("package command call"))
     }
 
+    #[test]
+    fn empty_source_update_and_uninstall_skip_repository_checks() {
+        for (manager, operation) in [
+            (ManagerName::PowerShell, Operation::Update),
+            (ManagerName::PowerShell, Operation::Uninstall),
+            (ManagerName::PowerShell7, Operation::Uninstall),
+        ] {
+            let mut request = make_request(manager);
+            request.operation = operation;
+            request.source.name = String::new();
+            let cmd = if manager == ManagerName::PowerShell {
+                build_powershell5_command(&request)
+            } else {
+                build_powershell7_command(&request)
+            }
+            .expect("empty source");
+            let script = script_of(&cmd);
+            assert!(!script.contains("-Repository"), "{script}");
+            assert!(!script.contains("Where-Object"), "{script}");
+        }
+    }
+
+    #[test]
+    fn remote_grant_allows_powershell7_default_source_update_only() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.operation = Operation::Update;
+        request.source.name = String::new();
+
+        build_powershell7_command(&request).expect_err("local policy requires a named source");
+
+        let cmd = build_powershell7_remote_grant_command(&request).expect("grant update");
+        let script = script_of(&cmd);
+        assert!(script.contains("Update-PSResource"), "{script}");
+        assert!(!script.contains("-Repository"), "{script}");
+
+        request.operation = Operation::Install;
+        build_powershell7_remote_grant_command(&request).expect_err("install still needs a source");
+
+        request.operation = Operation::Update;
+        request.source.url = Some("https://example.test/feed".to_owned());
+        build_powershell7_remote_grant_command(&request).expect_err("URLs remain unsupported");
+    }
+
+    #[test]
+    fn remote_grant_named_source_update_is_unchanged() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.operation = Operation::Update;
+
+        assert_eq!(
+            build_powershell7_remote_grant_command(&request).expect("grant"),
+            build_powershell7_command(&request).expect("local"),
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    // The cmdlet's scope parameter selects the resource to remove:
+    // https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.psresourceget/uninstall-psresource
+    #[test]
+    fn remote_grant_powershell7_uninstall_selects_reported_scope() {
+        let mut request = make_request(ManagerName::PowerShell7);
+        request.operation = Operation::Uninstall;
+        request.source.name = String::new();
+        request.options.scope = Some(Scope::Machine);
+
+        let remote = build_powershell7_remote_grant_command(&request).expect("grant uninstall");
+        assert!(script_of(&remote).contains("-Scope AllUsers"));
+        let local = build_powershell7_command(&request).expect("local uninstall");
+        assert!(!script_of(&local).contains("-Scope"));
+
+        request.options.scope = None;
+        let remote = build_powershell7_remote_grant_command(&request).expect("grant uninstall");
+        assert!(!script_of(&remote).contains("-Scope"));
+    }
+
+    #[test]
+    fn empty_source_is_rejected_for_install_and_powershell7_update() {
+        for (manager, operation) in [
+            (ManagerName::PowerShell, Operation::Install),
+            (ManagerName::PowerShell7, Operation::Install),
+            (ManagerName::PowerShell7, Operation::Update),
+        ] {
+            let mut request = make_request(manager);
+            request.operation = operation;
+            request.source.name = String::new();
+            let result = if manager == ManagerName::PowerShell {
+                build_powershell5_command(&request)
+            } else {
+                build_powershell7_command(&request)
+            };
+            result.expect_err("named source is required");
+        }
+    }
     #[test]
     fn powershell5_install_matches_package_broker_client_semantics() {
         let request = make_request(ManagerName::PowerShell);

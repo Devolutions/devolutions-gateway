@@ -3,6 +3,8 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
+use super::uses_default_source;
+
 /// Build the Pip command line from a validated request.
 ///
 /// The Windows executor resolves `python.exe` from the target user's environment.
@@ -61,7 +63,7 @@ fn validate_pip_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.source.url.is_some() {
         bail!("pip package sources with urls are not supported by the broker");
     }
-    if !request.source.name.eq_ignore_ascii_case("pip") {
+    if !uses_default_source("pip", request)? && !request.source.name.eq_ignore_ascii_case("pip") {
         bail!("pip package source must be pip");
     }
     validate_distribution_name(&request.package.id.0)?;
@@ -203,6 +205,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            build_pip_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_pip_command(&request).expect_err("install requires a named source");
+
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = Some("https://example.test/".to_owned());
+            build_pip_command(&request).expect_err("empty source cannot carry a URL");
+        }
+    }
     #[test]
     fn pip_install_matches_unigetui_semantics() {
         let mut request = make_request();

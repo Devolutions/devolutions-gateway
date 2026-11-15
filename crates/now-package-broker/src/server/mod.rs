@@ -35,14 +35,18 @@ use crate::evaluator;
 use crate::executor::{CommandExecutor, ExecutionContext, TokenElevationCheck};
 use crate::operation_tracker::OperationTracker;
 use crate::policy_store::PolicyStore;
+use crate::remote_grant::RemoteGrantStore;
 
 mod connection;
 mod execution;
+mod grant;
+mod pipe_identity;
 mod responses;
 
 pub use connection::serve_connection;
 #[cfg(test)]
 pub(crate) use connection::serve_connection_with_header_timeout;
+pub(crate) use pipe_identity::PipeIdentity;
 use responses::{
     api_version, diagnostics, error_response, filter_manager_capabilities, new_operation_id, parse_rule_id,
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
@@ -180,6 +184,8 @@ pub struct BrokerState {
     pub tracker: OperationTracker,
     pub skip_signature_validation: bool,
     pub manager_probe_cache: ManagerProbeCache,
+    /// Grants the Agent issues and the grant route consumes; the Agent also reads each grant's outcome here.
+    pub remote_grants: RemoteGrantStore,
 }
 
 struct EvaluatedRequest {
@@ -192,14 +198,35 @@ struct EvaluatedRequest {
 }
 
 /// Build the axum router for a single authenticated pipe client.
+///
+/// Without a pipe identity the grant route rejects every request because it cannot confirm the client's security context.
+#[cfg(test)]
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
+    build_router(state, client, None)
+}
+
+/// Build the router for a connected pipe, whose identity the grant route confirms per request.
+pub(crate) fn build_router_for_pipe(
+    state: Arc<BrokerState>,
+    client: PipeClient,
+    identity: PipeIdentity,
+) -> axum::Router {
+    build_router(state, client, Some(identity))
+}
+
+fn build_router(state: Arc<BrokerState>, client: PipeClient, identity: Option<PipeIdentity>) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection {
         state: Arc::clone(&state),
         client: client.clone(),
+        identity,
     });
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
+        .layer(middleware::from_fn(grant::normalize_grant_request))
         .layer(middleware::from_fn(reject_duplicate_policy_json_members))
-        .layer(middleware::from_fn_with_state(state, authenticate_policy_management))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authenticate_policy_management,
+        ))
         .layer(Extension(client))
 }
 
@@ -477,6 +504,7 @@ fn require_policy_management_authentication() -> Result<(), ErrorResponse> {
 struct BrokerConnection {
     state: Arc<BrokerState>,
     client: PipeClient,
+    identity: Option<PipeIdentity>,
 }
 
 #[async_trait]
@@ -570,6 +598,14 @@ impl PackageBrokerServer for BrokerConnection {
             })?;
 
         self.state.execute(request, self.client.user_sid()).await
+    }
+
+    async fn execute_grant(
+        &self,
+        request: PackageRequest,
+        grant: now_policy_api::PackageGrant,
+    ) -> Result<now_policy_api::GrantExecutionResponse, ErrorResponse> {
+        grant::execute_grant(&self.state, &self.client, self.identity.as_ref(), request, grant).await
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
@@ -768,6 +804,7 @@ impl BrokerState {
                     self.tracker.clone(),
                     operation_id.clone(),
                     context,
+                    None,
                 );
             }
             // Query the status after spawning so fast executions are reflected in the response.
@@ -1097,6 +1134,7 @@ mod tests {
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
             manager_probe_cache: Default::default(),
+            remote_grants: RemoteGrantStore::new(),
         }
     }
 
@@ -1327,6 +1365,7 @@ mod tests {
         let server = BrokerConnection {
             state: shared_state(None),
             client: PipeClient::from_current_process().expect("capture current test process"),
+            identity: None,
         };
         let error = server
             .policy_management()
@@ -1649,6 +1688,39 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn legacy_update_cannot_bypass_a_source_deny_with_an_empty_source() {
+        use std::collections::BTreeSet;
+
+        let mut policy = permissive_policy();
+        policy.enforcement.audit_mode = Some(false);
+        policy.rules.push(now_policy::PolicyRule {
+            id: ResourceId::from("deny-winget"),
+            enabled: true,
+            priority: 100,
+            decision: now_policy::Decision::Deny,
+            reason: None,
+            match_criteria: now_policy::PolicyMatch {
+                managers: BTreeSet::from([now_policy::ManagerName::Winget]),
+                source_names: BTreeSet::from([now_policy::SourceName::parse("winget").unwrap()]),
+                ..Default::default()
+            },
+            constraints: None,
+        });
+        let state = shared_state(Some(policy));
+        let mut request = request();
+        request.operation = api::Operation::Update;
+        assert!(!state.evaluate_request(&request).unwrap().would_execute);
+
+        request.source.name.clear();
+        assert!(
+            state
+                .evaluate_request(&request)
+                .map_or(true, |evaluated| !evaluated.would_execute)
+        );
+    }
+
     #[test]
     fn elevated_pre_operation_command_is_rejected_even_under_permissive_policy() {
         let mut request = request();
@@ -1785,6 +1857,7 @@ mod tests {
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
             manager_probe_cache,
+            remote_grants: RemoteGrantStore::new(),
         });
         (state, executor)
     }
@@ -1920,6 +1993,7 @@ mod tests {
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
             manager_probe_cache: Default::default(),
+            remote_grants: RemoteGrantStore::new(),
         }
     }
 

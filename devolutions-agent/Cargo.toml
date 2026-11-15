@@ -89,6 +89,8 @@ time = { version = "0.3", features = ["local-offset", "macros", "parsing"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 notify-debouncer-mini = "0.6"
 now-package-broker = { path = "../crates/now-package-broker" }
+now-policy-api = "0.7"
+private-fs = { path = "../crates/private-fs" }
 sysevent-winevent = { path = "../crates/sysevent-winevent" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 thiserror = "2"
@@ -128,7 +130,9 @@ tonic-build = "0.12"
 protoc-bin-vendored = "3"
 
 [dev-dependencies]
+private-fs = { path = "../crates/private-fs" }
 rstest = "0.25"
+time = { version = "0.3", features = ["parsing"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 expect-test = "1.5"

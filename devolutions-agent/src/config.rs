@@ -26,6 +26,7 @@ pub struct Conf {
     pub pedm: dto::PedmConf,
     pub session: dto::SessionConf,
     pub package_broker: dto::PackageBrokerConf,
+    pub device_management: dto::DeviceManagementConf,
     pub tunnel: TunnelConf,
     pub psu_agent: Option<PsuConf>,
     pub proxy: dto::ProxyConf,
@@ -324,6 +325,7 @@ impl Conf {
                 .pipe(Option::<PsuConf>::try_from)
                 .context("invalid PSU agent config")?,
             package_broker: conf_file.package_broker.clone().unwrap_or_default(),
+            device_management: conf_file.device_management.clone().unwrap_or_default(),
             tunnel: conf_file
                 .tunnel
                 .clone()
@@ -687,6 +689,26 @@ pub mod dto {
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
+    pub struct DeviceManagementConf {
+        /// Allow remote inventory requests.
+        #[serde(default = "default_true")]
+        pub remote_inventory_enabled: bool,
+        /// Allow remote package writes.
+        #[serde(default = "default_true")]
+        pub remote_writes_enabled: bool,
+    }
+
+    impl Default for DeviceManagementConf {
+        fn default() -> Self {
+            Self {
+                remote_inventory_enabled: true,
+                remote_writes_enabled: true,
+            }
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     pub struct TunnelConf {
         /// Enable tunnel module
         pub enabled: bool,
@@ -883,6 +905,10 @@ pub mod dto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub package_broker: Option<PackageBrokerConf>,
 
+        /// Remote device-management configuration.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub device_management: Option<DeviceManagementConf>,
+
         /// Agent Tunnel configuration
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tunnel: Option<TunnelConf>,
@@ -926,6 +952,7 @@ pub mod dto {
                 debug: None,
                 session: Some(SessionConf { enabled: false }),
                 package_broker: None,
+                device_management: None,
                 tunnel: None,
                 psu_agent: None,
                 rest: serde_json::Map::new(),
@@ -1229,6 +1256,31 @@ mod tests {
         assert!(
             format!("{error:#}").contains("invalid Tunnel.HeartbeatIntervalSecs and Tunnel.RouteAdvertiseIntervalSecs")
         );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §channel
+    #[test]
+    fn device_management_switches_default_to_enabled_independently() {
+        let defaults: dto::ConfFile = serde_json::from_value(serde_json::json!({})).expect("default configuration");
+        let defaults = Conf::from_conf_file(&defaults).expect("valid configuration");
+        assert!(defaults.device_management.remote_inventory_enabled);
+        assert!(defaults.device_management.remote_writes_enabled);
+
+        let partial: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "DeviceManagement": { "RemoteInventoryEnabled": false }
+        }))
+        .expect("partial device-management configuration");
+        let partial = Conf::from_conf_file(&partial).expect("valid configuration");
+        assert!(!partial.device_management.remote_inventory_enabled);
+        assert!(partial.device_management.remote_writes_enabled);
+
+        let partial: dto::ConfFile = serde_json::from_value(serde_json::json!({
+            "DeviceManagement": { "RemoteWritesEnabled": false }
+        }))
+        .expect("partial device-management configuration");
+        let partial = Conf::from_conf_file(&partial).expect("valid configuration");
+        assert!(partial.device_management.remote_inventory_enabled);
+        assert!(!partial.device_management.remote_writes_enabled);
     }
 
     #[test]

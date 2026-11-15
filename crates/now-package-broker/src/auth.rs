@@ -254,6 +254,11 @@ impl PipeClient {
         &self.executable_path
     }
 
+    /// Creation time of the retained process, which tells a process instance from a recycled process ID.
+    pub(crate) fn process_creation_time(&self) -> SystemTime {
+        self.process_creation_time
+    }
+
     pub(crate) fn session_id(&self) -> anyhow::Result<u32> {
         self.impersonation_token
             .as_ref()

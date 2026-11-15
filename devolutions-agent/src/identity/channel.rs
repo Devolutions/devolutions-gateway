@@ -17,6 +17,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::runner::config_revision;
+use crate::device_management::DeviceManagementContext;
 
 /// The most acknowledgements a queued config holds, its own included.
 ///
@@ -214,13 +215,24 @@ struct Status {
 }
 
 impl<C: LinkChannel + Send + 'static> Streams<C> {
-    /// Starts the task of the identity `identity_id`; it must be called within a Tokio runtime.
+    /// Starts the task of the identity `identity_id` with no device-management services.
+    #[cfg(test)]
     pub(super) fn spawn(identity_id: Uuid) -> Self {
+        Self::spawn_with(identity_id, Uuid::nil(), DeviceManagementContext::default())
+    }
+
+    /// Starts the task of the identity `identity_id` of the authority `authority_id`, whose links serve
+    /// device-management requests through `device_management`; it must be called within a Tokio runtime.
+    pub(super) fn spawn_with(
+        identity_id: Uuid,
+        authority_id: Uuid,
+        device_management: DeviceManagementContext,
+    ) -> Self {
         let (commands, command_receiver) = mpsc::unbounded_channel();
         let inbox = Arc::new(Inbox::default());
         let (status_sender, status) = watch::channel(Status::default());
         let task = tokio::spawn(run_streams(
-            Links::new(identity_id),
+            Links::with_device_management(identity_id, authority_id, device_management),
             command_receiver,
             Arc::clone(&inbox),
             status_sender,
@@ -350,6 +362,9 @@ async fn run_streams<C: LinkChannel>(
 /// authority would answer with the terminal `identity_unknown`.
 pub(super) struct Links<C> {
     identity_id: Uuid,
+    /// Stable across re-enrollment, unlike `identity_id`.
+    authority_id: Uuid,
+    device_management: DeviceManagementContext,
     workers_shutdown: watch::Sender<bool>,
     want: Want,
     /// The stream in use.
@@ -397,9 +412,20 @@ enum Role {
 }
 
 impl<C: LinkChannel> Links<C> {
+    #[cfg(test)]
     pub(super) fn new(identity_id: Uuid) -> Self {
+        Self::with_device_management(identity_id, Uuid::nil(), DeviceManagementContext::default())
+    }
+
+    pub(super) fn with_device_management(
+        identity_id: Uuid,
+        authority_id: Uuid,
+        device_management: DeviceManagementContext,
+    ) -> Self {
         Self {
             identity_id,
+            authority_id,
+            device_management,
             workers_shutdown: watch::channel(false).0,
             want: Want::Nothing,
             active: None,
@@ -577,7 +603,9 @@ impl<C: LinkChannel> Links<C> {
             Some(Event::DeviceManagement { id, request }) => {
                 if let Some(reporter) = self.link(role).and_then(|link| link.channel.reporter()) {
                     crate::device_management::handle(
+                        self.device_management.clone(),
                         self.identity_id,
+                        self.authority_id,
                         id,
                         request,
                         reporter,
