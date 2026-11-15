@@ -32,9 +32,6 @@ codegen-units = 1
 lto = true
 
 [patch.crates-io]
-now-policy = { git = "https://github.com/Devolutions/now-libraries.git", rev = "353659aa86f10ac25f54a51ce3ad33e65ab6de64" }
-now-policy-api = { git = "https://github.com/Devolutions/now-libraries.git", rev = "353659aa86f10ac25f54a51ce3ad33e65ab6de64" }
-now-policy-server-template = { git = "https://github.com/Devolutions/now-libraries.git", rev = "353659aa86f10ac25f54a51ce3ad33e65ab6de64" }
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
 
 [workspace.lints.rust]

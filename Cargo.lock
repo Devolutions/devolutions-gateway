@@ -5246,7 +5246,8 @@ dependencies = [
 [[package]]
 name = "now-policy"
 version = "0.5.0"
-source = "git+https://github.com/Devolutions/now-libraries.git?rev=353659aa86f10ac25f54a51ce3ad33e65ab6de64#353659aa86f10ac25f54a51ce3ad33e65ab6de64"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14bf619b405ffb47839ee24baebe1866009d1aea49b112afe0da1465fda7e700"
 dependencies = [
  "chrono",
  "schemars 0.9.0",
@@ -5259,8 +5260,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.7.0"
-source = "git+https://github.com/Devolutions/now-libraries.git?rev=353659aa86f10ac25f54a51ce3ad33e65ab6de64#353659aa86f10ac25f54a51ce3ad33e65ab6de64"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d72b70c897187df0bb789335d51b709113eb9f0784e0f69f05fc501d8919b05"
 dependencies = [
  "chrono",
  "derive_more",
@@ -5275,8 +5277,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-server-template"
-version = "0.7.0"
-source = "git+https://github.com/Devolutions/now-libraries.git?rev=353659aa86f10ac25f54a51ce3ad33e65ab6de64#353659aa86f10ac25f54a51ce3ad33e65ab6de64"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cb17df500bcc9d9a5909eee68e5bfd66c6b15dae56ca7b1473f2c6d6fd537a9"
 dependencies = [
  "aide 0.15.1",
  "async-trait",
