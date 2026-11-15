@@ -172,7 +172,7 @@ message InstalledPackage {
   string scope = 7;
   // Canonical broker source name. Empty when unavailable.
   string source_name = 8;
-  // Manager-reported scope, which does not establish ownership.
+  // Manager-reported scope; ownership requires a manager-specific mapping.
   string reported_scope = 9;
 }
 
@@ -213,6 +213,8 @@ message PackageOperationRequest {
   string scope = 8;
   string target_user_uuid = 9;
   string registry_epoch = 10;
+  // The selected inventory row's reported scope; present for update and uninstall.
+  optional string reported_scope = 11;
 }
 
 // Answer to PackageOperationRequest.

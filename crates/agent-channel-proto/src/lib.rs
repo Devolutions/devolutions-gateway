@@ -68,6 +68,19 @@ mod tests {
         );
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn operation_reported_scope_distinguishes_empty_from_absent() {
+        let mut operation = PackageOperationRequest::default();
+        assert!(operation.encode_to_vec().is_empty());
+
+        operation.reported_scope = Some(String::new());
+        assert_eq!(operation.encode_to_vec(), [0x5a, 0]);
+
+        operation.reported_scope = Some("machine".to_owned());
+        assert_eq!(operation.encode_to_vec(), text_field(11, "machine"));
+    }
+
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §channel
     #[test]
     fn discovery_and_inventory_encode_epochs_and_scan_times() {

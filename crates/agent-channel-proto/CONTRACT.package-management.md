@@ -37,7 +37,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_uuid`, `registry_epoch`, `page_index`, `page_count`, `scan_completed_at`, `update_scan_completed_at`, `packages`, `managers`, `sources` |
 | `InventoryUnavailable` | Agent to Authority | `target_user_uuid`, `registry_epoch`, `reason` |
 | `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope`, `reported_scope` |
-| `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_uuid`, `registry_epoch` |
+| `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_uuid`, `registry_epoch`, `reported_scope` |
 | `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `grant` |
 | `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `grant` |
 | `PackageOperationResult` | Agent to Authority | `operation_id`, `success`, `error`, `status`, `execution_started` |
@@ -178,7 +178,7 @@ Responses may arrive in any order, and the Agent has at most 8 outstanding reque
 | `ListSources` | none | the JSON array served by `GET /uniget/v1/sources` |
 | `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
 | `GetPackageVersions` | `manager`, `sourceName`, `packageId` | `{ "versions": [string] }` |
-| `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
+| `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
 The `GetInventorySnapshot` arrays use the item shapes of the corresponding list commands, subject to the source-safety rules in `CONTRACT.package-management.md §inventory`.
 An installed-package item may omit `systemRestartPending` when no value was captured in memory.
@@ -187,6 +187,8 @@ An installed-package item may omit `systemRestartPending` when no value was capt
 When UniGetUI cannot produce the installed snapshot required by `CONTRACT.package-management.md §inventory`, it answers `Failed` or `UnsupportedCommand` without a snapshot.
 `operation` is `Install`, `Update` or `Uninstall`; `version` and `scope` are empty when not requested.
 `sourceName` is empty for uninstall and may be empty for update, as specified in `CONTRACT.package-management.md §operations`.
+For update and uninstall, `reportedScope` is the selected inventory row's `reported_scope`, including an empty string when no scope was reported.
+For install, `reportedScope` is omitted.
 UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
 `Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
 A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless trusted Broker evidence establishes the outcome.
@@ -235,7 +237,11 @@ The Authority does not treat an available version as proof or authorization.
 Every inventory request includes the target user UUID, as do install, update and uninstall requests.
 The ownership `scope` is `USER`, `MACHINE` or `UNKNOWN`.
 The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping establishes that ownership; otherwise it is `UNKNOWN`.
+When WinGet itself reports `user` or `machine`, the Agent maps it to `USER` or `MACHINE`, respectively.
+An unverified scope string alone does not establish that WinGet reported it.
+All other managers have `UNKNOWN` ownership.
 `reported_scope` preserves UniGetUI's raw `reportedScope` value separately from ownership.
+When `reportedScope` is null or absent, `reported_scope` is empty.
 UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish ownership across managers.
 The Authority does not use `reported_scope` to deduplicate machine-wide installations or authorize machine-wide changes.
 The scope-label definitions are in [UniGetUI package scope aliases].
@@ -284,17 +290,21 @@ Omission from a snapshot does not prove that a package was uninstalled.
 ## Package operations
 
 The operation type is exactly one of `install`, `update` or `uninstall`.
-Remote writes allow install, update and uninstall in user scope for Broker-supported managers and in both scopes for WinGet.
-Unknown scope and other machine-scope requests are rejected without execution.
-User-scope operations run unelevated with the target user's token.
+Remote writes allow install, update and uninstall for Broker-supported managers when they run unelevated with the target user's token.
+Elevated operations are limited to WinGet in machine scope.
 When a Broker builder supports a scope selector, it passes the requested scope to the manager.
 An install may replace an existing installation when the manager cannot prevent it.
-The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope, target user UUID and registry epoch, but no bypass token.
+The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope, target user UUID, registry epoch and selected row's reported scope when applicable, but no bypass token.
 An install requires a nonempty canonical Broker source name, not the inventory display label.
 An update may name its current execution feed or leave the source empty to use the manager's normal default feed.
 Uninstall uses no feed and carries an empty source.
-Update and uninstall identify the installed package by manager, package ID and scope without proving its original source.
-UniGetUI rejects a write targeting an existing installation when it cannot identify the authorized row in the requested scope.
+Update and uninstall identify the installed package by manager, package ID and the selected inventory row's raw `reported_scope` without proving its original source.
+`PackageOperationRequest.reported_scope` is optional string field 11 and is present for update and uninstall, even when empty, and absent for install.
+The Authority copies that field from the selected observation without changing it.
+The Agent rejects an update or uninstall when that field is absent, and forwards it to UniGetUI unchanged as `reportedScope`.
+UniGetUI rejects a write targeting an existing installation when it cannot identify the authorized row.
+An installation with `UNKNOWN` ownership may be updated or uninstalled unelevated.
+An elevated update or uninstall is permitted only for a WinGet installation whose machine ownership is established by WinGet.
 When the manager cannot select the requested scope, UniGetUI checks its current installed list immediately before submission.
 It rejects the operation unless exactly one listed installation matches the manager and package ID and that installation is the authorized row.
 The installed list may omit an installation that the manager can act on, so the manager may affect another installation accessible to the target user's unelevated token.
@@ -327,7 +337,6 @@ An alias without an agreed mapping is rejected.
 For an update with an empty source, `Source.Name` is empty and `Source.Url` is absent; the grant binds the choice of the manager's default feed.
 For uninstall, `Source.Name` is empty and `Source.Url` is absent.
 An empty requested version requires an absent Broker `Package.Version`; a nonempty requested version must not be dropped or replaced.
-An empty requested scope requires an absent Broker `Options.Scope`.
 A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
 The Broker rejects any `Source.Url` the grant does not authorize.
 Matching a source name or URL in the request alone does not establish the feed the manager uses.
@@ -350,7 +359,7 @@ The Broker requires `Client.Transport` to be `HttpNamedPipe` and `Client.Request
 It resolves `Client.EffectiveUser` to the authenticated pipe caller's SID and verifies `Client.ClientExecutablePath` against the retained process image.
 Those two string values are excluded from the grant; their verified SID and image must match the authenticated process, and the SID must match the grant.
 `Client.ClientVersion` is excluded from the grant and is not evidence of authorization.
-The actual execution token must be elevated exactly when `Options.Scope` is `Machine` or the grant authorizes `RequestedElevation` as `Elevated`.
+The actual execution token must have exactly the elevation bound to the grant.
 The Broker rejects an elevated request unless the Authority's scope authorizes machine effects.
 `IncludeCommandPreview` must be false, and `CaptureOutput` must be true.
 UniGetUI uses captured stdout and stderr only for local result parsing; it does not send them to the Agent or Authority or write them to logs.
