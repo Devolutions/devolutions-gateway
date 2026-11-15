@@ -90,13 +90,12 @@ Before sending any frame, UniGetUI authenticates the server.
 After connecting, it obtains the server process ID with `GetNamedPipeServerProcessId` and the server session ID with `GetNamedPipeServerSessionId`.
 It then queries the `DevolutionsAgent` service with `QueryServiceStatusEx` and accepts the server only when the service is running, its process ID equals the server process ID, and the server session ID is 0.
 The service name is fixed in UniGetUI and never taken from the server.
-UniGetUI does not open the server process, because a standard user cannot open a SYSTEM service process with any access.
+UniGetUI does not open the server process, because a standard user cannot obtain the process access needed to pin a SYSTEM service process.
 This check assumes that the Service Control Manager holds the service process handle until it reports the service stopped, so a running service's process ID cannot belong to another process.
 On any failure, UniGetUI closes the connection without sending data and retries under the reconnect rules.
 UniGetUI applies the same check to every Broker execution pipe connection before writing to it.
 On the execution pipe, a failed check is a transport failure that is never retried on another route; after the request was sent, the outcome is `UNKNOWN`.
-Pipe authentication establishes the user SID and session, not the integrity of one process against code running as the same user.
-A process running as the same user can duplicate UniGetUI's pipe handles or read its memory, so neither side relies on process-level confidentiality within one user.
+Same-user code can duplicate UniGetUI's pipe handles, so process-level output confidentiality remains an unresolved security requirement.
 The Agent identifies the client with `GetNamedPipeClientProcessId` and keeps a handle to that process for the life of the connection.
 From that process's token it takes the user SID and session ID.
 It accepts the client only when the executable is a signature-verified `UniGetUI.exe`, the token is not elevated, and the session is a logged-on user session.
