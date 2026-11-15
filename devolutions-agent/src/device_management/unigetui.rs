@@ -7,11 +7,15 @@
 use std::mem::size_of;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 use agent_channel_proto::{InstalledPackage, PackageManager, PackageSource};
-use anyhow::{Context as _, bail};
+#[cfg(any(windows, test))]
+use anyhow::Context as _;
+use anyhow::bail;
 #[cfg(windows)]
 use now_package_broker::server::ProcessIdentity;
 use serde::Deserialize;
@@ -36,15 +40,19 @@ const INSTALLED_PACKAGES_PATH: &str = "/uniget/v1/packages/installed";
 const UPGRADABLE_PACKAGES_PATH: &str = "/uniget/v1/packages/updates";
 const MANAGERS_PATH: &str = "/uniget/v1/managers";
 const SOURCES_PATH: &str = "/uniget/v1/sources";
+#[cfg(windows)]
 const DEFAULT_PIPE_NAME: &str = "UniGetUI.IPC";
+#[cfg(windows)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[cfg(windows)]
 #[derive(Debug, Clone)]
 enum Transport {
     Tcp(u16),
     NamedPipe(String),
 }
 
+#[cfg(windows)]
 #[derive(Debug, Clone)]
 struct Endpoint {
     file: PathBuf,
@@ -53,6 +61,7 @@ struct Endpoint {
     persisted_at: String,
 }
 
+#[cfg(windows)]
 #[derive(Debug, Clone)]
 struct EndpointIdentity {
     user_sid: String,
@@ -61,19 +70,26 @@ struct EndpointIdentity {
     signature_verified: bool,
 }
 
+#[cfg(windows)]
 #[derive(Debug, Clone)]
 struct DiscoveredEndpoint {
     endpoint: Endpoint,
     identity: EndpointIdentity,
-    #[cfg(windows)]
     process: Option<ProcessIdentity>,
 }
 
+#[cfg(windows)]
 #[derive(Debug, Clone)]
 pub(super) struct TargetInstance {
     endpoint: DiscoveredEndpoint,
 }
 
+/// UniGetUI targets cannot be resolved off Windows, so no instance exists.
+#[cfg(not(windows))]
+#[derive(Debug, Clone)]
+pub(super) enum TargetInstance {}
+
+#[cfg(windows)]
 fn select_target_endpoint<'a>(
     endpoints: &'a [DiscoveredEndpoint],
     target_user_sid: &str,
@@ -83,6 +99,7 @@ fn select_target_endpoint<'a>(
         .find(|endpoint| endpoint.identity.signature_verified && endpoint.identity.user_sid == target_user_sid)
 }
 
+#[cfg(windows)]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Registration {
@@ -90,8 +107,6 @@ struct Registration {
     transport: Option<serde_json::Value>,
     tcp_port: Option<u16>,
     named_pipe_name: Option<String>,
-    #[cfg_attr(windows, allow(dead_code))]
-    named_pipe_path: Option<String>,
     persisted_at_utc: Option<String>,
 }
 
@@ -164,12 +179,12 @@ struct IpcSource {
 }
 
 pub(super) async fn installed_packages(instance: &TargetInstance) -> anyhow::Result<Vec<InstalledPackage>> {
-    let packages: Vec<IpcPackage> = get_json_on_endpoint(&instance.endpoint, INSTALLED_PACKAGES_PATH, &[]).await?;
+    let packages: Vec<IpcPackage> = get_json_on_endpoint(instance, INSTALLED_PACKAGES_PATH, &[]).await?;
     let mut packages: Vec<InstalledPackage> = packages.into_iter().map(Into::into).collect();
 
     // The installed list does not include the newer version, so merge it from the updates list.
     // A failure here only hides the available versions; the inventory is still valid.
-    match get_json_on_endpoint::<Vec<IpcPackage>>(&instance.endpoint, UPGRADABLE_PACKAGES_PATH, &[]).await {
+    match get_json_on_endpoint::<Vec<IpcPackage>>(instance, UPGRADABLE_PACKAGES_PATH, &[]).await {
         Ok(upgradable) => merge_available_versions(&mut packages, upgradable),
         Err(error) => warn!(
             error = format!("{error:#}"),
@@ -197,7 +212,7 @@ fn merge_available_versions(packages: &mut [InstalledPackage], upgradable: Vec<I
 }
 
 pub(super) async fn managers(instance: &TargetInstance) -> anyhow::Result<(Vec<PackageManager>, bool)> {
-    let managers: Vec<IpcManager> = get_json_on_endpoint(&instance.endpoint, MANAGERS_PATH, &[]).await?;
+    let managers: Vec<IpcManager> = get_json_on_endpoint(instance, MANAGERS_PATH, &[]).await?;
     let has_loading_manager = managers.iter().any(is_manager_loading);
     // The IPC API does not expose the manager version. "Ready" means that UniGetUI found the manager executable.
     let managers = managers
@@ -213,7 +228,7 @@ pub(super) async fn managers(instance: &TargetInstance) -> anyhow::Result<(Vec<P
 }
 
 pub(super) async fn sources(instance: &TargetInstance) -> anyhow::Result<Vec<PackageSource>> {
-    let sources: Vec<IpcSource> = get_json_on_endpoint(&instance.endpoint, SOURCES_PATH, &[]).await?;
+    let sources: Vec<IpcSource> = get_json_on_endpoint(instance, SOURCES_PATH, &[]).await?;
     Ok(sources
         .into_iter()
         .map(|source| PackageSource {
@@ -265,10 +280,11 @@ pub(super) async fn instances() -> anyhow::Result<Vec<agent_channel_proto::UniGe
 
 #[cfg(windows)]
 async fn get_json_on_endpoint<T: DeserializeOwned>(
-    endpoint: &DiscoveredEndpoint,
+    instance: &TargetInstance,
     path: &str,
     parameters: &[(&str, &str)],
 ) -> anyhow::Result<T> {
+    let endpoint = &instance.endpoint;
     let query = {
         let mut serializer = url::form_urlencoded::Serializer::new(String::new());
         serializer.append_pair("token", &endpoint.endpoint.token);
@@ -295,11 +311,11 @@ async fn get_json_on_endpoint<T: DeserializeOwned>(
 
 #[cfg(not(windows))]
 async fn get_json_on_endpoint<T: DeserializeOwned>(
-    _endpoint: &DiscoveredEndpoint,
+    instance: &TargetInstance,
     _path: &str,
     _parameters: &[(&str, &str)],
 ) -> anyhow::Result<T> {
-    bail!("verified UniGetUI target routing is only supported on Windows")
+    match *instance {}
 }
 
 #[cfg(windows)]
@@ -350,6 +366,7 @@ async fn query_verified_endpoint(endpoint: &DiscoveredEndpoint, path_and_query: 
     Ok(body)
 }
 
+#[cfg(windows)]
 fn discover_endpoints() -> anyhow::Result<Vec<Endpoint>> {
     let mut endpoints = Vec::new();
     for directory in registration_directories()? {
@@ -586,6 +603,7 @@ fn tcp_owner_table(table_class: TCP_TABLE_CLASS) -> anyhow::Result<Vec<usize>> {
     Ok(buffer)
 }
 
+#[cfg(windows)]
 fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -621,14 +639,6 @@ fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| DEFAULT_PIPE_NAME.to_owned());
 
-        // On Unix the pipe is a socket file; UniGetUI resolves relative names under /tmp.
-        #[cfg(unix)]
-        let name = match registration.named_pipe_path.filter(|path| !path.is_empty()) {
-            Some(path) => path,
-            None if name.starts_with('/') => name,
-            None => format!("/tmp/{name}"),
-        };
-
         Transport::NamedPipe(name)
     };
 
@@ -638,33 +648,6 @@ fn parse_registration(path: &Path) -> anyhow::Result<Option<Endpoint>> {
         transport,
         persisted_at: registration.persisted_at_utc.unwrap_or_default(),
     }))
-}
-
-#[cfg(unix)]
-fn registration_directories() -> anyhow::Result<Vec<PathBuf>> {
-    const RELATIVE: [&str; 5] = [".local", "share", "UniGetUI", "Configuration", "IpcApiEndpoints"];
-
-    let home_roots = if cfg!(target_os = "macos") { "/Users" } else { "/home" };
-    let mut homes = Vec::new();
-    match std::fs::read_dir(home_roots) {
-        Ok(entries) => {
-            for entry in entries {
-                homes.push(
-                    entry
-                        .context("failed to read UniGetUI user home directory entry")?
-                        .path(),
-                );
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).context("failed to read UniGetUI user home directories"),
-    }
-    homes.push(PathBuf::from("/root"));
-
-    Ok(homes
-        .into_iter()
-        .map(|home| RELATIVE.iter().fold(home, |acc, part| acc.join(part)))
-        .collect())
 }
 
 #[cfg(windows)]
@@ -775,6 +758,7 @@ fn portable_registration_directory(installation_directory: &Path) -> Option<Path
     })
 }
 
+#[cfg(windows)]
 async fn stream_request<S>(mut pipe: S, path_and_query: &str) -> anyhow::Result<String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -800,6 +784,7 @@ where
     parse_http_response(&response)
 }
 
+#[cfg(any(windows, test))]
 fn parse_http_response(response: &[u8]) -> anyhow::Result<String> {
     let header_end = response
         .windows(4)
@@ -824,6 +809,7 @@ fn parse_http_response(response: &[u8]) -> anyhow::Result<String> {
     Ok(body)
 }
 
+#[cfg(any(windows, test))]
 fn decode_chunked(mut input: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut output = Vec::new();
     loop {
@@ -858,6 +844,7 @@ mod tests {
         assert!(!error.to_string().contains("ipc-secret-x"));
     }
 
+    #[cfg(windows)]
     fn endpoint(file: &str, user_sid: &str) -> DiscoveredEndpoint {
         DiscoveredEndpoint {
             endpoint: Endpoint {
@@ -872,11 +859,11 @@ mod tests {
                 display_name: "DOMAIN\\user (session 1)".to_owned(),
                 signature_verified: true,
             },
-            #[cfg(windows)]
             process: None,
         }
     }
 
+    #[cfg(windows)]
     #[test]
     fn target_resolution_selects_an_endpoint_owned_by_the_requested_sid() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
@@ -893,6 +880,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn target_resolution_does_not_fall_back_to_another_sid() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
@@ -901,6 +889,7 @@ mod tests {
         assert!(select_target_endpoint(&endpoints, "S-1-5-21-200").is_none());
     }
 
+    #[cfg(windows)]
     #[test]
     fn target_resolution_rejects_an_unverified_endpoint() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
@@ -910,6 +899,7 @@ mod tests {
         assert!(select_target_endpoint(&[endpoint], "S-1-5-21-200").is_none());
     }
 
+    #[cfg(windows)]
     #[test]
     fn target_resolution_accepts_another_live_session_of_the_same_sid() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
