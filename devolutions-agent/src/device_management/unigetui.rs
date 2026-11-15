@@ -557,10 +557,7 @@ mod tests {
         ];
         for key in ["completedAt", "managers", "sources", "installedPackages"] {
             let mut value = snapshot(Value::Null, vec![], vec![]);
-            value
-                .as_object_mut()
-                .expect("snapshot is an object")
-                .remove(key);
+            value.as_object_mut().expect("snapshot is an object").remove(key);
             cases.push(value);
         }
         let mut value = snapshot(Value::Null, vec![], vec![]);
@@ -576,10 +573,7 @@ mod tests {
         ]);
         cases.push(value);
         let mut value = snapshot(json!("2024-01-01T00:00:10Z"), vec![], vec![]);
-        value
-            .as_object_mut()
-            .expect("snapshot is an object")
-            .remove("updates");
+        value.as_object_mut().expect("snapshot is an object").remove("updates");
         cases.push(value);
 
         for value in cases {
