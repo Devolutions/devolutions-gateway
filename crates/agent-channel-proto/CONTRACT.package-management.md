@@ -34,7 +34,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `UniGetUiInstance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
 | `SyncInventory` | Authority to Agent | `target_user_sid` |
 | `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `packages`, `managers`, `sources` |
-| `InstalledPackage` | Agent to Authority | `manager`, `source`, `id`, `name`, `version`, `available_version`, `scope` |
+| `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope` |
 | `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_sid` |
 | `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `bypass_token` |
 | `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `bypass_token` |
@@ -58,6 +58,8 @@ Remote writes never fall back to local package execution.
 ## Inventory
 
 Each package entry contains its manager, source, package ID, name, installed version, available version and scope.
+`source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity is unavailable.
+UniGetUI supplies the canonical name as `sourceName`; the Agent preserves both fields without deriving one from the other.
 Every inventory request includes the target user SID, as do install, update and uninstall requests.
 Values with confirmed machine or user semantics distinguish those installations; other manager-relative values are not interpreted without a mapping.
 Inventory preserves the scope values UniGetUI exposes without conversion to a narrower set.
@@ -78,12 +80,21 @@ These gaps are visible in the [UniGetUI package model], [UniGetUI IPC package ty
 
 The operation type is exactly one of `install`, `update` or `uninstall`.
 The Authority-to-Agent request contains an operation ID, operation type, manager, source, package ID, requested version when applicable, scope and target user SID, but no bypass token.
+The operation's source is the nonempty canonical Broker source name, not the inventory display label.
+When the canonical source name is unavailable, the operation is rejected without execution.
 The Agent mints an opaque, short-lived, single-use grant, also called a bypass token, held in the Broker's memory.
 The grant binds the target user SID, operation type, manager, source, package ID, version, scope, requested elevation and Broker request ID.
-UniGetUI sends the grant unchanged in the `X-Devolutions-Package-Grant` header of the Broker's grant-execution request over the named pipe while running unelevated as the target user.
+UniGetUI sends `POST /v1/package-operations/execute-grant` over the Broker's named pipe while running unelevated as the target user.
+The request uses `Accept: application/json` and carries the grant unchanged in exactly one `X-Devolutions-Package-Grant` header.
 The grant contains only visible ASCII characters, so it cannot inject another header.
 The Broker independently validates the decoded request and the pipe caller's SID against the grant before execution, and consumes a matching grant atomically.
 The Broker rejects an invalid, expired, reused or mismatched grant rather than applying local policy.
+The Broker rejects missing, duplicate, invalid or unsupported grant requests before consuming a grant or starting work.
+The legacy `POST /v1/package-operations/execute` route rejects any request carrying the grant header.
+If the grant route is unavailable, including an older Broker's 404 response, UniGetUI does not retry through the legacy route or execute locally.
+Grant-execution responses set `Authorization.Kind` to `RemoteGrant` without reporting a local policy, decision or rule.
+Responses contain no grant value, captured stdout or stderr, or command preview.
+The exact grant-execution JSON, error bodies and HTTP status codes remain unresolved.
 The Agent, UniGetUI and Broker reject execution-affecting fields not authorized by the grant.
 The Authority request does not authorize custom parameters, hooks or other execution options, so remote requests carrying them are rejected.
 UniGetUI's broker request builder maps source, custom parameters and pre-operation, post-operation and kill-before-operation commands into the request.
@@ -96,7 +107,9 @@ An alias without an agreed mapping is rejected.
 An empty requested version requires an absent Broker `Package.Version`; a nonempty requested version must not be dropped or replaced.
 An empty requested scope requires an absent Broker `Options.Scope`.
 A `User` or `Machine` scope is compared case-insensitively to `Options.Scope`; other scope labels are rejected until their mappings are agreed.
-The Broker rejects `Source.Url`, `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
+The Broker rejects any `Source.Url` the Authority has not authorized.
+The representation and manager-specific validation of authorized source URLs remain unresolved.
+It rejects `Package.Architecture`, `Package.Channel`, a custom install location, custom parameters, pre-operation or post-operation commands, and kill-before-operation entries.
 It also rejects `Interactive`, `SkipHashCheck`, `PreRelease`, `UninstallPrevious` and `NoUpgrade` when true.
 Any future execution-affecting request field must be explicitly authorized or rejected.
 
@@ -127,6 +140,8 @@ Mixed versions that do not satisfy this requirement are unsupported.
 The Agent records an operation before submitting it and does not submit another operation for the same operation ID.
 Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
 A repeated operation ID with a different payload is rejected.
+When deduplication state cannot be recovered, the Agent does not treat an operation ID as new and reports `UNKNOWN`.
+The Authority may submit a new operation ID after an `UNKNOWN` outcome only by explicitly accepting that the earlier operation may have completed.
 The Broker's request-ID replay tracking does not replace this Authority operation-ID tracking.
 The Broker status API requires the Broker-issued operation ID; if that ID is lost with the submission response and the outcome cannot otherwise be recovered, the Agent reports `UNKNOWN`.
 A confirmed rejection before submission is a failure, but a lost or malformed response after submission is not evidence of failure.
@@ -169,12 +184,12 @@ The requested-version field is optional where an operation does not use a versio
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
 A transport disconnection does not prove that an operation failed.
 The Agent does not replay an operation automatically after disconnection or restart.
-When the status is `UNKNOWN`, the Authority decides whether to resubmit with a new token.
 
 <a id="external-changes"></a>
 ## Required changes outside this repository
 
 UniGetUI must add scope to its package model and installed IPC response while including scope in package identity so user and machine installations remain distinct.
+UniGetUI must expose each package's canonical Broker source name as `sourceName` independently of its display label.
 UniGetUI must pass the Agent-minted operation token through IPC to the package broker's named pipe without elevating its process.
 UniGetUI must reject remote operations when broker routing is disabled, the manager is unsupported, the source cannot use broker routing, or the token does not authorize all execution-affecting fields; it must not fall back to local process execution.
 This fail-closed requirement covers the existing local-fallback paths in [PackageOperations.cs][UniGetUI operation fallback].
