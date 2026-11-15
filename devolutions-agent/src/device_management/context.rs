@@ -144,3 +144,96 @@ impl DeviceManagementContext {
         self.journal.as_ref()
     }
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use agent_channel_proto::{PackageOperationRequest, PackageOperationStatus};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::device_management::operation;
+    use crate::device_management::operation_journal::{Admission, Outcome, Settled};
+
+    #[tokio::test]
+    async fn recorded_failure_with_empty_error_is_unknown() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
+        let data = Utf8Path::from_path(root.path()).expect("data path is UTF-8");
+        let request = PackageOperationRequest {
+            operation_id: "operation-1".to_owned(),
+            ..Default::default()
+        };
+        let authority = Uuid::nil();
+        let journal = OperationJournal::open(data)?;
+        assert_eq!(journal.admit(&authority.to_string(), &request)?, Admission::Admitted);
+        journal.complete(
+            &authority.to_string(),
+            &request,
+            Outcome::Failed {
+                error: "rejected".to_owned(),
+            },
+        )?;
+        drop(journal);
+
+        let records = data.join("package-operations").join("records");
+        let record = std::fs::read_dir(records)?
+            .map(|entry| entry.expect("record entry is readable").path())
+            .find(|path| path.file_name().expect("record has a name") != "journal.json")
+            .expect("operation record exists");
+        let mut stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&record)?)?;
+        stored["outcome"]["failed"]["error"] = String::new().into();
+        std::fs::write(record, serde_json::to_vec(&stored)?)?;
+
+        let context = DeviceManagementContext {
+            journal: Some(Arc::new(OperationJournal::open(data)?)),
+            ..Default::default()
+        };
+        let result = operation::run(&context, authority, request).await;
+
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn changed_payload_for_recorded_operation_is_unknown() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
+        let data = Utf8Path::from_path(root.path()).expect("data path is UTF-8");
+        let request = PackageOperationRequest {
+            operation_id: "operation-1".to_owned(),
+            package_id: "original".to_owned(),
+            ..Default::default()
+        };
+        let authority = Uuid::nil();
+        let journal = Arc::new(OperationJournal::open(data)?);
+        assert_eq!(journal.admit(&authority.to_string(), &request)?, Admission::Admitted);
+        journal.mark_started(&authority.to_string(), &request)?;
+        journal.complete(&authority.to_string(), &request, Outcome::Succeeded)?;
+        let context = DeviceManagementContext {
+            journal: Some(Arc::clone(&journal)),
+            ..Default::default()
+        };
+        let changed = PackageOperationRequest {
+            package_id: "different".to_owned(),
+            ..request.clone()
+        };
+
+        let result = operation::run(&context, authority, changed).await;
+
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+        assert_eq!(
+            journal.admit(&authority.to_string(), &request)?,
+            Admission::Recorded(Settled {
+                outcome: Outcome::Succeeded,
+                execution_started: Some(true),
+            })
+        );
+        Ok(())
+    }
+}

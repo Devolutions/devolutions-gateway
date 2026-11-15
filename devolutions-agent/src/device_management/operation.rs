@@ -220,7 +220,10 @@ async fn settle(context: DeviceManagementContext, authority_id: String, request:
         }
         Admission::InFlight => wait(journal, authority_id, request).await,
         Admission::Recorded(settled) => settled,
-        Admission::PayloadMismatch => failed("operation ID was used for a different request"),
+        Admission::PayloadMismatch => {
+            warn!("Package operation ID was used for a different request");
+            unknown(false)
+        }
     }
 }
 
@@ -235,15 +238,6 @@ async fn wait(journal: Arc<OperationJournal>, authority_id: String, request: Pac
             unknown(false)
         }
         Err(_) => unknown(false),
-    }
-}
-
-fn failed(error: &str) -> Settled {
-    Settled {
-        outcome: Outcome::Failed {
-            error: error.to_owned(),
-        },
-        execution_started: None,
     }
 }
 
@@ -419,6 +413,7 @@ mod tests {
         );
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn winget_install_binds_no_upgrade_and_elevation_to_scope() {
         let user = Plan::parse(&request(PackageOperationType::Install, "winget", "winget", "USER"))
@@ -437,6 +432,7 @@ mod tests {
         );
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn no_upgrade_is_set_only_for_winget_install() {
         let update = Plan::parse(&request(PackageOperationType::Update, "Winget", "", "user"))
@@ -548,6 +544,7 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn rejects_requests_the_grant_cannot_bind() {
         let cases = [
@@ -576,6 +573,7 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn preserves_version_and_empty_update_source() {
         let plan = Plan::parse(&PackageOperationRequest {
@@ -591,6 +589,7 @@ mod tests {
         assert_eq!(arguments["scope"], "User");
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn results_report_recorded_outcomes() {
         let unknown = result("op".to_owned(), unknown(true));
@@ -598,7 +597,13 @@ mod tests {
         assert!(!unknown.success);
         assert_eq!(unknown.execution_started, Some(true));
 
-        let failure = result("op".to_owned(), failed("nope"));
+        let failure = result(
+            "op".to_owned(),
+            Settled {
+                outcome: failure("nope"),
+                execution_started: None,
+            },
+        );
         assert_eq!(failure.status, i32::from(PackageOperationStatus::Unspecified));
         assert_eq!(
             (failure.success, failure.error.as_str(), failure.execution_started),
@@ -606,6 +611,7 @@ mod tests {
         );
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn dropped_guard_ends_the_in_flight_record_as_unknown() {
         let base = std::env::var_os("LOCALAPPDATA")
@@ -638,6 +644,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(base);
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn operation_without_a_journal_is_unknown_and_never_dispatched() {
         let result = run(

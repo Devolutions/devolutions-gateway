@@ -448,6 +448,10 @@ impl OperationJournal {
             "unsupported package operation record version"
         );
         ensure!(
+            !matches!(&record.outcome, Some(Outcome::Failed { error }) if error.is_empty()),
+            "package operation failure has no error"
+        );
+        ensure!(
             record.operation_id == request.operation_id,
             "package operation record belongs to another operation ID"
         );
@@ -574,6 +578,7 @@ mod tests {
 
     #[test]
     fn first_delivery_is_admitted_and_repeat_is_in_flight() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
         let request = request("op", "pkg");
@@ -585,6 +590,7 @@ mod tests {
 
     #[test]
     fn repeat_after_completion_returns_recorded_outcome() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
         let request = request("op", "pkg");
@@ -604,6 +610,7 @@ mod tests {
 
     #[test]
     fn waiter_receives_the_outcome_of_the_in_flight_operation() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let journal = Arc::new(OperationJournal::open(&data)?);
         let request = Arc::new(request("op", "pkg"));
@@ -631,10 +638,12 @@ mod tests {
 
         journal.admit("authority", &request("op", "pkg"))?;
 
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         assert_eq!(
             journal.admit("authority", &request("op", "other"))?,
             Admission::PayloadMismatch
         );
+        // oracle: mutant a changed payload can record an outcome over the operation it does not match
         assert!(
             journal
                 .complete("authority", &request("op", "other"), Outcome::Succeeded)
@@ -683,6 +692,7 @@ mod tests {
 
     #[test]
     fn pending_record_reads_as_unknown_after_reopen() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
@@ -710,10 +720,12 @@ mod tests {
 
         let journal = OperationJournal::open(&data)?;
 
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
         assert_eq!(
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
         );
+        // oracle: mutant a late or repeated completion overwrites the recorded terminal outcome
         journal.complete("authority", &request, Outcome::Succeeded)?;
         assert!(journal.complete("authority", &request, Outcome::Unknown).is_err());
         assert_eq!(
@@ -725,6 +737,7 @@ mod tests {
 
     #[test]
     fn deleted_record_is_refused_while_the_journal_is_open() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
         let (finished, pending) = (request("finished", "pkg"), request("pending", "pkg"));
@@ -748,6 +761,7 @@ mod tests {
 
     #[test]
     fn deleted_record_is_refused_after_reopen() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
         let (finished, pending) = (request("finished", "pkg"), request("pending", "pkg"));
@@ -772,6 +786,7 @@ mod tests {
 
     #[test]
     fn record_missing_from_the_index_is_refused() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
@@ -793,6 +808,7 @@ mod tests {
 
     #[test]
     fn interrupted_admission_is_refused_and_leftovers_are_ignored() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
@@ -831,6 +847,7 @@ mod tests {
         drop(journal);
 
         // A pending record reads as unknown, keeping the evidence only where it was recorded.
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let journal = OperationJournal::open(&data)?;
         let expected = Settled {
             outcome: Outcome::Unknown,
@@ -850,6 +867,7 @@ mod tests {
         assert_eq!(journal.wait("authority", &started)?, expected);
 
         // Records written before the field existed carry no evidence.
+        // oracle: mutant a record without start evidence is read back as proof that the operation started
         let path = record_path(&data, "unproven");
         let mut record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
         assert_eq!(
@@ -866,6 +884,7 @@ mod tests {
 
     #[test]
     fn wholly_missing_journal_is_created_empty() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
 
@@ -882,6 +901,7 @@ mod tests {
 
     #[test]
     fn partially_missing_journal_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
@@ -900,6 +920,7 @@ mod tests {
 
     #[test]
     fn interrupted_creation_is_completed() -> anyhow::Result<()> {
+        // oracle: mutant a journal left without its index by an interrupted creation is refused or loses later admissions
         let (_dir, data) = data_dir()?;
         drop(OperationJournal::open(&data)?);
         std::fs::remove_file(journal_path(&data).join(INDEX_NAME))?;
@@ -918,7 +939,9 @@ mod tests {
         journal.admit("authority", &request)?;
         journal.complete("authority", &request, Outcome::Succeeded)?;
 
+        // oracle: mutant a second journal owner opens the same directory and overwrites the first owner's admissions
         assert!(OperationJournal::open(&data).is_err());
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
         assert_eq!(
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
@@ -938,6 +961,7 @@ mod tests {
 
     #[test]
     fn malformed_index_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         drop(OperationJournal::open(&data)?);
         std::fs::write(journal_path(&data).join(INDEX_NAME), b"{}")?;
@@ -948,6 +972,7 @@ mod tests {
 
     #[test]
     fn malformed_record_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
@@ -961,6 +986,7 @@ mod tests {
 
     #[test]
     fn record_of_another_operation_fails_closed() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
         journal.admit("authority", &request("other", "pkg"))?;
@@ -979,6 +1005,7 @@ mod tests {
 
     #[test]
     fn empty_ids_are_errors() -> anyhow::Result<()> {
+        // oracle: mutant an empty operation or authority ID is admitted and shares one record
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
 
@@ -989,6 +1016,7 @@ mod tests {
 
     #[test]
     fn concurrent_deliveries_admit_once() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
         let (_dir, data) = data_dir()?;
         let journal = Arc::new(OperationJournal::open(&data)?);
         let request = Arc::new(request("op", "pkg"));
