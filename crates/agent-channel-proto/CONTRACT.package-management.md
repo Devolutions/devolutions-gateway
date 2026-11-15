@@ -255,6 +255,7 @@ It ignores stale, unsolicited, mismatched and already completed reports without 
 
 Each collection has a nonempty `report_id` identifying the snapshot independently of the request UUID.
 All pages of that collection carry the same `report_id` and `page_count`.
+Only page 0 carries the `managers` and `sources` lists; later pages leave both lists empty.
 `scan_completed_at` is `InventoryReport` field 11, a `google.protobuf.Timestamp` that is present and valid on every page.
 It is the completion time of the copied installed scan, not the time the Agent reads or sends the snapshot.
 `update_scan_completed_at` is `InventoryReport` field 12, an optional `google.protobuf.Timestamp` containing the completion time of the update scan.
@@ -341,6 +342,10 @@ For an update with an empty source, `Source.Name` is empty and `Source.Url` is a
 For uninstall, `Source.Name` is empty and `Source.Url` is absent.
 An empty requested version requires an absent Broker `Package.Version`; a nonempty requested version must not be dropped or replaced.
 The Broker compares `Options.Scope` to the scope bound by the grant.
+For WinGet and all installs, that scope is the administrator's requested execution scope.
+For PowerShell and PowerShell 7 updates, and PowerShell 7 uninstalls, `reported_scope` selects the Broker scope: `user` or `machine` ignoring ASCII case maps to `User` or `Machine`, an empty value maps to an absent scope, and any other nonempty value is rejected.
+When that scope is absent, UniGetUI applies the unique-row rule before submission.
+For other updates and uninstalls, the Broker scope is `User` and UniGetUI applies the unique-row rule.
 The Broker rejects any `Source.Url` the grant does not authorize.
 Matching a source name or URL in the request alone does not establish the feed the manager uses.
 For install and update, the grant binds the requested source name or the choice of the target user's default feed.
