@@ -35,7 +35,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `UniGetUiInstancesUnavailable` | Agent to Authority | `reason` |
 | `UniGetUiInstance` | Agent to Authority | `user_uuid`, `display_name`, `session_id`, `signature_verified` |
 | `SyncInventory` | Authority to Agent | `target_user_uuid`, `registry_epoch` |
-| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_uuid`, `registry_epoch`, `page_index`, `page_count`, `scan_completed_at`, `packages`, `managers`, `sources` |
+| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_uuid`, `registry_epoch`, `page_index`, `page_count`, `scan_completed_at`, `update_scan_completed_at`, `packages`, `managers`, `sources` |
 | `InventoryUnavailable` | Agent to Authority | `target_user_uuid`, `registry_epoch`, `reason` |
 | `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope`, `reported_scope` |
 | `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_uuid`, `registry_epoch` |
@@ -177,9 +177,14 @@ Responses may arrive in any order, and the Agent has at most 8 outstanding reque
 | `ListPackageUpdates` | none | the JSON array served by `GET /uniget/v1/packages/updates` |
 | `ListManagers` | none | the JSON array served by `GET /uniget/v1/managers` |
 | `ListSources` | none | the JSON array served by `GET /uniget/v1/sources` |
+| `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
 | `GetPackageVersions` | `manager`, `sourceName`, `packageId` | `{ "versions": [string] }` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
+The `GetInventorySnapshot` arrays use the item shapes of the corresponding list commands, subject to the source-safety rules in `CONTRACT.package-management.md §inventory`.
+`GetInventorySnapshot` returns timestamps as RFC 3339 UTC strings.
+`updateCompletedAt` may be omitted or null when no complete update scan is available; in that case, `updates` is empty.
+When UniGetUI cannot produce the installed snapshot required by `CONTRACT.package-management.md §inventory`, it answers `Failed` or `UnsupportedCommand` without a snapshot.
 `operation` is `Install`, `Update` or `Uninstall`; `version` and `scope` are empty when not requested.
 UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
 `Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
@@ -214,12 +219,17 @@ Each package entry contains its manager, source, package ID, name, installed ver
 `source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity cannot be safely reported.
 UniGetUI supplies the canonical name as `sourceName`; the Agent does not derive it from the display label.
 Source names, URLs and labels containing credentials or local paths are not sent to the Authority.
-An inventory response copies UniGetUI's last completed scan, which may be stale.
+An inventory response copies UniGetUI's last completed installed-package scan, which may be stale.
 An inventory request does not start a package-manager scan, launch a package manager, change its state or log raw source details.
 UniGetUI does not use unclassified local tasks unless their isolation is established.
 When no endpoint can satisfy those requirements, it reports inventory unavailable without running the unsafe path.
-When no completed scan exists, its completion time is unavailable, any enabled, installed manager is unready, its scan failed, or UniGetUI cannot establish that distinct reported scopes survived the scan, it reports inventory unavailable without sending a partial or empty replacement snapshot.
-All inventory data in a response comes from one consistent completed scan.
+The installed scan covers every manager reported as both enabled and installed for that scan; disabled and uninstalled managers do not require a scan.
+When no completed installed scan exists, its completion time is unavailable, any required manager is unready, its scan failed, or UniGetUI cannot establish that distinct reported scopes survived the scan, it reports inventory unavailable without sending a partial or empty replacement snapshot.
+The installed list is a consistent copy of that completed scan.
+Safe source information may be omitted when unavailable; an omitted source does not prove that the source is absent.
+Update information is advisory and may come from an independently completed update scan.
+When no complete update scan is available, `available_version` is empty for every package.
+The Authority does not treat an available version as proof or authorization.
 Every inventory request includes the target user UUID, as do install, update and uninstall requests.
 The ownership `scope` is `USER`, `MACHINE` or `UNKNOWN`.
 The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping establishes that ownership; otherwise it is `UNKNOWN`.
@@ -238,14 +248,16 @@ It ignores stale, unsolicited, mismatched and already completed reports without 
 Each collection has a nonempty `report_id` identifying the snapshot independently of the request UUID.
 All pages of that collection carry the same `report_id` and `page_count`.
 `scan_completed_at` is `InventoryReport` field 11, a `google.protobuf.Timestamp` that is present and valid on every page.
-It is the completion time of the copied scan, not the time the Agent reads or sends the snapshot.
-The Agent carries UniGetUI's completion time unchanged, and all pages of the collection contain the same value.
-The Authority derives the scan age from this timestamp, not from the time of upload or the last successful sync.
-If the timestamp is in the Authority's future, the Authority reports the age as unknown.
+It is the completion time of the copied installed scan, not the time the Agent reads or sends the snapshot.
+`update_scan_completed_at` is `InventoryReport` field 12, an optional `google.protobuf.Timestamp` containing the completion time of the update scan.
+It is present and valid on every page when the response uses a complete update scan, and absent on every page otherwise.
+The Agent carries both completion times from UniGetUI unchanged, and their presence and values are identical on every page of the collection.
+The Authority derives each scan's age from its timestamp, not from the time of upload or the last successful sync.
+If a timestamp is in the Authority's future, the Authority reports that scan's age as unknown.
 `page_index` and `page_count` are `InventoryReport` fields 7 and 8, respectively.
 `page_count` is at least one, including for an empty inventory, and `page_index` is zero-based and less than `page_count`.
 `last` is true exactly when `page_index` is the final index.
-The Authority stages at most one collection for a request, bounds its staged page count and size, accepts identical duplicate pages and rejects conflicting duplicates.
+The Authority stages at most one collection for a request, bounds its staged page count and size, accepts identical duplicate pages and rejects conflicting duplicates or inconsistent scan timestamps.
 It atomically replaces observations for that Agent Identity and target user and updates that target's last-successful sync only after all indexes for that collection are present and the pending request, generation, active epoch and epoch revision still match.
 When staging is lost after restart or failover, the Authority abandons the incomplete attempt, ignores later pages from it and preserves the last completed inventory.
 
