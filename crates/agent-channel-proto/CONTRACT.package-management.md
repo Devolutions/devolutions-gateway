@@ -134,7 +134,9 @@ It reads only the bounded `Hello` before authenticating the client, and sends no
 The Agent impersonates the named-pipe client, reads its token SID and session ID, checks that the impersonation level permits identification, and reverts impersonation.
 It compares that SID and session ID with the retained process token before using them.
 It accepts the client only when the retained process image is a signature-verified `UniGetUI.exe`, the token is not elevated, and the session is a logged-on user session.
-The executable and its ancestor directories must pass the Broker's trusted-writer checks, so UniGetUI must be installed for all users in an administrator-protected directory.
+The executable and its containing directory must pass the Broker's trusted-writer checks, which reject write access by standard users.
+Its ancestor directories must also pass those checks.
+UniGetUI must be installed for all users in an administrator-protected directory.
 The Agent logs the reason when those checks reject a registration.
 Signature verification uses the retained image file and rejects a different signed file substituted at its path.
 Values that UniGetUI reports about itself are never used for identity or targeting.

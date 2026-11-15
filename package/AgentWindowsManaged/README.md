@@ -28,8 +28,11 @@ msiexec /i DevolutionsAgent.msi /qn ADDLOCAL=F.Agent,F.Updater,F.Session,F.Packa
 | `F.PackageBroker` | Off | UniGetUI Package Broker. Sets `PackageBroker.Enabled` in `agent.json`. |
 | `F.Pedm` | Off | Devolutions PEDM (experimental). |
 
-The Package Broker rejects package requests until a package policy is deployed, by default in `%ProgramData%\Devolutions\PackageBroker\`.
+The Package Broker rejects local self-service requests until a package policy is deployed, by default in `%ProgramData%\Devolutions\PackageBroker\`.
 The installer neither installs nor changes that policy.
+
+For device management, enable the Package Broker and install UniGetUI for all users in an administrator-protected directory, such as `C:\Program Files\UniGetUI`.
+The Agent refuses to register an instance if standard users can modify its executable or add files to its containing directory.
 
 An upgrade without `ADDLOCAL` or `REMOVE` keeps the previous feature selection.
 When upgrading from a release without the UniGetUI Package Broker option, setup selects `F.PackageBroker` if `agent.json` already enables the broker.
