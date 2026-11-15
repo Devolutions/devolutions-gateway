@@ -56,6 +56,8 @@ Each package entry contains its manager, source, package ID, name, installed ver
 Every inventory request includes the target user SID, as do install, update and uninstall requests.
 Known `scope` values distinguish machine and user installations.
 Scope values supported for package operations must include every value UniGetUI exposes, without conversion to a narrower set.
+UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish device-wide ownership across managers.
+The scope-label definitions are in [UniGetUI package scope aliases].
 Unknown-scope handling and the placement of the reporting instance SID are listed in `CONTRACT.package-management.md §provisional-decisions`.
 Pages in one complete inventory share a report ID, and the final page sets `last` to true.
 The Authority stores machine-scope entries once per device and user-scope entries once per device and target user SID.
@@ -78,6 +80,10 @@ The Agent, UniGetUI and Broker reject an execution-affecting field that is not c
 Remote operations do not carry custom parameters or pre-operation, post-operation or kill-before-operation commands unless the token explicitly authorizes them.
 UniGetUI's broker request builder maps source, custom parameters and pre-operation, post-operation and kill-before-operation commands into the request.
 These execution-affecting fields are visible in the [UniGetUI broker request builder][UniGetUI broker request fields].
+The npm broker always emits `--global`, while the .NET tool broker emits it when no custom install location is set; both reject explicit machine scope, so the current routes do not preserve UniGetUI's distinct `Local` and `Global` choices.
+The current Scoop broker rejects machine/global scope and elevated execution while its script is resolved from the target user's profile; those guards remain until a separately trusted route exists.
+The current scope behavior is visible in the [npm broker builder], [.NET tool broker builder] and [Scoop broker builder].
+How each manager's scope maps to broker execution remains unresolved.
 An operation result identifies the operation ID and reports success or failure with an error value when it fails.
 Local broker policy is bypassed only for a valid DVLS-authorized operation; local policy continues to govern user self-service operations.
 The exact requested-version semantics for each operation are provisional as described in `CONTRACT.package-management.md §provisional-decisions`.
@@ -109,9 +115,8 @@ The Authority opens a channel with a channel ID, extension name and version, and
 The Agent refuses an unknown extension or one disabled by local configuration.
 Data messages carry a channel ID and opaque payload, and either party may close a channel with a reason.
 Package management is the first separately versioned extension.
-Package scope comes from a per-package value supplied by UniGetUI once its IPC exposes that value.
-UniGetUI must preserve scope in its package model and package identity as well as its IPC response, so distinct user and machine installations are not collapsed.
-Until UniGetUI supplies scope, entries use `scope=unknown` and are stored once per device and target user SID.
+Package scope must come from a per-package value supplied by UniGetUI, which must preserve scope in its package model and identity as well as its IPC response so distinct installations are not collapsed.
+How an inventory entry with unknown scope is represented or keyed, and how each manager's scope maps to broker execution, remain unresolved.
 The proposed inventory page carries the SID of its reporting instance.
 The Authority initializes or replaces stored inventory only after the final page arrives, and an operation result does not itself update package records.
 The requested-version field is optional where an operation does not use a version; its exact meaning for each operation is unresolved.
@@ -129,6 +134,8 @@ UniGetUI must reject remote operations when broker routing is disabled, the mana
 This fail-closed requirement covers the existing local-fallback paths in [PackageOperations.cs][UniGetUI operation fallback].
 UniGetUI must extend its broker mapping beyond the current fixed manager list to cover every exposed manager and scope.
 The current fixed mapping is in [`BrokerRequestBuilder.TryMapManagerName`][UniGetUI manager mapping] at commit `da6be7b86100302a79a208e7ab4d5c6fcd695fd5`.
+The UniGetUI `Installer` manager also requires feed-item resolution, installer hash, identity and signature verification, and installed-version receipt handling; adding a manager enum value alone is insufficient.
+These operations are implemented in the pinned [WinInstaller runner], [WinInstaller manager] and [Installer receipt] sources.
 DVLS must store the target user SID and package scope in its beta database schema.
 DVLS/RDM must show the Agent-reported user and session in an instance picker and send the selected target user SID with every operation.
 
@@ -138,3 +145,10 @@ DVLS/RDM must show the Agent-reported user and session in an instance picker and
 [UniGetUI manager mapping]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.AgentBroker/BrokerRequestBuilder.cs#L201-L221
 [UniGetUI operation fallback]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Operations/PackageOperations.cs#L387-L514
 [UniGetUI broker request fields]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.AgentBroker/BrokerRequestBuilder.cs#L53-L84
+[UniGetUI package scope aliases]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Enums/Enums.cs#L11-L18
+[npm broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/npm.rs#L19-L50
+[.NET tool broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/dotnet.rs#L19-L86
+[Scoop broker builder]: https://github.com/Devolutions/devolutions-gateway/blob/c45dd6698116854c32b1881ce9a74bb79e43f8c0/crates/now-package-broker/src/command_builder/scoop.rs#L78-L86
+[WinInstaller runner]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/Internal/WinInstallerRunner.cs#L30-L106
+[WinInstaller manager]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/WinInstaller.cs
+[Installer receipt]: https://github.com/Devolutions/UniGetUI/blob/da6be7b86100302a79a208e7ab4d5c6fcd695fd5/src/UniGetUI.PackageEngine.Managers.WinInstaller/Internal/InstallReceipts.cs
