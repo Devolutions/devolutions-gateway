@@ -268,6 +268,7 @@ fn parse_timestamp(text: &str) -> anyhow::Result<prost_types::Timestamp> {
 
     let timestamp = time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339)
         .map_err(|_| anyhow::anyhow!("invalid RFC 3339 timestamp"))?;
+    anyhow::ensure!(timestamp.offset().is_utc(), "timestamp is not UTC");
     let seconds = timestamp.unix_timestamp();
     anyhow::ensure!(
         (-62_135_596_800..=253_402_300_799).contains(&seconds),
@@ -315,12 +316,13 @@ mod tests {
 
     #[test]
     fn timestamps_convert_to_unix_time() {
+        // oracle: spec Protocol Buffers Timestamp §Timestamp
         let cases = [
             ("1970-01-01T00:00:00Z", 0, 0),
             ("2000-03-01T00:00:00Z", 951_868_800, 0),
             ("2024-02-29T12:00:00.5Z", 1_709_208_000, 500_000_000),
-            ("2024-01-01T09:00:00+09:00", 1_704_067_200, 0),
-            ("2023-12-31T19:00:00.000000001-05:00", 1_704_067_200, 1),
+            ("2024-01-01T00:00:00+00:00", 1_704_067_200, 0),
+            ("2024-01-01T00:00:00.000000001Z", 1_704_067_200, 1),
         ];
         for (text, seconds, nanos) in cases {
             assert_eq!(
@@ -334,26 +336,44 @@ mod tests {
     #[test]
     fn invalid_timestamps_are_rejected() {
         for text in [
+            // oracle: spec RFC 3339 §5.6
             "",
             "2024-01-01",
-            "2024-01-01 00:00:00Z",
             "2024-01-01T00:00:00",
             "2023-02-29T00:00:00Z",
             "2024-13-01T00:00:00Z",
             "2024-01-01T24:00:00Z",
-            "2024-01-01T00:00:60Z",
             "2024-01-01T00:00:00.Z",
-            "2024-01-01T00:00:00.1234567890Z",
             "2024-01-01T00:00:00+0900",
-            "0000-01-01T00:00:00Z",
             "2024-01-01T00:00:00Zjunk",
+            // oracle: spec Protocol Buffers Timestamp §Timestamp
+            "0000-01-01T00:00:00Z",
+            // oracle: spec RFC 3339 §5.6
+            "2024-01-01 00:00:00Z",
+            // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §registration
+            "2016-12-31T23:59:60Z",
+            "2024-01-01T00:00:00.1234567890Z",
         ] {
             assert!(parse_timestamp(text).is_err(), "{text}");
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+    #[rstest::rstest]
+    #[case::installed_positive_offset("completedAt", "2024-01-01T09:00:00+09:00")]
+    #[case::installed_negative_offset("completedAt", "2023-12-31T19:00:00-05:00")]
+    #[case::update_positive_offset("updateCompletedAt", "2024-01-01T09:00:00+09:00")]
+    #[case::update_negative_offset("updateCompletedAt", "2023-12-31T19:00:00-05:00")]
+    fn non_utc_scan_timestamps_are_rejected(#[case] field: &str, #[case] timestamp: &str) {
+        let mut value = snapshot(Value::Null, vec![], vec![]);
+        value[field] = json!(timestamp);
+
+        assert!(parse_snapshot(value).is_err());
+    }
+
     #[test]
     fn installed_only_snapshot_keeps_timestamps_and_ignores_update_data() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let value = snapshot(
             Value::Null,
             vec![package(json!({ "newVersion": "9.9" }))],
