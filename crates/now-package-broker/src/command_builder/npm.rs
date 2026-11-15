@@ -233,6 +233,7 @@ mod tests {
         &cmd[3]
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn empty_source_is_accepted_for_update_and_uninstall_only() {
         for operation in [Operation::Update, Operation::Uninstall] {

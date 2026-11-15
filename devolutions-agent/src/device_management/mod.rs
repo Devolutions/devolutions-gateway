@@ -586,6 +586,7 @@ mod tests {
         assert!(sent.is_empty());
     }
 
+    // oracle: mutant unavailable catalog synchronization is reported as successful
     #[test]
     fn catalog_sync_is_reported_unavailable() {
         let response = catalog_unavailable_report(42);
@@ -597,6 +598,7 @@ mod tests {
         assert!(!result.error.is_empty());
     }
 
+    // oracle: mutant stream shutdown drops an active package operation before it is settled
     #[tokio::test]
     async fn package_operation_continues_after_stream_shutdown() {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);

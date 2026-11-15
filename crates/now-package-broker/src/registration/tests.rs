@@ -429,29 +429,29 @@ mod connection {
         let endpoint = endpoint(&registry);
         let first = tokio::spawn({
             let endpoint = endpoint.clone();
-            async move { endpoint.request("ListManagers", json!({})).await }
+            async move { endpoint.request("GetInventorySnapshot", json!({})).await }
         });
         let first_request = read_json(&mut client).await;
         let second = tokio::spawn({
             let endpoint = endpoint.clone();
-            async move { endpoint.request("ListSources", json!({})).await }
+            async move { endpoint.request("GetInventorySnapshot", json!({})).await }
         });
         let second_request = read_json(&mut client).await;
         assert_ne!(id_of(&first_request), id_of(&second_request));
 
         respond(
             &mut client,
-            json!({"kind": "Response", "id": id_of(&second_request), "ok": true, "result": "sources"}),
+            json!({"kind": "Response", "id": id_of(&second_request), "ok": true, "result": "inventory"}),
         )
         .await;
         respond(
             &mut client,
-            json!({"kind": "Response", "id": id_of(&first_request), "ok": true, "result": "managers"}),
+            json!({"kind": "Response", "id": id_of(&first_request), "ok": true, "result": "first"}),
         )
         .await;
 
-        assert_eq!(second.await.expect("task").expect("result"), json!("sources"));
-        assert_eq!(first.await.expect("task").expect("result"), json!("managers"));
+        assert_eq!(second.await.expect("task").expect("result"), json!("inventory"));
+        assert_eq!(first.await.expect("task").expect("result"), json!("first"));
         task.abort();
     }
 
@@ -466,12 +466,12 @@ mod connection {
         for _ in 0..8 {
             calls.push(tokio::spawn({
                 let endpoint = endpoint.clone();
-                async move { endpoint.request("ListManagers", json!({})).await }
+                async move { endpoint.request("GetInventorySnapshot", json!({})).await }
             }));
             ids.push(id_of(&read_json(&mut client).await));
         }
 
-        let ninth = request_error(endpoint.request("ListManagers", json!({})).await);
+        let ninth = request_error(endpoint.request("GetInventorySnapshot", json!({})).await);
         assert!(!ninth.may_have_been_sent(), "the ninth request is not written");
         respond(
             &mut client,
@@ -482,7 +482,7 @@ mod connection {
 
         let replacement = tokio::spawn({
             let endpoint = endpoint.clone();
-            async move { endpoint.request("ListManagers", json!({})).await }
+            async move { endpoint.request("GetInventorySnapshot", json!({})).await }
         });
         read_json(&mut client).await;
         assert!(!replacement.is_finished());
@@ -495,7 +495,7 @@ mod connection {
         let registry = Arc::new(Registry::default());
         let (mut client, task) = serve(&registry, 1);
         let endpoint = endpoint(&registry);
-        let call = tokio::spawn(async move { endpoint.request("GetPackageVersions", json!({})).await });
+        let call = tokio::spawn(async move { endpoint.request("ExecutePackageOperation", json!({})).await });
         let request = read_json(&mut client).await;
 
         respond(
@@ -543,7 +543,7 @@ mod connection {
         let registry = Arc::new(Registry::default());
         let (mut client, task) = serve(&registry, 1);
         let endpoint = endpoint(&registry);
-        let call = tokio::spawn(async move { endpoint.request("ListManagers", json!({})).await });
+        let call = tokio::spawn(async move { endpoint.request("GetInventorySnapshot", json!({})).await });
         let request = read_json(&mut client).await;
         let response = json!({"kind": "Response", "id": id_of(&request), "ok": true, "result": []});
 
@@ -560,7 +560,7 @@ mod connection {
         let registry = Arc::new(Registry::default());
         let (mut client, task) = serve(&registry, 1);
         let endpoint = endpoint(&registry);
-        let call = tokio::spawn(async move { endpoint.request("ListManagers", json!({})).await });
+        let call = tokio::spawn(async move { endpoint.request("GetInventorySnapshot", json!({})).await });
         read_json(&mut client).await;
         let pinger = tokio::spawn(async move {
             loop {
@@ -599,7 +599,7 @@ mod connection {
             request_error(call.await.expect("call task")),
             RequestError::Unanswered(_)
         ));
-        let later = request_error(endpoint.request("ListManagers", json!({})).await);
+        let later = request_error(endpoint.request("GetInventorySnapshot", json!({})).await);
         assert!(!later.may_have_been_sent());
     }
 
@@ -613,7 +613,7 @@ mod connection {
         drop(first_client);
         first_task.await.expect("connection task").expect("client closed");
 
-        let error = request_error(endpoint.request("ListManagers", json!({})).await);
+        let error = request_error(endpoint.request("GetInventorySnapshot", json!({})).await);
 
         assert!(!error.may_have_been_sent());
         let mut byte = [0u8; 1];
@@ -633,10 +633,10 @@ mod connection {
         let endpoint = endpoint(&registry);
 
         for (command, arguments) in [
-            ("ListManagers", json!([])),
-            ("ListManagers", Value::Null),
+            ("GetInventorySnapshot", json!([])),
+            ("GetInventorySnapshot", Value::Null),
             ("", json!({})),
-            ("ListManagers", json!({"padding": "x".repeat(2_000_000)})),
+            ("GetInventorySnapshot", json!({"padding": "x".repeat(2_000_000)})),
         ] {
             let error = request_error(endpoint.request(command, arguments).await);
             assert!(!error.may_have_been_sent());

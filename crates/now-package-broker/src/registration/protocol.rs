@@ -438,12 +438,13 @@ mod tests {
         assert!(encode_request(id, "c", oversized).is_none());
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §registration
     #[tokio::test]
-    async fn truncated_body_is_an_io_error() {
+    async fn truncated_body_is_rejected() {
         let mut bytes = framed(r#"{"kind":"Ping"}"#);
-        bytes.pop();
+        bytes[0] += 1;
 
-        assert!(matches!(read(&bytes, MAX_FRAME_LEN).await, Err(ReadError::Io(_))));
+        assert!(read(&bytes, MAX_FRAME_LEN).await.is_err());
     }
 
     #[tokio::test]

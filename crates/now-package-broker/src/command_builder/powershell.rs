@@ -333,6 +333,7 @@ mod tests {
         script.split_at(script.find(verb).expect("package command call"))
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn empty_source_update_and_uninstall_skip_repository_checks() {
         for (manager, operation) in [
@@ -355,6 +356,7 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn remote_grant_allows_powershell7_default_source_update_only() {
         let mut request = make_request(ManagerName::PowerShell7);
@@ -365,6 +367,7 @@ mod tests {
 
         let cmd = build_powershell7_remote_grant_command(&request).expect("grant update");
         let script = script_of(&cmd);
+        // oracle: reference PSResourceGet 1.2.0 `Update-PSResource`, the cmdlet that updates a resource
         assert!(script.contains("Update-PSResource"), "{script}");
         assert!(!script.contains("-Repository"), "{script}");
 
@@ -376,6 +379,7 @@ mod tests {
         build_powershell7_remote_grant_command(&request).expect_err("URLs remain unsupported");
     }
 
+    // oracle: mutant making the remote-grant update command differ from the local one, such as dropping `-Repository`, when the request names a source
     #[test]
     fn remote_grant_named_source_update_is_unchanged() {
         let mut request = make_request(ManagerName::PowerShell7);
@@ -410,8 +414,11 @@ mod tests {
     #[test]
     fn empty_source_is_rejected_for_install_and_powershell7_update() {
         for (manager, operation) in [
+            // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
             (ManagerName::PowerShell, Operation::Install),
+            // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
             (ManagerName::PowerShell7, Operation::Install),
+            // oracle: mutant accepting an empty source for a PowerShell 7 update on the local-policy path
             (ManagerName::PowerShell7, Operation::Update),
         ] {
             let mut request = make_request(manager);

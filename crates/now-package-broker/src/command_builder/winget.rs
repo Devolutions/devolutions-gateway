@@ -161,6 +161,7 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn empty_source_omits_source_flag_for_update_and_uninstall() {
         for (operation, verb) in [(Operation::Update, "upgrade"), (Operation::Uninstall, "uninstall")] {
@@ -170,6 +171,7 @@ mod tests {
             let cmd = build_winget_command(&request).expect("build command");
             assert_eq!(cmd[1], verb);
             assert!(!cmd.contains(&"--source".to_owned()));
+            // oracle: mutant dropping the exact package-id selector, which would let an empty-source command match other packages
             assert_eq!(&cmd[2..5], ["--id", "Mozilla.Firefox", "--exact"]);
         }
 
@@ -179,6 +181,7 @@ mod tests {
         assert_eq!(&cmd[4..6], ["--source", "winget"]);
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn empty_source_is_rejected_for_install_and_with_url() {
         let mut request = make_request();

@@ -228,6 +228,7 @@ mod tests {
             request.source.name = String::new();
 
             request.package.id = PackageIdentifier::from("zlib".to_owned());
+            // oracle: mutant accepting an empty-source package id without a triplet, so vcpkg acts on its default triplet instead of the installed one
             build_vcpkg_command(&request).expect_err("default triplet is not the installed one");
 
             request.package.id = PackageIdentifier::from("zlib:x64-windows".to_owned());
@@ -238,6 +239,7 @@ mod tests {
         let mut request = make_request();
         request.source.name = String::new();
         request.package.id = PackageIdentifier::from("zlib:x64-windows".to_owned());
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         build_vcpkg_command(&request).expect_err("install requires a source");
     }
     #[test]

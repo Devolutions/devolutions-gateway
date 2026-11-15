@@ -220,6 +220,7 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn empty_source_update_omits_source_flag() {
         let mut request = make_request();
@@ -228,6 +229,7 @@ mod tests {
         let cmd = build_chocolatey_command(&request).expect("empty source");
         assert!(!cmd.contains(&"--source".to_owned()));
     }
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn empty_source_is_accepted_for_update_and_uninstall_only() {
         for operation in [Operation::Update, Operation::Uninstall] {

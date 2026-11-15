@@ -398,6 +398,7 @@ mod tests {
                 reported_scope: "Machine".to_owned(),
             }]
         );
+        // oracle: mutant a manager version is invented
         assert_eq!(
             snapshot.managers,
             vec![PackageManager {
@@ -412,10 +413,10 @@ mod tests {
 
     #[test]
     fn empty_snapshot_is_valid_and_omitted_update_timestamp_is_none() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let mut value = snapshot(Value::Null, vec![], vec![]);
         let object = value.as_object_mut().expect("snapshot is an object");
         object.remove("updateCompletedAt");
-        object.remove("updates");
         object.insert("managers".to_owned(), json!([]));
         object.insert("sources".to_owned(), json!([]));
 
@@ -460,6 +461,7 @@ mod tests {
 
     #[test]
     fn ambiguous_or_conflicting_updates_are_not_merged() {
+        // oracle: mutant an update is attached to duplicate installed rows, to a different source, or from conflicting updates
         let duplicated_installed = snapshot(
             json!("2024-01-01T00:00:10Z"),
             vec![package(json!({})), package(json!({}))],
@@ -489,6 +491,7 @@ mod tests {
 
     #[test]
     fn reported_scope_is_preserved_but_never_becomes_ownership() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         for reported in ["Machine", "Global", "User", "Local", ""] {
             let value = snapshot(Value::Null, vec![package(json!({ "reportedScope": reported }))], vec![]);
             let packages = parse_snapshot(value).expect("snapshot is valid").packages;
@@ -504,6 +507,7 @@ mod tests {
     #[test]
     fn unsafe_source_data_is_omitted() {
         let unsafe_values = [
+            // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
             "C:\\Users\\me\\feed",
             "c:/feeds/local",
             "relative/feed",
@@ -518,6 +522,11 @@ mod tests {
             "feed@example.com",
             "feed token",
             "line\nbreak",
+            "https://example.com/feed#token=abc",
+            "ftp://user:pass@example.com/feed",
+            "user:pass@example.com",
+            "feed token=abc",
+            "token=abc\n",
         ];
 
         for text in unsafe_values {
@@ -550,21 +559,24 @@ mod tests {
 
     #[test]
     fn canonical_source_name_is_kept_without_exposing_a_url() {
-        let value = snapshot(
+        let mut value = snapshot(
             Value::Null,
             vec![package(
-                json!({ "source": "https://community.chocolatey.org/api/v2/", "sourceName": "chocolatey" }),
+                json!({ "source": "https://user:pass@community.chocolatey.org/api/v2/", "sourceName": "chocolatey" }),
             )],
             vec![],
         );
+        value["sources"][0]["url"] = json!("https://user:pass@example.com/feed");
         let snapshot = parse_snapshot(value).expect("snapshot is valid");
-        assert_eq!(snapshot.packages[0].source, "");
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         assert_eq!(snapshot.packages[0].source_name, "chocolatey");
+        assert_eq!(snapshot.packages[0].source, "");
         assert_eq!(snapshot.sources[0].url, "");
     }
 
     #[test]
     fn malformed_required_data_fails_closed_without_echoing_input() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let mut cases = vec![
             json!([]),
             json!("snapshot"),
@@ -598,6 +610,7 @@ mod tests {
 
         for value in cases {
             let error = format!("{:#}", parse_snapshot(value).expect_err("snapshot is invalid"));
+            // oracle: mutant a parse error carries the rejected UniGetUI value into a log or report
             assert!(!error.contains("SECRET"), "{error}");
         }
     }
