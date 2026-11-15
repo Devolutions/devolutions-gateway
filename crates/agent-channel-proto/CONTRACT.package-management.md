@@ -62,6 +62,8 @@ Each package entry contains its manager, source, package ID, name, installed ver
 `source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity cannot be safely reported.
 UniGetUI supplies the canonical name as `sourceName`; the Agent does not derive it from the display label.
 Source names, URLs and labels containing credentials or local paths are not sent to the Authority.
+The Agent does not use a UniGetUI inventory endpoint that can change package-manager state or log raw source details.
+When no safe endpoint is available, it reports inventory unavailable without sending an empty replacement snapshot.
 Every inventory request includes the target user SID, as do install, update and uninstall requests.
 The ownership `scope` is `USER`, `MACHINE` or `UNKNOWN`.
 The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping establishes that ownership; otherwise it is `UNKNOWN`.

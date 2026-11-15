@@ -12,6 +12,7 @@ use agent_channel_proto::{
     CatalogSyncResult, DeviceManagementReport, DeviceManagementRequest, InstalledPackage, InventoryReport,
     PackageManager, PackageOperationRequest, PackageOperationResult, PackageSource, UniGetUiInstances,
 };
+use anyhow::Context as _;
 use prost::Message as _;
 use tokio::sync::{Semaphore, SemaphorePermit, watch};
 use uuid::Uuid;
@@ -61,10 +62,8 @@ pub(crate) fn handle(
                     }
                     Request::DiscoverUnigetuiInstances(_) => send_instances(&reporter, &id).await,
                     Request::PackageOperation(request) => {
-                        let target_user_sid = request.target_user_sid.clone();
                         let result = run_package_operation(request);
                         reporter.send(Some(id.clone()), report(Report::PackageOperationResult(result)));
-                        send_inventory(&reporter, &id, &target_user_sid).await;
                     }
                     Request::CatalogSync(request) => {
                         // Serializes catalog writes, because each request runs on its own task.
@@ -137,8 +136,16 @@ fn report(report: Report) -> DeviceManagementReport {
 
 /// Sends the inventory in parts that each fit in one channel envelope.
 async fn send_inventory(reporter: &Reporter, correlation_id: &str, target_user_sid: &str) {
-    let Some(inventory) = collect_inventory(target_user_sid).await else {
-        return;
+    let inventory = match collect_inventory(target_user_sid).await {
+        Ok(inventory) => inventory,
+        Err(error) => {
+            warn!(
+                correlation_id,
+                error = format!("{error:#}"),
+                "UniGetUI inventory is unavailable"
+            );
+            return;
+        }
     };
 
     let parts = match inventory_parts(inventory, target_user_sid) {
@@ -213,72 +220,48 @@ struct Inventory {
     sources: Vec<PackageSource>,
 }
 
-/// Returns `None` when UniGetUI cannot be reached or its managers are not loaded yet,
-/// so Devolutions Server keeps the last known inventory.
-async fn collect_inventory(target_user_sid: &str) -> Option<Inventory> {
-    let instance = match unigetui::resolve_target(target_user_sid).await {
-        Ok(instance) => instance,
-        Err(error) => {
-            warn!(
-                error = format!("{error:#}"),
-                "Failed to resolve UniGetUI target; skipping the inventory report"
-            );
-            return None;
-        }
-    };
+async fn collect_inventory(target_user_sid: &str) -> anyhow::Result<Inventory> {
+    collect_inventory_from(unigetui::resolve_target(target_user_sid)).await
+}
 
-    let (managers, managers_loading) = match unigetui::managers(&instance).await {
-        Ok(managers) => managers,
-        Err(error) => {
-            warn!(
-                error = format!("{error:#}"),
-                "Failed to collect UniGetUI package managers; skipping the inventory report"
-            );
-            return None;
-        }
-    };
+async fn collect_inventory_from(
+    resolve: impl Future<Output = anyhow::Result<unigetui::TargetInstance>>,
+) -> anyhow::Result<Inventory> {
+    // The legacy inventory calls can modify manager state and expose source details.
+    // Replace them with a safe endpoint; removing this guard must not enable the legacy routes.
+    require_safe_inventory_endpoint()?;
+
+    let instance = resolve.await.context("failed to resolve UniGetUI target")?;
+    let (managers, managers_loading) = unigetui::managers(&instance)
+        .await
+        .context("failed to collect UniGetUI package managers")?;
 
     if managers_loading {
-        warn!("UniGetUI package managers are still loading; skipping the inventory report");
-        return None;
+        anyhow::bail!("UniGetUI package managers are still loading");
     }
 
     // UniGetUI returns an empty list for a manager that is not ready, for example just after logon or wake.
     if !managers.iter().any(|manager| manager.enabled && manager.installed) {
-        warn!("No UniGetUI package manager is ready; skipping the inventory report");
-        return None;
+        anyhow::bail!("no UniGetUI package manager is ready");
     }
 
-    let packages = match unigetui::installed_packages(&instance).await {
-        Ok(packages) => {
-            info!(count = packages.len(), "Collected UniGetUI inventory");
-            packages
-        }
-        Err(error) => {
-            warn!(
-                error = format!("{error:#}"),
-                "Failed to collect UniGetUI inventory; skipping the inventory report"
-            );
-            return None;
-        }
-    };
+    let packages = unigetui::installed_packages(&instance)
+        .await
+        .context("failed to collect UniGetUI inventory")?;
+    info!(count = packages.len(), "Collected UniGetUI inventory");
+    let sources = unigetui::sources(&instance)
+        .await
+        .context("failed to collect UniGetUI package sources")?;
 
-    let sources = match unigetui::sources(&instance).await {
-        Ok(sources) => sources,
-        Err(error) => {
-            warn!(
-                error = format!("{error:#}"),
-                "Failed to collect UniGetUI package sources; skipping the inventory report"
-            );
-            return None;
-        }
-    };
-
-    Some(Inventory {
+    Ok(Inventory {
         packages,
         managers,
         sources,
     })
+}
+
+fn require_safe_inventory_endpoint() -> anyhow::Result<()> {
+    anyhow::bail!("safe UniGetUI inventory endpoint is unavailable")
 }
 
 fn run_package_operation(request: PackageOperationRequest) -> PackageOperationResult {
@@ -294,7 +277,23 @@ fn run_package_operation(request: PackageOperationRequest) -> PackageOperationRe
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+    #[tokio::test]
+    async fn unavailable_inventory_does_not_contact_unigetui() {
+        let attempted = AtomicBool::new(false);
+        let result = collect_inventory_from(async {
+            attempted.store(true, Ordering::SeqCst);
+            Err(anyhow::anyhow!("target unavailable"))
+        })
+        .await;
+
+        assert!(!attempted.load(Ordering::SeqCst), "inventory contacted UniGetUI");
+        assert!(result.is_err());
+    }
 
     #[test]
     fn every_inventory_page_carries_the_target_user_sid() {
