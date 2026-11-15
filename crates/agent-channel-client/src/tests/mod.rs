@@ -1543,6 +1543,71 @@ async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+#[tokio::test]
+async fn unavailable_inventory_keeps_request_correlation_across_reopening() -> anyhow::Result<()> {
+    use agent_channel_proto::device_management_report::Report;
+    use agent_channel_proto::device_management_request::Request;
+    use agent_channel_proto::{
+        DeviceManagementRequest, InventoryUnavailable, InventoryUnavailableReason, SyncInventory,
+    };
+
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut first = authority.next_opening().await.accept();
+    first.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let request_id = new_id();
+    let target_user_sid = "S-1-5-21-200";
+    first
+        .send(
+            &request_id,
+            None,
+            Payload::DeviceManagement(DeviceManagementRequest {
+                request: Some(Request::SyncInventory(SyncInventory {
+                    target_user_sid: target_user_sid.to_owned(),
+                })),
+            }),
+        )
+        .await;
+    assert!(matches!(
+        next_event(&mut channel).await,
+        Event::DeviceManagement { id, .. } if id == request_id
+    ));
+    first
+        .close(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+    next_closure(&mut channel).await;
+
+    channel.reporter().send(
+        Some(request_id.clone()),
+        DeviceManagementReport {
+            report: Some(Report::InventoryUnavailable(InventoryUnavailable {
+                target_user_sid: target_user_sid.to_owned(),
+                reason: InventoryUnavailableReason::SafeEndpointUnavailable.into(),
+            })),
+        },
+    );
+    let mut second = authority.next_opening().await.accept();
+    second.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let message = second.receive().await;
+
+    assert_eq!(message.correlation_id.as_deref(), Some(request_id.as_str()));
+    assert!(matches!(
+        message.payload,
+        Some(agent_message::Payload::DeviceManagement(DeviceManagementReport {
+            report: Some(Report::InventoryUnavailable(InventoryUnavailable {
+                target_user_sid: sid,
+                reason: 1,
+            })),
+        })) if sid == target_user_sid
+    ));
+    Ok(())
+}
+
 /// Checks that a closure with gRPC status OK keeps its trailers and, with an unknown error code, stays transient.
 fn assert_ok_closure_with_trailers(closure: &Closure) {
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));

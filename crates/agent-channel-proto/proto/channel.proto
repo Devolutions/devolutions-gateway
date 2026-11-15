@@ -84,6 +84,8 @@ message DeviceManagementReport {
     PackageOperationResult package_operation_result = 2;
     CatalogSyncResult catalog_sync_result = 3;
     UniGetUiInstances unigetui_instances = 4;
+    PackageOperationResult package_operation_unknown = 5;
+    InventoryUnavailable inventory_unavailable = 6;
   }
 }
 
@@ -104,9 +106,8 @@ message UniGetUiInstance {
   bool signature_verified = 4;
 }
 
-// One part of an inventory. The agent splits an inventory so that each envelope stays under the
-// envelope limit. All parts of one inventory share report_id, and the last part has last = true.
-// The first part carries the managers and sources. A complete inventory replaces the previous one.
+// Inventory pages share a report ID and page count. Only the final index has last = true.
+// The first page carries the managers and sources. A complete inventory replaces the previous one.
 message InventoryReport {
   string report_id = 1;
   bool last = 2;
@@ -114,6 +115,20 @@ message InventoryReport {
   repeated PackageManager managers = 4;
   repeated PackageSource sources = 5;
   string target_user_sid = 6;
+  uint32 page_index = 7;
+  uint32 page_count = 8;
+}
+
+message InventoryUnavailable {
+  string target_user_sid = 1;
+  InventoryUnavailableReason reason = 2;
+}
+
+enum InventoryUnavailableReason {
+  INVENTORY_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  INVENTORY_UNAVAILABLE_REASON_SAFE_ENDPOINT_UNAVAILABLE = 1;
+  INVENTORY_UNAVAILABLE_REASON_BUSY = 2;
+  INVENTORY_UNAVAILABLE_REASON_COLLECTION_FAILED = 3;
 }
 
 message InstalledPackage {
@@ -124,8 +139,12 @@ message InstalledPackage {
   string version = 5;
   // Newer version reported by the package manager. Empty when the package is up to date.
   string available_version = 6;
-  // Manager-relative scope. Empty when UniGetUI does not report it.
+  // Proven ownership: USER, MACHINE or UNKNOWN.
   string scope = 7;
+  // Canonical broker source name. Empty when unavailable.
+  string source_name = 8;
+  // Manager-reported scope, which does not establish ownership.
+  string reported_scope = 9;
 }
 
 message PackageManager {
@@ -147,6 +166,11 @@ enum PackageOperationType {
   PACKAGE_OPERATION_TYPE_UNINSTALL = 2;
 }
 
+enum PackageOperationStatus {
+  PACKAGE_OPERATION_STATUS_UNSPECIFIED = 0;
+  PACKAGE_OPERATION_STATUS_UNKNOWN = 1;
+}
+
 // Requests one package operation for a live UniGetUI instance owned by target_user_sid.
 message PackageOperationRequest {
   string operation_id = 1;
@@ -159,11 +183,13 @@ message PackageOperationRequest {
   string scope = 8;
 }
 
-// Answer to PackageOperationRequest. Error is set when success is false.
+// Answer to PackageOperationRequest.
+// UNKNOWN means the outcome cannot be recovered.
 message PackageOperationResult {
   string operation_id = 1;
   bool success = 2;
   string error = 3;
+  PackageOperationStatus status = 4;
 }
 
 message CatalogSync {

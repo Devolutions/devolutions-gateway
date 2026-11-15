@@ -293,6 +293,10 @@ impl PipeClient {
         self.is_elevated && self.is_administrator
     }
 
+    pub(crate) fn is_elevated(&self) -> bool {
+        self.is_elevated
+    }
+
     pub(crate) fn validate_request(
         &self,
         request: &PackageRequest,

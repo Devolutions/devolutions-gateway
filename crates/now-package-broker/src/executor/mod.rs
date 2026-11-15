@@ -19,6 +19,21 @@ mod windows;
 pub use output::{ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, describe_exit_code, tail_utf8};
 #[cfg(windows)]
 pub use windows::WindowsExecutor;
+#[cfg(windows)]
+pub(crate) use windows::ensure_session_user;
+
+/// How strictly the executor checks the elevation of the token that launches the plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TokenElevationCheck {
+    /// Local-policy behavior: the token is obtained according to the request and only
+    /// pre/post operation commands are checked against it.
+    #[default]
+    Unchecked,
+    /// The launching token must be elevated exactly when the operation requires elevation
+    /// (`Elevated` or machine scope), including UAC-disabled sessions whose regular token is
+    /// already elevated. Any mismatch fails before a process is started.
+    Exact,
+}
 
 /// Execution context passed from the server to the executor.
 ///
@@ -54,6 +69,8 @@ pub struct ExecutionContext {
     pub elevation: Elevation,
     /// Installation scope (machine scope requires elevation).
     pub scope: Option<Scope>,
+    /// Whether the actual launching token's elevation must match the requirement exactly.
+    pub token_elevation_check: TokenElevationCheck,
     /// When true, capture the main command's combined stdout+stderr.
     ///
     /// Since API v0.3 this only controls whether output frames are pushed on the

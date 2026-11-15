@@ -33,7 +33,8 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `UniGetUiInstances` | Agent to Authority | `instances` |
 | `UniGetUiInstance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
 | `SyncInventory` | Authority to Agent | `target_user_sid` |
-| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `packages`, `managers`, `sources` |
+| `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `page_index`, `page_count`, `packages`, `managers`, `sources` |
+| `InventoryUnavailable` | Agent to Authority | `target_user_sid`, `reason` |
 | `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope`, `reported_scope` |
 | `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_sid` |
 | `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `bypass_token` |
@@ -51,6 +52,7 @@ The Authority stores and selects the target user SID, and displays it as `DOMAIN
 Every package operation includes a target user SID, including a machine-scope operation.
 The Agent resolves the target SID to a live instance when it executes the request.
 The Agent sends the write at most once to one resolved instance and does not retry it against that or another endpoint.
+When a write targets an existing installation, UniGetUI rejects it if that installation cannot be identified in the authorized scope.
 Inventory covers the package managers and scopes exposed by UniGetUI.
 Remote writes are limited to operations supported by the existing package broker and fail closed when unsupported.
 Remote writes never fall back to local package execution.
@@ -71,12 +73,35 @@ The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping es
 UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish ownership across managers.
 The Authority does not use `reported_scope` to deduplicate machine-wide installations or authorize machine-wide changes.
 The scope-label definitions are in [UniGetUI package scope aliases].
-The placement of the reporting instance SID is listed in `CONTRACT.package-management.md §provisional-decisions`.
-Pages in one complete inventory share a report ID, and the final page sets `last` to true.
+For each Agent Identity and target SID, the Authority transactionally allocates a durable generation and records the identity, request UUID, canonical SID and generation as pending before enqueueing a sync request.
+Every retry after a timeout uses a new request UUID and generation.
+The Agent sets the response envelope's `correlation_id` to the request UUID, including after a stream reconnect.
+Reports can be lost when a stream closes, so the Authority times out requests without a terminal outcome.
+The Authority accepts a report only when its authenticated Agent Identity and correlation UUID match a pending request and its target SID matches that request's canonical SID.
+It ignores stale, unsolicited, mismatched and already completed reports without changing inventory or newer requests.
+
+Each collection has a nonempty `report_id` identifying the snapshot independently of the request UUID.
+All pages of that collection carry the same `report_id` and `page_count`.
+`page_index` and `page_count` are `InventoryReport` fields 7 and 8, respectively.
+`page_count` is at least one, including for an empty inventory, and `page_index` is zero-based and less than `page_count`.
+`last` is true exactly when `page_index` is the final index.
+The Authority stages at most one collection for a request, bounds its staged page count and size, accepts identical duplicate pages and rejects conflicting duplicates.
+It replaces inventory and updates its last-successful sync only after all indexes for that collection are present.
+When staging is lost after restart or failover, the Authority abandons the incomplete attempt, ignores later pages from it and preserves the last completed inventory.
+
+The Agent sends `InventoryUnavailable` as `DeviceManagementReport.inventory_unavailable` field 6, with `target_user_sid` field 1 and `reason` field 2.
+`reason` is `UNSPECIFIED` (0), `SAFE_ENDPOINT_UNAVAILABLE` (1), `BUSY` (2) or `COLLECTION_FAILED` (3).
+The Authority maps `UNSPECIFIED` and unrecognized reasons to generic unavailability, never success or authorization.
+It stores or displays only an allowlisted reason or a generic label, not raw diagnostics.
+An unavailable result discards only that request's staged pages and preserves the last completed inventory and last-successful sync.
+The Agent and Authority must both understand unavailable reports and complete-page validation; mixed versions are unsupported.
+
+Any refresh after a package operation uses a new `SyncInventory` request with its own correlation and generation.
+Such a refresh neither determines the operation's outcome nor retries the write.
+Connection activity or a last-seen timestamp is not an inventory-sync outcome.
 The Authority stores an entry once per device when a manager-specific mapping confirms machine-wide ownership, and once per device and target user SID when it confirms user ownership.
 An unmapped scope does not establish either ownership class.
 The exact inventory record key is provisional, but it must preserve manager, source, package ID and scope so machine and user installations are not collapsed.
-Inventory pagination and replacement semantics are provisional as described in `CONTRACT.package-management.md §provisional-decisions`.
 UniGetUI's current package model and `IpcPackageInfo` contain no scope property, while `IpcPackageActionRequest` accepts `Scope`.
 The installed IPC list deduplicates with `GetPackageIdentity`, so adding a response property alone may not preserve both machine and user installations.
 These gaps are visible in the [UniGetUI package model], [UniGetUI IPC package types] and [installed-package identity implementation] at pinned source commit `da6be7b86100302a79a208e7ab4d5c6fcd695fd5`.
@@ -270,8 +295,7 @@ Data messages carry a channel ID and opaque payload, and either party may close 
 Package management is the first separately versioned extension.
 UniGetUI must preserve reported scope in its package model and identity as well as its IPC response so distinct installations are not collapsed.
 The inventory key for unknown ownership and how each manager's scope maps to broker execution remain unresolved.
-The proposed inventory page carries the SID of its reporting instance.
-The Authority initializes or replaces stored inventory only after the final page arrives, and an operation result does not itself update package records.
+An operation result does not itself update package records.
 The requested-version field is optional where an operation does not use a version; its exact meaning for each operation is unresolved.
 The endpoint errors use the proposed codes in `CONTRACT.package-management.md §provisional-errors`, and neither permits retrying the write against another endpoint.
 A transport disconnection does not prove that an operation failed.

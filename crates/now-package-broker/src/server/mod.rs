@@ -32,7 +32,7 @@ use win_api_wrappers::identity::sid::Sid;
 use crate::auth::PipeClient;
 use crate::command_builder::build_command;
 use crate::evaluator;
-use crate::executor::{CommandExecutor, ExecutionContext};
+use crate::executor::{CommandExecutor, ExecutionContext, TokenElevationCheck};
 use crate::operation_tracker::OperationTracker;
 use crate::policy_store::PolicyStore;
 
@@ -91,9 +91,20 @@ impl ProcessIdentity {
         self.client.user_sid()
     }
 
+    /// Returns whether the process token was elevated when captured.
+    pub fn is_elevated(&self) -> bool {
+        self.client.is_elevated()
+    }
+
     /// Returns the session ID captured from the process token.
     pub fn session_id(&self) -> anyhow::Result<u32> {
         self.client.session_id()
+    }
+
+    /// Checks that the process belongs to the user logged on to its session.
+    pub fn ensure_logged_on_session(&self) -> anyhow::Result<()> {
+        crate::executor::ensure_session_user(self.session_id()?, self.user_sid())?;
+        self.client.ensure_process_instance()
     }
 
     /// Resolves the account name under the captured process token.
@@ -702,6 +713,7 @@ impl BrokerState {
                 user_sid: user_sid.clone(),
                 elevation: evaluator::effective_execution_elevation(&request),
                 scope: request.options.scope,
+                token_elevation_check: TokenElevationCheck::Unchecked,
                 capture_output: request.capture_output,
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 event_sink: None,

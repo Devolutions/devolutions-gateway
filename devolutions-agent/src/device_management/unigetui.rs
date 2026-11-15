@@ -6,7 +6,9 @@
 #[cfg(windows)]
 use std::mem::size_of;
 #[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::fs::OpenOptionsExt as _;
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, IntoRawHandle as _};
 #[cfg(windows)]
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
@@ -23,7 +25,7 @@ use serde::de::DeserializeOwned;
 #[cfg(windows)]
 use win_api_wrappers::process::{Process, ProcessEntry32Iterator};
 #[cfg(windows)]
-use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE};
+use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GENERIC_READ, HANDLE};
 #[cfg(windows)]
 use windows::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCP_STATE_ESTAB, MIB_TCP_STATE_LISTEN, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_CLASS,
@@ -31,6 +33,8 @@ use windows::Win32::NetworkManagement::IpHelper::{
 };
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock::AF_INET;
+#[cfg(windows)]
+use windows::Win32::Storage::FileSystem::{FILE_FLAG_OVERLAPPED, FILE_WRITE_DATA, SECURITY_IDENTIFICATION};
 #[cfg(windows)]
 use windows::Win32::System::Pipes::GetNamedPipeServerProcessId;
 #[cfg(windows)]
@@ -122,23 +126,36 @@ struct IpcPackage {
     #[serde(default)]
     source: String,
     #[serde(default)]
+    source_name: String,
+    #[serde(default)]
     manager: String,
     #[serde(default)]
     new_version: String,
     #[serde(default)]
     scope: String,
+    #[serde(default)]
+    reported_scope: Option<String>,
+}
+
+impl IpcPackage {
+    fn reported_scope(&self) -> &str {
+        self.reported_scope.as_deref().unwrap_or(&self.scope)
+    }
 }
 
 impl From<IpcPackage> for InstalledPackage {
     fn from(package: IpcPackage) -> Self {
+        let reported_scope = package.reported_scope.unwrap_or(package.scope);
         Self {
             manager: package.manager,
             source: package.source,
+            source_name: package.source_name,
             id: package.id,
             name: package.name,
             version: package.version,
             available_version: package.new_version,
-            scope: package.scope,
+            scope: "UNKNOWN".to_owned(),
+            reported_scope,
         }
     }
 }
@@ -198,13 +215,20 @@ pub(super) async fn installed_packages(instance: &TargetInstance) -> anyhow::Res
 fn merge_available_versions(packages: &mut [InstalledPackage], upgradable: Vec<IpcPackage>) {
     for update in upgradable.into_iter().filter(|update| !update.new_version.is_empty()) {
         let same_package = |package: &InstalledPackage| {
-            package.manager == update.manager && package.id == update.id && package.scope == update.scope
+            package.manager == update.manager
+                && package.id == update.id
+                && package.reported_scope == update.reported_scope()
         };
-        // Match the source first; fall back to manager, ID and scope when UniGetUI reports a different source name.
-        let index = packages
-            .iter()
-            .position(|package| same_package(package) && package.source == update.source)
-            .or_else(|| packages.iter().position(same_package));
+        let mut candidates = packages.iter().enumerate().filter(|(_, package)| {
+            same_package(package)
+                && if package.source_name.is_empty() || update.source_name.is_empty() {
+                    !package.source.is_empty() && package.source == update.source
+                } else {
+                    package.source_name == update.source_name
+                }
+        });
+        let index = candidates.next().map(|(index, _)| index);
+        let index = if candidates.next().is_none() { index } else { None };
         if let Some(index) = index {
             packages[index].available_version = update.new_version;
         }
@@ -346,9 +370,7 @@ async fn query_verified_endpoint(endpoint: &DiscoveredEndpoint, path_and_query: 
         }
         Transport::NamedPipe(name) => {
             let pipe_path = format!(r"\\.\pipe\{name}");
-            let pipe = tokio::net::windows::named_pipe::ClientOptions::new()
-                .open(&pipe_path)
-                .with_context(|| format!("failed to open {pipe_path}"))?;
+            let pipe = open_unigetui_pipe(&pipe_path).with_context(|| format!("failed to open {pipe_path}"))?;
             if named_pipe_server_process_id(pipe.as_raw_handle())? != process_id {
                 bail!("UniGetUI named-pipe endpoint owner changed before the request");
             }
@@ -453,11 +475,32 @@ async fn discover_endpoints_with_identity() -> anyhow::Result<Vec<DiscoveredEndp
             );
             continue;
         }
-        if session_id == 0 {
+        if !process.signature_verified() {
             warn!(
                 file = %endpoint.file.display(),
                 process_id,
-                "UniGetUI endpoint owner is not in an interactive user session"
+                "UniGetUI endpoint owner signature is not verified"
+            );
+            continue;
+        }
+        // UNTESTED: A process can use another account within a logged-on session, so its SID must match the session user.
+        // Check mismatched and matching signed processes in real user sessions when changing this verification.
+        if let Err(error) = process.ensure_logged_on_session() {
+            warn!(
+                file = %endpoint.file.display(),
+                process_id,
+                error = format!("{error:#}"),
+                "UniGetUI endpoint owner is not the logged-on session user"
+            );
+            continue;
+        }
+        // UNTESTED: An elevated UniGetUI must not be reported or targeted, because remote operations require an unelevated client.
+        // Verify signed elevated and unelevated instances when changing process-token capture or this check.
+        if process.is_elevated() {
+            warn!(
+                file = %endpoint.file.display(),
+                process_id,
+                "UniGetUI endpoint owner is elevated"
             );
             continue;
         }
@@ -513,12 +556,22 @@ async fn endpoint_owner_process_id(endpoint: &Endpoint) -> anyhow::Result<u32> {
         Transport::Tcp(port) => tcp_listener_process_id(*port),
         Transport::NamedPipe(name) => {
             let pipe_path = format!(r"\\.\pipe\{name}");
-            let pipe = tokio::net::windows::named_pipe::ClientOptions::new()
-                .open(&pipe_path)
-                .with_context(|| format!("failed to open {pipe_path}"))?;
+            let pipe = open_unigetui_pipe(&pipe_path).with_context(|| format!("failed to open {pipe_path}"))?;
             named_pipe_server_process_id(pipe.as_raw_handle())
         }
     }
+}
+
+#[cfg(windows)]
+fn open_unigetui_pipe(path: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    let pipe = std::fs::OpenOptions::new()
+        .access_mode(GENERIC_READ.0 | FILE_WRITE_DATA.0)
+        .custom_flags(FILE_FLAG_OVERLAPPED.0)
+        .security_qos_flags(SECURITY_IDENTIFICATION.0)
+        .open(path)?;
+
+    // SAFETY: The new overlapped pipe handle is transferred to the Tokio client.
+    unsafe { tokio::net::windows::named_pipe::NamedPipeClient::from_raw_handle(pipe.into_raw_handle()) }
 }
 
 #[cfg(windows)]
@@ -834,6 +887,53 @@ fn decode_chunked(mut input: &[u8]) -> anyhow::Result<Vec<u8>> {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn named_pipe_client_restricts_server_impersonation() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use win_api_wrappers::handle::HandleWrapper as _;
+        use win_api_wrappers::thread::Thread;
+        use windows::Win32::Security::{
+            GetTokenInformation, RevertToSelf, SECURITY_IMPERSONATION_LEVEL, SecurityIdentification, TOKEN_QUERY,
+            TokenImpersonationLevel,
+        };
+        use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
+
+        let name = format!(r"\\.\pipe\unigetui-qos-test-{}", uuid::Uuid::new_v4());
+        let mut server = tokio::net::windows::named_pipe::ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&name)
+            .expect("create pipe");
+        let mut client = open_unigetui_pipe(&name).expect("connect client");
+        server.connect().await.expect("accept client");
+        client.write_all(b"x").await.expect("write request");
+        server.read_exact(&mut [0]).await.expect("read request");
+
+        // SAFETY: The server has read from this connected pipe.
+        unsafe { ImpersonateNamedPipeClient(HANDLE(server.as_raw_handle())) }.expect("impersonate client");
+        let level = (|| -> anyhow::Result<SECURITY_IMPERSONATION_LEVEL> {
+            let token = Thread::current().token(TOKEN_QUERY, true)?;
+            let mut level = SECURITY_IMPERSONATION_LEVEL::default();
+            let mut returned = 0;
+            // SAFETY: The token is open for query and the buffer has the size of the requested type.
+            unsafe {
+                GetTokenInformation(
+                    token.handle().raw(),
+                    TokenImpersonationLevel,
+                    Some((&raw mut level).cast()),
+                    u32::try_from(size_of::<SECURITY_IMPERSONATION_LEVEL>()).expect("impersonation level size"),
+                    &mut returned,
+                )
+            }?;
+            Ok(level)
+        })();
+        // SAFETY: Revert before the test thread runs any other work.
+        unsafe { RevertToSelf() }.expect("revert impersonation");
+
+        assert_eq!(level.expect("query impersonation level"), SecurityIdentification);
+    }
+
     #[test]
     fn error_responses_do_not_echo_the_ipc_token() {
         // oracle: regression #2194
@@ -914,26 +1014,53 @@ mod tests {
 
     #[test]
     fn missing_inventory_scope_remains_unknown() {
-        // oracle: reference Devolutions/UniGetUI@da6be7b86100:src/UniGetUI.Interface.IpcApi/IpcPackageApi.cs
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let package: InstalledPackage = serde_json::from_str::<IpcPackage>(
             r#"{"name":"Example","id":"example","version":"1.0","manager":"winget"}"#,
         )
         .expect("deserialize package")
         .into();
 
-        assert!(package.scope.is_empty());
+        assert_eq!(package.scope, "UNKNOWN");
+        assert!(package.reported_scope.is_empty());
     }
 
     #[test]
-    fn inventory_scope_is_preserved_without_normalization() {
+    fn manager_scope_does_not_claim_unproven_ownership() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
         let package: InstalledPackage = serde_json::from_str::<IpcPackage>(
-            r#"{"name":"Example","id":"example","version":"1.0","manager":"winget","scope":"Local"}"#,
+            r#"{"name":"Example","id":"example","version":"1.0","manager":"bun","reportedScope":"Machine"}"#,
         )
         .expect("deserialize package")
         .into();
 
-        assert_eq!(package.scope, "Local");
+        assert_eq!(package.scope, "UNKNOWN");
+        assert_eq!(package.reported_scope, "Machine");
+    }
+
+    #[test]
+    fn inventory_preserves_the_canonical_source_separately_from_its_label() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+        let package: InstalledPackage = serde_json::from_str::<IpcPackage>(
+            r#"{"source":"WinGet: winget","sourceName":"winget","id":"example","manager":"winget"}"#,
+        )
+        .expect("deserialize package")
+        .into();
+
+        assert_eq!(package.source, "WinGet: winget");
+        assert_eq!(package.source_name, "winget");
+    }
+
+    #[test]
+    fn inventory_does_not_infer_a_canonical_source_from_its_label() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+        let package: InstalledPackage =
+            serde_json::from_str::<IpcPackage>(r#"{"source":"WinGet: winget","id":"example","manager":"winget"}"#)
+                .expect("deserialize package")
+                .into();
+
+        assert_eq!(package.source, "WinGet: winget");
+        assert!(package.source_name.is_empty());
     }
 
     #[cfg(windows)]
@@ -985,20 +1112,24 @@ mod tests {
             InstalledPackage {
                 manager: "winget".to_owned(),
                 source: "winget".to_owned(),
+                source_name: "winget".to_owned(),
                 id: "example".to_owned(),
                 name: "Example".to_owned(),
                 version: "1.0".to_owned(),
                 available_version: String::new(),
-                scope: "Machine".to_owned(),
+                scope: "UNKNOWN".to_owned(),
+                reported_scope: "Machine".to_owned(),
             },
             InstalledPackage {
                 manager: "winget".to_owned(),
                 source: "winget".to_owned(),
+                source_name: "winget".to_owned(),
                 id: "example".to_owned(),
                 name: "Example".to_owned(),
                 version: "1.0".to_owned(),
                 available_version: String::new(),
-                scope: "User".to_owned(),
+                scope: "UNKNOWN".to_owned(),
+                reported_scope: "User".to_owned(),
             },
         ];
 
@@ -1009,9 +1140,11 @@ mod tests {
                 id: "example".to_owned(),
                 version: "1.0".to_owned(),
                 source: "winget".to_owned(),
+                source_name: "winget".to_owned(),
                 manager: "winget".to_owned(),
                 new_version: "2.0".to_owned(),
                 scope: "User".to_owned(),
+                reported_scope: None,
             }],
         );
 
@@ -1025,11 +1158,13 @@ mod tests {
         let mut packages = vec![InstalledPackage {
             manager: "winget".to_owned(),
             source: "winget".to_owned(),
+            source_name: "winget".to_owned(),
             id: "example".to_owned(),
             name: "Example".to_owned(),
             version: "1.0".to_owned(),
             available_version: String::new(),
-            scope: "Machine".to_owned(),
+            scope: "UNKNOWN".to_owned(),
+            reported_scope: "Machine".to_owned(),
         }];
 
         merge_available_versions(
@@ -1039,13 +1174,82 @@ mod tests {
                 id: "example".to_owned(),
                 version: "1.0".to_owned(),
                 source: "winget".to_owned(),
+                source_name: "winget".to_owned(),
                 manager: "winget".to_owned(),
                 new_version: "2.0".to_owned(),
                 scope: String::new(),
+                reported_scope: None,
             }],
         );
 
         assert_eq!(packages[0].available_version, "");
+    }
+
+    #[test]
+    fn available_version_is_not_attributed_to_a_different_source() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+        let mut packages = vec![InstalledPackage {
+            manager: "winget".to_owned(),
+            source: "WinGet: first".to_owned(),
+            source_name: "first".to_owned(),
+            id: "example".to_owned(),
+            name: "Example".to_owned(),
+            version: "1.0".to_owned(),
+            available_version: String::new(),
+            scope: "UNKNOWN".to_owned(),
+            reported_scope: "User".to_owned(),
+        }];
+
+        merge_available_versions(
+            &mut packages,
+            vec![IpcPackage {
+                name: "Example".to_owned(),
+                id: "example".to_owned(),
+                version: "1.0".to_owned(),
+                source: "WinGet: second".to_owned(),
+                source_name: "second".to_owned(),
+                manager: "winget".to_owned(),
+                new_version: "2.0".to_owned(),
+                scope: "User".to_owned(),
+                reported_scope: None,
+            }],
+        );
+
+        assert!(packages[0].available_version.is_empty());
+    }
+
+    #[test]
+    fn available_version_is_not_attributed_to_an_ambiguous_source() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+        let package = |source_name: &str| InstalledPackage {
+            manager: "winget".to_owned(),
+            source: "redacted".to_owned(),
+            source_name: source_name.to_owned(),
+            id: "example".to_owned(),
+            name: "Example".to_owned(),
+            version: "1.0".to_owned(),
+            available_version: String::new(),
+            scope: "UNKNOWN".to_owned(),
+            reported_scope: "User".to_owned(),
+        };
+        let mut packages = vec![package("first"), package("second")];
+
+        merge_available_versions(
+            &mut packages,
+            vec![IpcPackage {
+                name: "Example".to_owned(),
+                id: "example".to_owned(),
+                version: "1.0".to_owned(),
+                source: "redacted".to_owned(),
+                source_name: String::new(),
+                manager: "winget".to_owned(),
+                new_version: "2.0".to_owned(),
+                scope: "User".to_owned(),
+                reported_scope: None,
+            }],
+        );
+
+        assert!(packages.iter().all(|package| package.available_version.is_empty()));
     }
 
     #[cfg(windows)]

@@ -2,8 +2,8 @@
 //!
 //! The Agent issues a grant from the authority's operation fields and a target Windows SID.
 //! The broker consumes it against the pipe caller and the decoded request.
-//! The grant authorizes exactly one canonical request: the authority fields, the generated request ID and fixed safe
-//! values for every other field.
+//! The grant binds the authority operation fields, generated request ID and safe values for other effectful fields.
+//! Caller identity is verified separately, and non-effectful metadata is excluded.
 //! The store is in-memory only: grants do not survive a restart.
 
 use std::collections::HashMap;
@@ -391,6 +391,7 @@ mod tests {
 
     macro_rules! request_is_denied {
         ($name:ident, |$r:ident| $change:expr) => {
+            // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
             #[test]
             fn $name() {
                 assert_changed_request_is_denied(|$r| {
@@ -402,6 +403,7 @@ mod tests {
 
     macro_rules! spec_is_denied {
         ($name:ident, |$s:ident| $change:expr) => {
+            // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
             #[test]
             fn $name() {
                 assert_changed_spec_is_denied(|$s| {

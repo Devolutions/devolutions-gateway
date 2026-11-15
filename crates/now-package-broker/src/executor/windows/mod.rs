@@ -20,7 +20,7 @@ use windows::Win32::Security::TOKEN_ALL_ACCESS;
 
 use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
-    ProcessStartedCallback, is_canceled_error,
+    ProcessStartedCallback, TokenElevationCheck, is_canceled_error,
 };
 use crate::command_builder::{BATCH_METACHARACTERS, quote_powershell_literal};
 use crate::policy_security;
@@ -34,6 +34,22 @@ use privileges::SharedPrivileges;
 use process::{OutputCapture, create_process};
 use token::{detect_running_as_system, find_user_session, get_elevated_token};
 use user_env::UserEnv;
+
+pub(crate) fn ensure_session_user(session_id: u32, user_sid: &Sid) -> anyhow::Result<()> {
+    if session_id == 0 {
+        bail!("process is not in a user session");
+    }
+
+    let _privileges = SharedPrivileges::acquire(&[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
+    let token = Token::for_session(session_id).context("failed to query logged-on session user")?;
+    let session_user = token
+        .sid_and_attributes()
+        .context("failed to query logged-on session user SID")?;
+    if session_user.sid != *user_sid {
+        bail!("process user does not match the logged-on session user");
+    }
+    Ok(())
+}
 
 /// Windows command executor using `win-api-wrappers` safe abstractions.
 ///
@@ -325,6 +341,15 @@ fn execute_as_current_user(
     Ok(output)
 }
 
+fn verify_token_elevation(required: bool, actual: bool) -> anyhow::Result<()> {
+    if required != actual {
+        bail!(
+            "execution token elevation (elevated: {actual}) does not match the authorized requirement (elevated: {required})"
+        );
+    }
+    Ok(())
+}
+
 /// Run the full execution plan under `token`: best-effort process kills, an
 /// optional pre-operation command (must succeed), the main package-manager
 /// command, then an optional post-operation command (failures are logged).
@@ -343,6 +368,17 @@ fn run_plan(
     let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
     if requires_elevation && command_is_bun(&ctx.command) {
         bail!("elevated Bun package operations are not supported by the broker");
+    }
+
+    // The token's own elevation is what matters, not how it was obtained, so this also
+    // covers UAC-disabled sessions where the regular token is already elevated.
+    // UNTESTED: The selected execution token has the expected elevation on real UAC-enabled and UAC-disabled systems.
+    // A mismatch could run an operation with unintended privileges; check both request levels in SYSTEM mode.
+    if ctx.token_elevation_check == TokenElevationCheck::Exact {
+        let actual = token
+            .is_elevated()
+            .context("failed to query execution token elevation")?;
+        verify_token_elevation(requires_elevation, actual)?;
     }
 
     // SECURITY: Pre/post commands are raw strings whose content is not governed by
@@ -1410,21 +1446,22 @@ mod tests {
 
     use now_policy_api::{Elevation, Scope};
     use win_api_wrappers::identity::sid::Sid;
+    use win_api_wrappers::process::Process;
     use win_api_wrappers::security::acl::{
         Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
     };
     use win_api_wrappers::str::U16CString;
     use windows::Win32::Foundation::GENERIC_ALL;
     use windows::Win32::Security::Authorization::{GRANT_ACCESS, SE_FILE_OBJECT};
-    use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
+    use windows::Win32::Security::{NO_INHERITANCE, TOKEN_ALL_ACCESS, WinWorldSid};
 
     use super::{
         BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, UserEnv, WindowsExecutor, append_batch_executable,
         execute_as_current_user, prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root,
         prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
-        resolve_trusted_chocolatey_executable, resolve_winget_executable,
+        resolve_trusted_chocolatey_executable, resolve_winget_executable, run_plan, verify_token_elevation,
     };
-    use crate::executor::{CommandExecutor as _, ExecutionContext};
+    use crate::executor::{CommandExecutor as _, ExecutionContext, TokenElevationCheck};
 
     fn grant(permissions: u32, sid: Sid) -> ExplicitAccess {
         ExplicitAccess {
@@ -2228,6 +2265,7 @@ mod tests {
             user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
+            token_elevation_check: TokenElevationCheck::Unchecked,
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             event_sink: None,
@@ -2253,6 +2291,7 @@ mod tests {
             user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Elevated,
             scope: Some(Scope::User),
+            token_elevation_check: TokenElevationCheck::Unchecked,
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             event_sink: None,
@@ -2282,6 +2321,7 @@ mod tests {
             user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
             elevation: Elevation::Standard,
             scope: Some(Scope::User),
+            token_elevation_check: TokenElevationCheck::Unchecked,
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             event_sink: None,
@@ -2289,6 +2329,54 @@ mod tests {
 
         let error = execute_as_current_user(&ctx, None).expect_err("mismatched client SID should fail");
         assert!(error.to_string().contains("does not match broker process user SID"));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn token_elevation_must_match_requirement_exactly() {
+        verify_token_elevation(true, true).expect("elevated token for an elevated requirement");
+        verify_token_elevation(false, false).expect("regular token for a regular requirement");
+        verify_token_elevation(true, false).expect_err("regular token cannot satisfy an elevated requirement");
+        // Covers UAC-disabled sessions, where the regular session token is already elevated.
+        verify_token_elevation(false, true).expect_err("elevated token cannot satisfy a regular requirement");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn exact_check_rejects_actual_token_mismatch_before_launch() {
+        let token = Process::current_process()
+            .token(TOKEN_ALL_ACCESS)
+            .expect("open current process token");
+        let actual = token.is_elevated().expect("query token elevation");
+        let user_sid = token.sid_and_attributes().expect("token user SID").sid;
+        let session_id = token.session_id().expect("token session ID");
+
+        // Require the opposite of what the token is: the plan must fail before any process starts.
+        let ctx = ExecutionContext {
+            kill_processes: vec!["now-package-broker-test-never-running.exe".to_owned()],
+            pre_command: None,
+            command: vec![
+                r"C:\Windows\System32\cmd.exe".to_owned(),
+                "/C".to_owned(),
+                "exit".to_owned(),
+            ],
+            post_command: None,
+            effective_user: "DOMAIN\\user".to_owned(),
+            user_sid,
+            elevation: if actual {
+                Elevation::Standard
+            } else {
+                Elevation::Elevated
+            },
+            scope: Some(Scope::User),
+            token_elevation_check: TokenElevationCheck::Exact,
+            capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
+        };
+
+        let error = run_plan(&token, &ctx, session_id, None).expect_err("mismatched token must be rejected");
+        assert!(error.to_string().contains("does not match the authorized requirement"));
     }
 
     #[test]
