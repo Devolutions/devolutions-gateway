@@ -31,8 +31,8 @@ use url as _;
 use uuid as _;
 #[cfg(windows)]
 use {
-    aws_lc_rs as _, chrono as _, devolutions_pedm as _, hex as _, notify_debouncer_mini as _, sha2 as _,
-    thiserror as _, win_api_wrappers as _, windows as _,
+    aws_lc_rs as _, devolutions_pedm as _, hex as _, notify_debouncer_mini as _, sha2 as _, thiserror as _,
+    win_api_wrappers as _, windows as _,
 };
 
 #[macro_use]
