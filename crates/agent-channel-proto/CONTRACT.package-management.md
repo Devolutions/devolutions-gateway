@@ -13,7 +13,7 @@ The UniGetUI IPC and broker request details below describe cross-component behav
 - **Broker**: the Agent package broker, which validates authorization tokens and executes operations.
 - **Instance**: one running UniGetUI process and its IPC endpoint.
 - **Target user SID**: the Windows user SID whose session supplies the UniGetUI instance for an operation.
-- **Scope**: a manager-reported package scope value; manager-relative labels do not by themselves establish machine-wide or user-specific installed ownership.
+- **Scope**: proven user or machine installation ownership, or unknown when ownership cannot be established.
 
 <a id="channel"></a>
 ## Channel
@@ -34,7 +34,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 | `UniGetUiInstance` | Agent to Authority | `user_sid`, `display_name`, `session_id`, `signature_verified` |
 | `SyncInventory` | Authority to Agent | `target_user_sid` |
 | `InventoryReport` | Agent to Authority | `report_id`, `last`, `target_user_sid`, `packages`, `managers`, `sources` |
-| `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope` |
+| `InstalledPackage` | Agent to Authority | `manager`, `source`, `source_name`, `id`, `name`, `version`, `available_version`, `scope`, `reported_scope` |
 | `PackageOperationRequest` | Authority to Agent | `operation_id`, `type`, `manager`, `source`, `package_id`, `version`, `scope`, `target_user_sid` |
 | `UniGetUIOperationRequest` | Agent to UniGetUI | `operation`, `bypass_token` |
 | `BrokerOperationRequest` | UniGetUI to Broker | `operation`, `bypass_token` |
@@ -46,6 +46,7 @@ The extension framing and any UniGetUI-to-Broker request details not specified b
 The Agent reports discovered, unelevated UniGetUI instances in logged-on user sessions with their target user SID, session ID, display name and signature-verification result.
 The Agent obtains the SID and session ID from the Windows token of the endpoint-owning process, not from a value reported by UniGetUI.
 The Agent verifies the executable signature before reporting an instance or accepting it as a target.
+The Agent allows at most identification-level impersonation when connecting to a UniGetUI named pipe.
 The Authority stores and selects the target user SID, and displays it as `DOMAIN\user (session N)`.
 Every package operation includes a target user SID, including a machine-scope operation.
 The Agent resolves the target SID to a live instance when it executes the request.
@@ -57,15 +58,18 @@ Remote writes never fall back to local package execution.
 <a id="inventory"></a>
 ## Inventory
 
-Each package entry contains its manager, source, package ID, name, installed version, available version and scope.
-`source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity is unavailable.
-UniGetUI supplies the canonical name as `sourceName`; the Agent preserves both fields without deriving one from the other.
+Each package entry contains its manager, source, package ID, name, installed version, available version, ownership scope and reported scope.
+`source` is a display label; `source_name` is the canonical Broker `Source.Name` or empty when that identity cannot be safely reported.
+UniGetUI supplies the canonical name as `sourceName`; the Agent does not derive it from the display label.
+Source names, URLs and labels containing credentials or local paths are not sent to the Authority.
 Every inventory request includes the target user SID, as do install, update and uninstall requests.
-Values with confirmed machine or user semantics distinguish those installations; other manager-relative values are not interpreted without a mapping.
-Inventory preserves the scope values UniGetUI exposes without conversion to a narrower set.
-UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish device-wide ownership across managers.
+The ownership `scope` is `USER`, `MACHINE` or `UNKNOWN`.
+The Agent sets it to `USER` or `MACHINE` only when a manager-specific mapping establishes that ownership; otherwise it is `UNKNOWN`.
+`reported_scope` preserves UniGetUI's raw `reportedScope` value separately from ownership.
+UniGetUI aliases `Global` to `Machine` and `Local` to `User`, but those labels do not establish ownership across managers.
+The Authority does not use `reported_scope` to deduplicate machine-wide installations or authorize machine-wide changes.
 The scope-label definitions are in [UniGetUI package scope aliases].
-Unknown-scope handling and the placement of the reporting instance SID are listed in `CONTRACT.package-management.md §provisional-decisions`.
+The placement of the reporting instance SID is listed in `CONTRACT.package-management.md §provisional-decisions`.
 Pages in one complete inventory share a report ID, and the final page sets `last` to true.
 The Authority stores an entry once per device when a manager-specific mapping confirms machine-wide ownership, and once per device and target user SID when it confirms user ownership.
 An unmapped scope does not establish either ownership class.
@@ -131,8 +135,14 @@ The actual execution token must be elevated exactly when `Options.Scope` is `Mac
 The Broker rejects an elevated request unless the Authority's scope authorizes machine effects.
 `IncludeCommandPreview` must be false, and `CaptureOutput` must be true.
 UniGetUI uses captured stdout and stderr only for local result parsing; it does not send them to the Agent or Authority or write them to logs.
-The existing event pipe permits access by the target user SID, SYSTEM and Administrators and does not authenticate the connecting process or session.
-The required privacy boundary for grant-operation output remains unresolved; remote execution must not begin until it is settled.
+For grant operations, the Broker sends event frames only to the verified process that submitted the operation.
+It authenticates the connecting process before sending any event frames, and rejects other processes without disclosing output.
+The grant client verifies that the event pipe belongs to the same live Broker instance that accepted the operation.
+The legacy event pipe and its user-SID access rules remain unchanged.
+For grant operations, the Broker emits `Finish` only after both output readers have completed without losing data.
+On a read failure, reader panic, invalid UTF-8, output overflow or other loss, it closes the event stream without `Finish`.
+The grant client accepts output only after a valid `Hello` and `Finish` with no overflow or malformed frames.
+When the operation's verdict requires output that is unavailable or incomplete, UniGetUI reports `UNKNOWN`.
 
 The npm broker always emits `--global`, while the .NET tool broker emits it when no custom install location is set; both reject explicit machine scope, so the current routes do not preserve UniGetUI's distinct `Local` and `Global` choices.
 The .NET broker passes `--source` for install and update, which overrides NuGet configuration including Package Source Mapping.
@@ -142,6 +152,9 @@ How each manager's scope maps to broker execution remains unresolved.
 An operation result identifies the operation ID.
 When the outcome is known, it reports success or failure with an error value on failure.
 When the Agent cannot recover an operation's outcome, it reports `UNKNOWN`.
+The Agent sends an `UNKNOWN` result in `DeviceManagementReport.package_operation_unknown` with field number 5.
+It sends a known result with status `UNSPECIFIED` in `DeviceManagementReport.package_operation_result` with field number 2.
+The Authority does not record success or failure for a result whose field and status disagree.
 The Authority ignores `success` when the status is `UNKNOWN`.
 Agent and Authority versions must both understand `UNKNOWN` when they exchange operation results, including queued results after reconnect or rollback.
 Mixed versions that do not satisfy this requirement are unsupported.
@@ -251,8 +264,8 @@ The Authority opens a channel with a channel ID, extension name and version, and
 The Agent refuses an unknown extension or one disabled by local configuration.
 Data messages carry a channel ID and opaque payload, and either party may close a channel with a reason.
 Package management is the first separately versioned extension.
-Package scope must come from a per-package value supplied by UniGetUI, which must preserve scope in its package model and identity as well as its IPC response so distinct installations are not collapsed.
-How an inventory entry with unknown scope is represented or keyed, and how each manager's scope maps to broker execution, remain unresolved.
+UniGetUI must preserve reported scope in its package model and identity as well as its IPC response so distinct installations are not collapsed.
+The inventory key for unknown ownership and how each manager's scope maps to broker execution remain unresolved.
 The proposed inventory page carries the SID of its reporting instance.
 The Authority initializes or replaces stored inventory only after the final page arrives, and an operation result does not itself update package records.
 The requested-version field is optional where an operation does not use a version; its exact meaning for each operation is unresolved.
@@ -263,8 +276,8 @@ The Agent does not replay an operation automatically after disconnection or rest
 <a id="external-changes"></a>
 ## Required changes outside this repository
 
-UniGetUI must add scope to its package model and installed IPC response while including scope in package identity so user and machine installations remain distinct.
-UniGetUI must expose each package's canonical Broker source name as `sourceName` independently of its display label.
+UniGetUI must add `reportedScope` to its package model and installed IPC response while including it in package identity so distinct installations remain distinct.
+UniGetUI must expose each safely reportable canonical Broker source name as `sourceName` independently of its display label.
 UniGetUI must pass the Agent-minted operation token through IPC to the package broker's named pipe without elevating its process.
 UniGetUI must reject remote operations when broker routing is disabled, the manager is unsupported, the source cannot use broker routing, or the token does not authorize all execution-affecting fields; it must not fall back to local process execution.
 This fail-closed requirement covers the existing local-fallback paths in [PackageOperations.cs][UniGetUI operation fallback].
