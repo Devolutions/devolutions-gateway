@@ -324,6 +324,8 @@ The grant is 1 to 2,048 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._~:-]*`
 Header names are case-insensitive; duplicate grant or `Accept` headers are rejected.
 The client validates the grant before sending it and does not send it with any other Broker request.
 The Broker independently validates the decoded request and the pipe caller's SID against the grant before execution, and atomically consumes a matching grant while creating its outcome record.
+The caller is the named pipe's connected client security context, which must also match the captured connecting process.
+A client that delegates its connected handle delegates that connection's authority.
 The Broker rejects an invalid, expired, reused or mismatched grant rather than applying local policy.
 The Broker rejects missing, duplicate, invalid or unsupported grant requests before consuming a grant or starting work.
 Once consumed, a grant is never restored, even if submission or response delivery fails.
@@ -335,6 +337,8 @@ UniGetUI's broker request builder maps source, custom parameters and pre-operati
 These execution-affecting fields are visible in the [UniGetUI broker request builder][UniGetUI broker request fields].
 
 The Broker request's `Operation` must match the Authority operation type.
+The Agent accepts Broker manager names ignoring ASCII case and maps the inventory IDs `winps`, `pwsh` and `dotnet-tool` to `PowerShell`, `PowerShell7` and `Dotnet`, respectively, also ignoring ASCII case.
+It sends the canonical Broker name to UniGetUI.
 The Broker compares `Manager` to the authorized manager using ASCII case-insensitive comparison of the Broker enum spelling.
 An alias without an agreed mapping is rejected.
 `Source.Name`, `Package.Id` and a nonempty requested version are compared exactly as decoded Unicode strings, without trimming or case folding.
