@@ -178,15 +178,21 @@ Responses may arrive in any order, and the Agent has at most 8 outstanding reque
 | --- | --- | --- |
 | `ListInstalledPackages` | none | the JSON array served by UniGetUI IPC `GET /uniget/v1/packages/installed` |
 | `ListPackageUpdates` | none | the JSON array served by `GET /uniget/v1/packages/updates` |
-| `ListManagers` | none | the JSON array served by `GET /uniget/v1/managers` |
+| `ListManagers` | none | the manager array with the redactions below |
 | `ListSources` | none | the JSON array served by `GET /uniget/v1/sources` |
 | `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
 | `GetPackageVersions` | `manager`, `sourceName`, `packageId` | `{ "versions": [string] }` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
+`ListManagers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
+`executablePath` and `executableArguments` are empty strings.
+`health.state` is `unknown`, `health.needsAttention` is false, `health.failingListing` and `health.reason` are null, and `health.consecutiveFailures` is zero.
+Each of `health.search`, `health.installed` and `health.updates` has null `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason`; false `lastFailureWasTimeout`; zero `consecutiveFailures`; and an empty `recentDurationsMs` array.
+These redactions keep executable paths, arguments and captured health output from reaching the Agent.
+
 The `GetInventorySnapshot` arrays use the item shapes of the corresponding list commands, subject to the source-safety rules in `CONTRACT.package-management.md §inventory`.
 An installed-package item may omit `systemRestartPending` when no value was captured in memory.
-`GetInventorySnapshot` returns timestamps as RFC 3339 UTC strings.
+`GetInventorySnapshot` returns scan timestamps as RFC 3339 strings with UTC offset zero, at most nine fractional digits and no leap seconds.
 `updateCompletedAt` may be omitted or null when no complete update scan is available; in that case, `updates` is empty.
 When UniGetUI cannot produce the installed snapshot required by `CONTRACT.package-management.md §inventory`, it answers `Failed` or `UnsupportedCommand` without a snapshot.
 `operation` is `Install`, `Update` or `Uninstall`; `version` is empty when not requested.
@@ -264,6 +270,7 @@ It is the completion time of the copied installed scan, not the time the Agent r
 `update_scan_completed_at` is `InventoryReport` field 12, an optional `google.protobuf.Timestamp` containing the completion time of the update scan.
 It is present and valid on every page when the response uses a complete update scan, and absent on every page otherwise.
 The Agent carries both completion times from UniGetUI unchanged, and their presence and values are identical on every page of the collection.
+If either timestamp violates `CONTRACT.package-management.md §registration` or the `google.protobuf.Timestamp` range, the Agent reports inventory unavailable without rounding or adjusting it.
 The Authority derives each scan's age from its timestamp, not from the time of upload or the last successful sync.
 If a timestamp is in the Authority's future, the Authority reports that scan's age as unknown.
 `page_index` and `page_count` are `InventoryReport` fields 7 and 8, respectively.
