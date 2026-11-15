@@ -149,7 +149,8 @@ Registration does not prove which process sends a later frame.
 
 Each frame is a 4-byte unsigned little-endian length `N`, followed by `N` bytes of a UTF-8 JSON object.
 `N` is 1 to 1,048,576; a frame outside that range, invalid JSON, a missing `kind` or an unknown `kind` closes the connection.
-Unknown members are ignored.
+Unknown members in a frame envelope or non-operation command are ignored and are never interpreted or forwarded.
+For `ExecutePackageOperation` arguments, `CONTRACT.package-management.md §operations` takes precedence.
 All identifiers are lowercase hyphenated UUIDs.
 
 | `kind` | Direction | Members |
@@ -300,6 +301,8 @@ Omission from a snapshot does not prove that a package was uninstalled.
 <a id="operations"></a>
 ## Package operations
 
+`ExecutePackageOperation` accepts only the argument members listed in `CONTRACT.package-management.md §registration`.
+UniGetUI rejects any other argument member before submitting the request to the Broker.
 The operation type is exactly one of `install`, `update` or `uninstall`.
 Remote writes allow install, update and uninstall for Broker-supported managers when they run unelevated with the target user's token.
 An operation runs elevated only when its manager is WinGet and the administrator requests `Machine` execution scope.
