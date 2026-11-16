@@ -10,8 +10,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::Value;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use parking_lot::Mutex;
+use serde_json::{Value, json};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -22,11 +23,20 @@ pub(super) const MAX_OUTSTANDING_REQUESTS: usize = 8;
 
 const MAX_COMMAND_CHARS: usize = 128;
 
-/// Time UniGetUI has to answer a request that does not change the system.
+/// Command that asks UniGetUI to reload its installed-package and available-update lists.
+const RESCAN_COMMAND: &str = "RescanInventory";
+
+/// Time UniGetUI has to answer a request that neither changes the system nor waits for a scan.
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Time UniGetUI has to answer `ExecutePackageOperation`.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// Time UniGetUI has to answer `RescanInventory`, which answers when both scans completed.
+///
+/// A request that reaches this deadline closes its connection, which leaves a package operation running on it unanswered.
+/// The deadline is therefore as long as an operation's, and a caller that cannot wait that long bounds its own wait.
+const RESCAN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Why a request produced no result.
 ///
@@ -78,6 +88,21 @@ pub(super) struct Command {
 pub(super) struct ConnectionHandle {
     commands: mpsc::Sender<Command>,
     slots: Arc<Semaphore>,
+    rescans: Mutex<Rescans>,
+}
+
+/// The outcome of one `RescanInventory`, absent until that request ended.
+type RescanOutcome = Option<Result<(), RequestError>>;
+
+/// The `RescanInventory` requests of one connection.
+///
+/// INVARIANT: Only the rescan in `outstanding` is written, and it is replaced only after it ended, so at most one is outstanding.
+#[derive(Debug, Default)]
+struct Rescans {
+    /// The rescan that was written last, which is outstanding until it carries an outcome.
+    outstanding: Option<watch::Receiver<RescanOutcome>>,
+    /// The rescan that waits for the outstanding one to end, shared by every caller that arrives meanwhile.
+    queued: Option<watch::Receiver<RescanOutcome>>,
 }
 
 impl ConnectionHandle {
@@ -87,6 +112,7 @@ impl ConnectionHandle {
         let handle = Self {
             commands,
             slots: Arc::new(Semaphore::new(MAX_OUTSTANDING_REQUESTS)),
+            rescans: Mutex::default(),
         };
         (Arc::new(handle), receiver)
     }
@@ -111,10 +137,10 @@ impl ConnectionHandle {
         let id = Uuid::new_v4();
         let frame = protocol::encode_request(id, command, arguments)
             .ok_or(RequestError::NotSent("request exceeds the frame limit"))?;
-        let timeout = if command == "ExecutePackageOperation" {
-            OPERATION_TIMEOUT
-        } else {
-            READ_TIMEOUT
+        let timeout = match command {
+            "ExecutePackageOperation" => OPERATION_TIMEOUT,
+            RESCAN_COMMAND => RESCAN_TIMEOUT,
+            _ => READ_TIMEOUT,
         };
 
         let permit = Arc::clone(&self.slots)
@@ -134,6 +160,71 @@ impl ConnectionHandle {
         response
             .await
             .unwrap_or(Err(RequestError::Unanswered("connection closed")))
+    }
+
+    /// Asks UniGetUI to reload its package lists and waits for the answer to a request written after this call.
+    ///
+    /// A request that was already written says nothing about what changed since, so a caller never shares it.
+    /// Callers that arrive while a rescan is outstanding share the next one, which is written once that one ended.
+    /// Dropping the returned future abandons the wait but not a written request, which stays outstanding until it ends.
+    pub(super) async fn rescan_inventory(self: &Arc<Self>) -> Result<(), RequestError> {
+        let mut outcome = {
+            let mut rescans = self.rescans.lock();
+            match &rescans.queued {
+                Some(queued) => queued.clone(),
+                None => {
+                    let (publish, outcome) = watch::channel(None);
+                    let previous = rescans
+                        .outstanding
+                        .clone()
+                        .filter(|previous| previous.borrow().is_none());
+                    if previous.is_some() {
+                        rescans.queued = Some(outcome.clone());
+                    } else {
+                        rescans.outstanding = Some(outcome.clone());
+                    }
+                    // The task owns the request, so a caller that gives up neither cancels it nor lets another start early.
+                    tokio::spawn(Arc::clone(self).run_rescan(previous, publish));
+                    outcome
+                }
+            }
+        };
+
+        let ended = outcome.wait_for(Option::is_some).await;
+        // UNTESTED: A rescan task dropped before it publishes, as when the runtime shuts down, ends this wait instead of hanging it.
+        // Check that nothing keeps the sender alive past its task when changing `run_rescan`.
+        ended
+            .ok()
+            .and_then(|outcome| outcome.clone())
+            .unwrap_or(Err(RequestError::Unanswered("rescan was abandoned")))
+    }
+
+    /// Sends one `RescanInventory` once `previous` ended, and publishes its outcome.
+    ///
+    /// A queued rescan that no caller waits for any more is not sent.
+    async fn run_rescan(
+        self: Arc<Self>,
+        previous: Option<watch::Receiver<RescanOutcome>>,
+        publish: watch::Sender<RescanOutcome>,
+    ) {
+        if let Some(mut previous) = previous {
+            // A sender dropped without an outcome also means that the previous rescan ended.
+            let _ = previous.wait_for(Option::is_some).await;
+
+            // UNTESTED: A caller never joins a queued rescan that is being discarded, because it joins under this lock.
+            // The tests run on one thread and cannot interleave a join with the check below.
+            // Keep the removal from `queued` and the check for remaining callers under one lock when changing either.
+            let mut rescans = self.rescans.lock();
+            rescans.queued = None;
+            // The receiver that `queued` held is gone, so the channel is closed exactly when no caller waits.
+            if publish.is_closed() {
+                return;
+            }
+            rescans.outstanding = Some(publish.subscribe());
+        }
+
+        let outcome = self.request(RESCAN_COMMAND, json!({})).await.map(drop);
+        publish.send_replace(Some(outcome));
     }
 }
 

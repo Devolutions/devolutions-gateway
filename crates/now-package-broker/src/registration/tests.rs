@@ -642,4 +642,219 @@ mod connection {
             assert!(!error.may_have_been_sent());
         }
     }
+
+    fn rescan(endpoint: &RegisteredEndpoint) -> JoinHandle<Result<(), RequestError>> {
+        let endpoint = endpoint.clone();
+        tokio::spawn(async move { endpoint.rescan_inventory().await })
+    }
+
+    fn rescan_done(id: &str) -> Value {
+        json!({"kind": "Response", "id": id, "ok": true, "result": {}})
+    }
+
+    fn rejection(id: &str, code: &str) -> Value {
+        json!({"kind": "Response", "id": id, "ok": false, "error": {"code": code, "message": "not done"}})
+    }
+
+    /// Lets every task run until it waits, then checks that the Agent wrote no frame.
+    async fn assert_nothing_written(client: &mut tokio::io::DuplexStream) {
+        let mut byte = [0u8; 1];
+        tokio::time::timeout(Duration::from_secs(1), client.read_exact(&mut byte))
+            .await
+            .expect_err("no frame is written");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rescan_is_one_request_without_arguments_answered_by_an_empty_result() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let call = rescan(&endpoint(&registry));
+
+        let request = read_json(&mut client).await;
+        assert_eq!(request["kind"], "Request");
+        assert_eq!(request["command"], "RescanInventory");
+        assert_eq!(request["arguments"], json!({}));
+        respond(&mut client, rescan_done(&id_of(&request))).await;
+
+        assert_eq!(call.await.expect("call task"), Ok(()));
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn callers_arriving_during_a_rescan_share_one_sent_after_it_is_answered() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let first = rescan(&endpoint);
+        let first_request = read_json(&mut client).await;
+
+        let second = rescan(&endpoint);
+        let third = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+        respond(&mut client, rescan_done(&id_of(&first_request))).await;
+
+        assert_eq!(first.await.expect("call task"), Ok(()));
+        let shared_request = read_json(&mut client).await;
+        assert_eq!(shared_request["command"], "RescanInventory");
+        assert_ne!(id_of(&shared_request), id_of(&first_request));
+        assert_nothing_written(&mut client).await;
+        assert!(
+            !second.is_finished() && !third.is_finished(),
+            "a response to a request sent before a caller arrived does not answer that caller"
+        );
+        respond(&mut client, rescan_done(&id_of(&shared_request))).await;
+        assert_eq!(second.await.expect("call task"), Ok(()));
+        assert_eq!(third.await.expect("call task"), Ok(()));
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rescan_rejected_as_unsupported_leaves_the_connection_usable() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let call = rescan(&endpoint);
+        let request = read_json(&mut client).await;
+
+        respond(&mut client, rejection(&id_of(&request), "UnsupportedCommand")).await;
+
+        let error = call.await.expect("call task").expect_err("the rescan is rejected");
+        assert!(matches!(&error, RequestError::Rejected(remote) if remote.code == "UnsupportedCommand"));
+        let snapshot = tokio::spawn(async move { endpoint.request("GetInventorySnapshot", json!({})).await });
+        let request = read_json(&mut client).await;
+        assert_eq!(request["command"], "GetInventorySnapshot");
+        respond(
+            &mut client,
+            json!({"kind": "Response", "id": id_of(&request), "ok": true, "result": {"managers": []}}),
+        )
+        .await;
+        assert_eq!(
+            snapshot.await.expect("call task").expect("snapshot result"),
+            json!({"managers": []})
+        );
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn caller_that_gives_up_leaves_its_rescan_outstanding() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let first = rescan(&endpoint);
+        let first_request = read_json(&mut client).await;
+
+        first.abort();
+        first.await.expect_err("the first caller gave up");
+        let second = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+        respond(&mut client, rescan_done(&id_of(&first_request))).await;
+
+        let second_request = read_json(&mut client).await;
+        assert_eq!(second_request["command"], "RescanInventory");
+        assert_ne!(id_of(&second_request), id_of(&first_request));
+        respond(&mut client, rescan_done(&id_of(&second_request))).await;
+        assert_eq!(second.await.expect("call task"), Ok(()));
+        assert!(!task.is_finished(), "both responses answered an outstanding request");
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn queued_rescan_that_no_caller_awaits_is_not_sent() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let first = rescan(&endpoint);
+        let first_request = read_json(&mut client).await;
+        let second = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+
+        second.abort();
+        second.await.expect_err("the second caller gave up");
+        respond(&mut client, rescan_done(&id_of(&first_request))).await;
+
+        assert_eq!(first.await.expect("call task"), Ok(()));
+        assert_nothing_written(&mut client).await;
+        assert!(!task.is_finished(), "the connection stays open");
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn queued_rescan_is_sent_after_the_outstanding_one_is_rejected() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let first = rescan(&endpoint);
+        let first_request = read_json(&mut client).await;
+        let second = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+
+        respond(&mut client, rejection(&id_of(&first_request), "Failed")).await;
+
+        let error = first.await.expect("call task").expect_err("the rescan is rejected");
+        assert!(matches!(&error, RequestError::Rejected(remote) if remote.code == "Failed"));
+        let second_request = read_json(&mut client).await;
+        assert_eq!(second_request["command"], "RescanInventory");
+        respond(&mut client, rescan_done(&id_of(&second_request))).await;
+        assert_eq!(second.await.expect("call task"), Ok(()));
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rescan_unanswered_for_thirty_minutes_closes_the_connection() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let call = rescan(&endpoint(&registry));
+        read_json(&mut client).await;
+        let start = Instant::now();
+        let pinger = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(45)).await;
+                if client.write_all(&framed(r#"{"kind":"Ping"}"#)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let outcome = call.await.expect("call task");
+
+        assert_eq!(start.elapsed(), Duration::from_secs(30 * 60));
+        assert!(matches!(outcome, Err(RequestError::Unanswered(_))), "{outcome:?}");
+        task.await
+            .expect("connection task")
+            .expect_err("the deadline closes the connection");
+        pinger.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unanswered_rescan_stays_outstanding_past_the_read_timeout() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let call = rescan(&endpoint(&registry));
+        let request = read_json(&mut client).await;
+        let start = Instant::now();
+
+        // Pings keep the connection from idling out while the request stays unanswered.
+        while start.elapsed() < Duration::from_secs(5 * 60) {
+            tokio::time::sleep(Duration::from_secs(45)).await;
+            assert!(!call.is_finished(), "the rescan is still awaited");
+            assert!(!task.is_finished(), "the connection is still open");
+            client
+                .write_all(&framed(r#"{"kind":"Ping"}"#))
+                .await
+                .expect("write ping");
+        }
+        respond(&mut client, rescan_done(&id_of(&request))).await;
+
+        assert_eq!(call.await.expect("call task"), Ok(()));
+        assert!(!task.is_finished(), "the late response answers an outstanding request");
+        task.abort();
+    }
 }
