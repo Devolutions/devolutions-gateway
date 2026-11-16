@@ -548,8 +548,14 @@ async fn finish_sent_until(
     completion
 }
 
-fn outcome_for_exit(_manager: &str, _exit_code: i32) -> Outcome {
-    Outcome::Unknown
+fn outcome_for_exit(manager: &str, exit_code: i32) -> Outcome {
+    match exit_code {
+        0 => Outcome::Succeeded,
+        // Windows exit codes are DWORDs; the Authority parses the unsigned decimal value.
+        _ => Outcome::Failed {
+            error: format!("{manager} exited with code {}", exit_code.cast_unsigned()),
+        },
+    }
 }
 
 fn failure(error: &str) -> Outcome {
@@ -778,12 +784,66 @@ mod tests {
         assert!(record.mark_exited(0));
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
         let expected = Settled {
-            outcome: Outcome::Unknown,
+            outcome: Outcome::Succeeded,
             execution_started: Some(true),
         };
         assert_eq!(settled, expected);
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn nonzero_broker_exit_is_a_known_failure_with_the_unsigned_code() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        assert!(record.mark_exited(0x8A15_0010u32.cast_signed()));
+        let settled = finish_sent(pending, &grants, &issued, None, std::future::pending())
+            .await
+            .settled;
+
+        let expected = Settled {
+            outcome: Outcome::Failed {
+                error: "Winget exited with code 2316632080".to_owned(),
+            },
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(
+            journal.admit("authority", &request)?,
+            Admission::Recorded(expected.clone())
+        );
+        let reported = result("op-1".to_owned(), expected);
+        assert!(!reported.success);
+        assert_eq!(reported.error, "Winget exited with code 2316632080");
+        assert_eq!(reported.status, i32::from(PackageOperationStatus::Unspecified));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn exit_code_maps_to_known_outcome_with_manager_unchanged() {
+        assert_eq!(outcome_for_exit("WinGet", 0), Outcome::Succeeded);
+        assert_eq!(
+            outcome_for_exit("WinGet", 1),
+            Outcome::Failed {
+                error: "WinGet exited with code 1".to_owned()
+            }
+        );
+        assert_eq!(
+            outcome_for_exit(".NET Tool", -1),
+            Outcome::Failed {
+                error: ".NET Tool exited with code 4294967295".to_owned()
+            }
+        );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -860,7 +920,7 @@ mod tests {
         assert!(record.mark_exited(0));
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
         let expected = Settled {
-            outcome: Outcome::Unknown,
+            outcome: Outcome::Succeeded,
             execution_started: Some(true),
         };
         assert_eq!(settled, expected);
@@ -928,7 +988,7 @@ mod tests {
             .await??
             .settled;
         let expected = Settled {
-            outcome: Outcome::Unknown,
+            outcome: Outcome::Succeeded,
             execution_started: Some(true),
         };
         assert_eq!(settled, expected);

@@ -395,8 +395,14 @@ For grant operations, the Broker emits `Finish` only after both output readers h
 On a read failure, reader panic, invalid UTF-8, output overflow or other loss, it closes the event stream without `Finish`.
 The grant client accepts output only after a valid `Hello` and `Finish` with no overflow or malformed frames and only when it can establish that no output was lost or injected.
 The v1 event stream cannot establish completeness: another reader can consume whole frames without leaving a gap visible to the client.
-An exit code or output alone does not establish a package outcome.
-When the operation's verdict depends on either, the Agent reports `UNKNOWN`.
+Output never establishes a package outcome; when the operation's verdict depends on output, the Agent reports `UNKNOWN`.
+When the Broker record shows that the process exited, its exit code establishes the outcome.
+Exit code 0 is a known success.
+Any other exit code is a known failure whose error is exactly `<manager> exited with code <N>`.
+`<manager>` is the request's `manager` string, unchanged.
+`<N>` is the exit code as an unsigned 32-bit integer in plain decimal.
+For example, a `Winget` request whose process exits with `0x8A150010` fails with `Winget exited with code 2316632080`, not `-1978335216`.
+An exit code does not prove the package's state: exit code 0 can mean that nothing changed, and a nonzero code can be a success that needs a restart.
 
 The Broker atomically records consumption of each grant in memory before starting its authorized operation.
 The record is bound to the issued grant and Broker request ID and records positive evidence of process start and termination, including the exit code when available.
