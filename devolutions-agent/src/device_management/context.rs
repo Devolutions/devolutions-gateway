@@ -277,6 +277,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn damaged_live_journal_returns_unknown_for_new_writes_and_keeps_recorded_results() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
+        let data = Utf8Path::from_path(root.path()).expect("data path is UTF-8");
+        let known = PackageOperationRequest {
+            operation_id: "known".to_owned(),
+            ..Default::default()
+        };
+        let new = PackageOperationRequest {
+            operation_id: "new".to_owned(),
+            ..Default::default()
+        };
+        let authority = Uuid::nil();
+        let journal = Arc::new(OperationJournal::open(data)?);
+        journal.admit(&authority.to_string(), &known)?;
+        journal.complete(&authority.to_string(), &known, Outcome::Succeeded)?;
+        let context = DeviceManagementContext {
+            journal: Some(journal),
+            ..Default::default()
+        };
+        let index = data.join("package-operations").join("records").join("journal.json");
+        std::fs::remove_file(&index)?;
+
+        let refused = operation::run(&context, authority, new).await;
+        assert_eq!(refused.status, i32::from(PackageOperationStatus::Unknown));
+        assert!(!refused.success);
+        assert!(refused.error.is_empty());
+        assert_eq!(refused.execution_started, None);
+        assert!(!index.exists());
+        let recorded = operation::run(&context, authority, known).await;
+        assert_eq!(recorded.status, i32::from(PackageOperationStatus::Unspecified));
+        assert!(recorded.success);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn changed_payload_for_recorded_operation_is_unknown() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let parent = std::env::var_os("LOCALAPPDATA")

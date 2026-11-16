@@ -203,6 +203,8 @@ async fn settle(context: DeviceManagementContext, authority_id: String, request:
                 error = format!("{error:#}"),
                 "Package operation journal admission failed"
             );
+            // UNTESTED: A refused admission must issue no grant and dispatch no request.
+            // The context test has no live endpoint; count grants and requests when changing this return.
             return unknown(false);
         }
         Err(_) => return unknown(false),

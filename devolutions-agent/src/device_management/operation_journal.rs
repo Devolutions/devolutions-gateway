@@ -1,6 +1,6 @@
 //! Durable record of package operations, keyed by authority operation ID.
 //!
-//! An operation ID is never executed twice, whichever authority delivers it.
+//! While its operation ID remains in a trusted journal, an operation is never executed twice, whichever authority delivers it.
 //! Delivering the same ID and request again, whether after a restart or a re-enrollment, returns the recorded outcome.
 //! Only the admitting authority can update that outcome.
 //!
@@ -23,14 +23,13 @@
 //! `journal.json` lists the name of every record admitted.
 //! A delivery is admitted by first making that list durable with its name and only then writing its pending record, so a
 //! record that exists is always listed.
-//! A listed name whose record is missing, and a record whose name is not listed, are errors for that operation ID, never
-//! a new operation: the record was lost, or a crash interrupted the admission and the journal cannot tell which.
-//! The journal repairs neither, and every other operation ID keeps working.
+//! A missing, corrupt or unlisted record makes the journal refuse new operations until recovery and reopening.
+//! Intact records still return their recorded outcomes, and pending records return [`Outcome::Unknown`] during refusal.
 //! The list is rewritten whole at each admission and is limited to [`MAX_INDEX_SIZE`] bytes, beyond which admission
 //! fails closed.
 //!
 //! A wholly missing journal is created, so operations recorded in a journal that was deleted whole may execute again.
-//! A journal directory that exists but lacks its records directory or journal.json is unrecoverable and is refused.
+//! An existing journal that lacks its records directory or journal.json refuses new operations.
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read as _, Write as _};
@@ -90,11 +89,11 @@ pub(super) enum Admission {
     Admitted,
     /// Another delivery admitted the operation in this journal and has not recorded its outcome yet.
     ///
-    /// [`OperationJournal::wait`] returns its outcome once recorded.
+    /// [`OperationJournal::wait`] returns its outcome once recorded, or unknown if the journal becomes unavailable.
     InFlight,
     /// The operation was admitted before and ended with this outcome; submit nothing.
     ///
-    /// A pending record found after a restart is recorded as [`Outcome::Unknown`] and keeps any start evidence.
+    /// A pending record found after a restart or during refusal returns [`Outcome::Unknown`] and keeps any start evidence.
     Recorded(Settled),
     /// The operation ID belongs to a different request; execute nothing.
     PayloadMismatch,
@@ -129,6 +128,8 @@ struct State {
     admitted: BTreeSet<String>,
     /// The record names admitted by this journal whose outcome is not recorded yet.
     in_flight: HashSet<String>,
+    /// Once journal damage is detected, only recovery and reopening can allow admissions again.
+    unavailable: bool,
 }
 
 /// The journal of every authority of this Agent.
@@ -244,8 +245,8 @@ impl OperationJournal {
     /// Opens the journal, creating it when the data directory or the journal directory is missing.
     ///
     /// A journal deleted whole cannot be told from a first run, so operations recorded in it may execute again.
-    /// An existing journal missing its records directory or `journal.json` is refused, as is one that is not private
-    /// to the Agent's account.
+    /// An existing journal missing its records directory cannot be opened.
+    /// If its index or records are damaged, it refuses new operations while allowing intact records to be read.
     pub(super) fn open(data_dir: &Utf8Path) -> anyhow::Result<Self> {
         let rule = directory_rule();
         let data = Dir::create_base(data_dir, &rule).context("open data directory")?;
@@ -282,12 +283,44 @@ impl OperationJournal {
             state: Mutex::new(State {
                 admitted: BTreeSet::new(),
                 in_flight: HashSet::new(),
+                unavailable: false,
             }),
             recorded: Condvar::new(),
         };
-        let admitted = journal.load_index(was_missing)?;
-        journal.state.get_mut().admitted = admitted;
+        match journal.load_index(was_missing) {
+            Ok(admitted) => {
+                journal.state.get_mut().admitted = admitted;
+                if let Err(error) = journal.validate_records() {
+                    journal.make_unavailable(&mut journal.state.lock(), &error);
+                }
+            }
+            Err(error) if !was_missing => journal.make_unavailable(&mut journal.state.lock(), &error),
+            Err(error) => return Err(error),
+        }
         Ok(journal)
+    }
+
+    fn validate_records(&self) -> anyhow::Result<()> {
+        let state = self.state.lock();
+        for name in &state.admitted {
+            ensure!(
+                self.load_record(name)?.is_some(),
+                "package operation record is missing, so its history may be lost"
+            );
+        }
+        for entry in self.directory.entries().context("list package operation records")? {
+            let name = entry
+                .name
+                .to_str()
+                .context("package operation record name is not UTF-8")?;
+            ensure!(
+                name == INDEX_NAME
+                    || state.admitted.contains(name)
+                    || (name.starts_with('.') && name.ends_with(".tmp")),
+                "package operation record is not in the journal index, so the journal cannot vouch for it"
+            );
+        }
+        Ok(())
     }
 
     fn load_index(&self, was_missing: bool) -> anyhow::Result<BTreeSet<String>> {
@@ -310,28 +343,57 @@ impl OperationJournal {
             return Ok(admitted);
         };
 
-        let index: Index = serde_json::from_slice(&read_limited(file, MAX_INDEX_SIZE)?)
-            .context("parse package operation journal index")?;
+        read_index(file)
+    }
+
+    fn check_live_index(&self, state: &State) -> anyhow::Result<()> {
+        let directory = self
+            ._lock
+            .dir
+            .open_dir(RECORDS_NAME, &directory_rule(), Share::Shared)
+            .context("open package operation records directory")?
+            .context("package operation records directory is missing")?;
+        let current = directory
+            .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
+            .context("open current package operation journal index")?
+            .context("package operation journal index is missing")?;
+        let retained = self
+            .directory
+            .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
+            .context("open retained package operation journal index")?
+            .context("package operation journal index is missing")?;
         ensure!(
-            index.version == VERSION,
-            "unsupported package operation journal version"
+            file_identity(&current)? == file_identity(&retained)?,
+            "package operation records directory or index changed while open"
         );
-        Ok(index.operations)
+        ensure!(
+            read_index(retained)? == state.admitted,
+            "package operation journal index changed while open"
+        );
+        Ok(())
     }
 
     /// Decides whether this delivery of `request` for `authority_id` may submit its operation, persisting a pending
     /// record first when it may.
     ///
-    /// Of any number of concurrent deliveries of one new operation ID, exactly one is [`Admission::Admitted`].
+    /// While the journal is available, exactly one of any number of concurrent deliveries of a new ID is admitted.
     pub(super) fn admit(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<Admission> {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
 
-        let Some(record) = self.read(&state, &name, request)? else {
+        let Some(record) = self.read(&mut state, &name, request)? else {
+            ensure!(
+                !state.unavailable,
+                "package operation journal requires recovery and Agent restart"
+            );
             let mut admitted = state.admitted.clone();
             admitted.insert(name.clone());
-            self.write_index(&admitted)
-                .context("persist package operation journal index")?;
+            // UNTESTED: A privileged writer can remove the index or replace the records directory after validation.
+            // The write can then recreate the index or use a disconnected directory; check this window when changing it.
+            let written = self
+                .write_index(&admitted)
+                .context("persist package operation journal index");
+            self.refuse_on_error(&mut state, written)?;
             state.admitted = admitted;
 
             let record = Record {
@@ -342,8 +404,10 @@ impl OperationJournal {
                 outcome: None,
                 execution_started: false,
             };
-            self.write_record(&name, &record, Replace::Refuse)
-                .context("persist pending package operation record")?;
+            let written = self
+                .write_record(&name, &record, Replace::Refuse)
+                .context("persist pending package operation record");
+            self.refuse_on_error(&mut state, written)?;
             state.in_flight.insert(name);
             return Ok(Admission::Admitted);
         };
@@ -354,7 +418,7 @@ impl OperationJournal {
         let started = record.execution_started;
         Ok(match record.outcome {
             Some(outcome) => Admission::Recorded(Settled::new(outcome, started)),
-            None if state.in_flight.contains(&name) => Admission::InFlight,
+            None if !state.unavailable && state.in_flight.contains(&name) => Admission::InFlight,
             None => Admission::Recorded(Settled::new(Outcome::Unknown, started)),
         })
     }
@@ -365,11 +429,15 @@ impl OperationJournal {
     /// The evidence is never withdrawn, so recording it again succeeds.
     pub(super) fn mark_started(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<()> {
         let (name, encoded) = locate(authority_id, request)?;
-        let state = self.state.lock();
+        let mut state = self.state.lock();
 
         let mut record = self
-            .read(&state, &name, request)?
+            .read(&mut state, &name, request)?
             .context("no package operation record to mark as started")?;
+        ensure!(
+            !state.unavailable,
+            "package operation journal requires recovery and Agent restart"
+        );
         ensure!(
             record.authority_id == authority_id && record.request == encoded,
             "package operation record belongs to a different request"
@@ -378,13 +446,15 @@ impl OperationJournal {
             return Ok(());
         }
         record.execution_started = true;
-        self.write_record(&name, &record, Replace::Allow)
-            .context("persist package operation start evidence")
+        let written = self
+            .write_record(&name, &record, Replace::Allow)
+            .context("persist package operation start evidence");
+        self.refuse_on_error(&mut state, written)
     }
 
     /// Durably records the end of an operation [`admitted`](Self::admit) for `request`, and wakes its waiters.
     ///
-    /// Recording the outcome already recorded succeeds; recording a different outcome over a recorded one is an error.
+    /// While the journal is available, recording an already recorded outcome succeeds; a different outcome is an error.
     /// When the outcome cannot be written, the operation stops being in flight, so waiters read it as unknown.
     pub(super) fn complete(
         &self,
@@ -395,7 +465,13 @@ impl OperationJournal {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
 
-        let record = self.read(&state, &name, request);
+        let record = self.read(&mut state, &name, request);
+        if state.unavailable {
+            if state.in_flight.remove(&name) {
+                self.recorded.notify_all();
+            }
+            bail!("package operation journal requires recovery and Agent restart");
+        }
         if let Ok(Some(record)) = &record {
             ensure!(
                 record.authority_id == authority_id && record.request == encoded,
@@ -410,8 +486,10 @@ impl OperationJournal {
                 Some(_) => bail!("package operation already has a different recorded outcome"),
                 None => {
                     record.outcome = Some(outcome);
-                    self.write_record(&name, &record, Replace::Allow)
-                        .context("persist package operation outcome")
+                    let written = self
+                        .write_record(&name, &record, Replace::Allow)
+                        .context("persist package operation outcome");
+                    self.refuse_on_error(&mut state, written)
                 }
             }
         });
@@ -421,20 +499,21 @@ impl OperationJournal {
         completed
     }
 
-    /// Blocks until the operation in flight for `request` has its outcome recorded, and returns it.
+    /// Blocks until the operation in flight for `request` has its outcome recorded or the journal becomes unavailable.
     ///
-    /// An operation that is not in flight returns its recorded outcome at once, or [`Outcome::Unknown`] when it is
-    /// still pending, with the start evidence recorded.
+    /// An operation that is not in flight returns its recorded outcome at once, or [`Outcome::Unknown`] when still
+    /// pending, with the start evidence recorded.
+    /// A refusal wakes waiters, and an intact pending record returns [`Outcome::Unknown`].
     /// Call it off the async runtime.
     pub(super) fn wait(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<Settled> {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
-        while state.in_flight.contains(&name) {
+        while !state.unavailable && state.in_flight.contains(&name) {
             self.recorded.wait(&mut state);
         }
 
         let record = self
-            .read(&state, &name, request)?
+            .read(&mut state, &name, request)?
             .context("no package operation record to wait for")?;
         ensure!(
             record.request == encoded,
@@ -446,24 +525,79 @@ impl OperationJournal {
         ))
     }
 
-    /// Reads and validates the record `name`, and returns `None` only when it neither exists nor is listed.
-    fn read(&self, state: &State, name: &str, request: &PackageOperationRequest) -> anyhow::Result<Option<Record>> {
+    /// Reads and validates `name`, latching refusal if the journal's live index or record is inconsistent.
+    fn read(&self, state: &mut State, name: &str, request: &PackageOperationRequest) -> anyhow::Result<Option<Record>> {
+        if !state.unavailable {
+            match self
+                .check_live_index(state)
+                .and_then(|()| self.read_record(state, name, request))
+            {
+                Ok(record) => return Ok(record),
+                Err(error) => self.make_unavailable(state, &error),
+            }
+        }
+        let record = self.load_record(name)?;
+        ensure!(
+            record
+                .as_ref()
+                .is_none_or(|record| record.operation_id == request.operation_id),
+            "package operation record belongs to another operation ID"
+        );
+        Ok(record)
+    }
+
+    fn make_unavailable(&self, state: &mut State, error: &anyhow::Error) {
+        if !state.unavailable {
+            state.unavailable = true;
+            self.recorded.notify_all();
+            error!(
+                error = format!("{error:#}"),
+                "Package operation journal is unrecoverable; package writes are unavailable"
+            );
+        }
+    }
+
+    fn refuse_on_error<T>(&self, state: &mut State, result: anyhow::Result<T>) -> anyhow::Result<T> {
+        if let Err(error) = &result {
+            self.make_unavailable(state, error);
+        }
+        result
+    }
+
+    fn read_record(
+        &self,
+        state: &State,
+        name: &str,
+        request: &PackageOperationRequest,
+    ) -> anyhow::Result<Option<Record>> {
         let listed = state.admitted.contains(name);
+        let record = self.load_record(name)?;
+        if let Some(record) = &record {
+            ensure!(
+                listed,
+                "package operation record is not in the journal index, so the journal cannot vouch for it"
+            );
+            ensure!(
+                record.operation_id == request.operation_id,
+                "package operation record belongs to another operation ID"
+            );
+        } else {
+            ensure!(
+                !listed,
+                "package operation record is missing, so its history may be lost"
+            );
+        }
+        Ok(record)
+    }
+
+    fn load_record(&self, name: &str) -> anyhow::Result<Option<Record>> {
         let Some(file) = self
             .directory
             .open_file(name, &file_rule(), FileOptions::new().read(true))
             .context("open package operation record")?
         else {
-            ensure!(
-                !listed,
-                "package operation record is missing, so its history may be lost"
-            );
             return Ok(None);
         };
-        ensure!(
-            listed,
-            "package operation record is not in the journal index, so the journal cannot vouch for it"
-        );
 
         let record: Record =
             serde_json::from_slice(&read_limited(file, MAX_RECORD_SIZE)?).context("parse package operation record")?;
@@ -472,12 +606,16 @@ impl OperationJournal {
             "unsupported package operation record version"
         );
         ensure!(
+            !record.authority_id.is_empty(),
+            "package operation record has an empty authority ID"
+        );
+        ensure!(
             !matches!(&record.outcome, Some(Outcome::Failed { error }) if error.is_empty()),
             "package operation failure has no error"
         );
         ensure!(
-            record.operation_id == request.operation_id,
-            "package operation record belongs to another operation ID"
+            record_name(&record.operation_id) == name,
+            "package operation record name belongs to another operation ID"
         );
         let stored = hex::decode(&record.request).context("decode stored package operation request")?;
         let stored =
@@ -528,6 +666,39 @@ impl OperationJournal {
         }
         persisted
     }
+}
+
+fn read_index(file: std::fs::File) -> anyhow::Result<BTreeSet<String>> {
+    let index: Index = serde_json::from_slice(&read_limited(file, MAX_INDEX_SIZE)?)
+        .context("parse package operation journal index")?;
+    ensure!(
+        index.version == VERSION,
+        "unsupported package operation journal version"
+    );
+    Ok(index.operations)
+}
+
+#[cfg(unix)]
+fn file_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn file_identity(file: &std::fs::File) -> anyhow::Result<(u64, [u8; 16])> {
+    use std::os::windows::io::AsRawHandle as _;
+
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx};
+
+    let mut info = FILE_ID_INFO::default();
+    let size = u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits in u32");
+    // SAFETY: The file handle is open, and the output buffer has the required size.
+    unsafe { GetFileInformationByHandleEx(HANDLE(file.as_raw_handle()), FileIdInfo, (&raw mut info).cast(), size) }
+        .context("read package operation index file identity")?;
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
 }
 
 fn read_limited(file: std::fs::File, limit: u64) -> anyhow::Result<Vec<u8>> {
@@ -656,6 +827,37 @@ mod tests {
     }
 
     #[test]
+    fn journal_refusal_wakes_waiters_with_an_unknown_outcome() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = Arc::new(OperationJournal::open(&data)?);
+        let pending = Arc::new(request("pending", "pkg"));
+        let missing = request("missing", "pkg");
+        journal.admit("authority", &pending)?;
+        journal.admit("authority", &missing)?;
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let waiter = {
+            let (journal, pending) = (Arc::clone(&journal), Arc::clone(&pending));
+            std::thread::spawn(move || {
+                let _ = sender.send(journal.wait("authority", &pending));
+            })
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!waiter.is_finished());
+        std::fs::remove_file(record_path(&data, "missing"))?;
+        assert!(journal.admit("authority", &missing).is_err());
+
+        let outcome = receiver.recv_timeout(Duration::from_secs(5));
+        if outcome.is_err() {
+            let _ = journal.complete("authority", &pending, Outcome::Unknown);
+        }
+        waiter.join().expect("waiter thread panicked");
+        assert_eq!(outcome??, settled(Outcome::Unknown));
+        Ok(())
+    }
+
+    #[test]
     fn same_id_with_changed_payload_is_rejected() -> anyhow::Result<()> {
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
@@ -672,6 +874,10 @@ mod tests {
             journal
                 .complete("authority", &request("op", "other"), Outcome::Succeeded)
                 .is_err()
+        );
+        assert_eq!(
+            journal.admit("authority", &request("another", "pkg"))?,
+            Admission::Admitted
         );
         Ok(())
     }
@@ -776,10 +982,7 @@ mod tests {
         assert!(journal.wait("authority", &finished).is_err());
         assert!(journal.complete("authority", &pending, Outcome::Succeeded).is_err());
         assert!(!record_path(&data, "finished").exists());
-        assert_eq!(
-            journal.admit("authority", &request("other", "pkg"))?,
-            Admission::Admitted
-        );
+        assert!(journal.admit("authority", &request("other", "pkg")).is_err());
         Ok(())
     }
 
@@ -797,24 +1000,65 @@ mod tests {
         std::fs::remove_file(record_path(&data, "pending"))?;
 
         let journal = OperationJournal::open(&data)?;
-
         assert!(journal.admit("authority", &finished).is_err());
         assert!(journal.admit("authority", &pending).is_err());
+        assert!(journal.admit("authority", &request("other", "pkg")).is_err());
         assert!(!record_path(&data, "pending").exists());
-        assert_eq!(
-            journal.admit("authority", &request("other", "pkg"))?,
-            Admission::Admitted
-        );
         Ok(())
     }
 
     #[test]
-    fn record_missing_from_the_index_is_refused() -> anyhow::Result<()> {
+    fn intact_record_returns_its_outcome_after_another_record_is_lost() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let intact = request("intact", "pkg");
+        let missing = request("missing", "pkg");
+        journal.admit("authority", &intact)?;
+        journal.complete("authority", &intact, Outcome::Succeeded)?;
+        journal.admit("authority", &missing)?;
+        std::fs::remove_file(record_path(&data, "missing"))?;
+
+        assert!(journal.admit("authority", &missing).is_err());
+        assert_eq!(
+            journal.admit("authority", &intact)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn intact_record_returns_its_outcome_after_reopening_a_damaged_journal() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let intact = request("intact", "pkg");
+        let missing = request("missing", "pkg");
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &intact)?;
+        journal.complete("authority", &intact, Outcome::Succeeded)?;
+        journal.admit("authority", &missing)?;
+        drop(journal);
+        std::fs::remove_file(record_path(&data, "missing"))?;
+
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(
+            journal.admit("authority", &intact)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        assert!(journal.admit("authority", &missing).is_err());
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn unindexed_record_keeps_its_outcome_but_new_writes_are_refused() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
         journal.admit("authority", &request)?;
+        journal.complete("authority", &request, Outcome::Succeeded)?;
         drop(journal);
         std::fs::write(
             journal_path(&data).join(INDEX_NAME),
@@ -825,13 +1069,16 @@ mod tests {
         )?;
 
         let journal = OperationJournal::open(&data)?;
-
-        assert!(journal.admit("authority", &request).is_err());
+        assert_eq!(
+            journal.admit("authority", &request)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        assert!(journal.admit("authority", &self::request("other", "pkg")).is_err());
         Ok(())
     }
 
     #[test]
-    fn interrupted_admission_is_refused_and_leftovers_are_ignored() -> anyhow::Result<()> {
+    fn interrupted_admission_refuses_new_writes_after_reopen() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
@@ -852,8 +1099,20 @@ mod tests {
         let journal = OperationJournal::open(&data)?;
 
         assert!(journal.admit("authority", &request).is_err());
+        assert!(journal.admit("authority", &self::request("other", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn leftover_temporary_file_does_not_disable_a_consistent_journal() -> anyhow::Result<()> {
+        // oracle: mutant an interrupted temporary write is mistaken for an unindexed operation record
+        let (_dir, data) = data_dir()?;
+        drop(OperationJournal::open(&data)?);
+        std::fs::write(journal_path(&data).join(".journal.json-stray.tmp"), b"partial")?;
+
+        let journal = OperationJournal::open(&data)?;
         assert_eq!(
-            journal.admit("authority", &self::request("other", "pkg"))?,
+            journal.admit("authority", &request("other", "pkg"))?,
             Admission::Admitted
         );
         Ok(())
@@ -930,15 +1189,178 @@ mod tests {
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
         journal.admit("authority", &request)?;
+        journal.complete("authority", &request, Outcome::Succeeded)?;
         drop(journal);
 
         let records = journal_path(&data);
         std::fs::remove_file(records.join(INDEX_NAME))?;
-        assert!(OperationJournal::open(&data).is_err());
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(
+            journal.admit("authority", &request)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        assert!(journal.admit("authority", &self::request("other", "pkg")).is_err());
+        drop(journal);
 
         std::fs::remove_dir_all(&records)?;
         std::fs::write(data.join(DIRECTORY_NAME).join("stray"), b"x")?;
         assert!(OperationJournal::open(&data).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_live_index_refuses_new_writes_without_recreating_it() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &request("first", "pkg"))?;
+        let index = journal_path(&data).join(INDEX_NAME);
+        let saved = std::fs::read(&index)?;
+        std::fs::remove_file(&index)?;
+
+        assert!(journal.admit("authority", &request("second", "pkg")).is_err());
+        assert!(!index.exists());
+        let mut restored = journal
+            .directory
+            .create_file(INDEX_NAME, &file_rule(), FileOptions::new())?;
+        restored.write_all(&saved)?;
+        restored.sync_all()?;
+        drop(restored);
+        assert!(journal.admit("authority", &request("second", "pkg")).is_err());
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(
+            journal.admit("authority", &request("second", "pkg"))?,
+            Admission::Admitted
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn changed_live_index_refuses_new_writes_until_reopen() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        let index = journal_path(&data).join(INDEX_NAME);
+        let saved = std::fs::read(&index)?;
+        std::fs::write(
+            &index,
+            serde_json::to_vec(&Index {
+                version: VERSION,
+                operations: BTreeSet::new(),
+            })?,
+        )?;
+
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        assert_eq!(
+            journal.admit("authority", &existing)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        std::fs::write(&index, saved)?;
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removed_live_records_directory_refuses_new_writes() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        let records = journal_path(&data);
+        std::fs::rename(&records, data.join(DIRECTORY_NAME).join("moved-records"))?;
+
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        assert!(!records.exists());
+        assert_eq!(
+            journal.admit("authority", &existing)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_live_records_directory_refuses_new_writes() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        let records = journal_path(&data);
+        let saved_index = std::fs::read(records.join(INDEX_NAME))?;
+        std::fs::rename(&records, data.join(DIRECTORY_NAME).join("moved-records"))?;
+        let replacement = journal
+            ._lock
+            .dir
+            .create_dir(RECORDS_NAME, &directory_rule(), Existing::Check)?;
+        let mut index = replacement.create_file(INDEX_NAME, &file_rule(), FileOptions::new())?;
+        index.write_all(&saved_index)?;
+        index.sync_all()?;
+        drop(index);
+        drop(replacement);
+
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        assert_eq!(
+            journal.admit("authority", &existing)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_index_write_refuses_later_writes_after_access_is_restored() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let index = journal_path(&data).join(INDEX_NAME);
+        let original = std::fs::metadata(&index)?.permissions();
+        let mut read_only = original.clone();
+        read_only.set_readonly(true);
+        std::fs::set_permissions(&index, read_only)?;
+        let first = journal.admit("authority", &request("first", "pkg"));
+        std::fs::set_permissions(&index, original)?;
+
+        assert!(first.is_err());
+        assert!(journal.admit("authority", &request("second", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_record_write_refuses_later_writes_after_access_is_restored() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let pending = request("pending", "pkg");
+        journal.admit("authority", &pending)?;
+        let path = record_path(&data, "pending");
+        let original = std::fs::metadata(&path)?.permissions();
+        let mut read_only = original.clone();
+        read_only.set_readonly(true);
+        std::fs::set_permissions(&path, read_only)?;
+        let completed = journal.complete("authority", &pending, Outcome::Succeeded);
+        std::fs::set_permissions(&path, original)?;
+
+        assert!(completed.is_err());
+        assert_eq!(
+            journal.admit("authority", &pending)?,
+            Admission::Recorded(settled(Outcome::Unknown))
+        );
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
         Ok(())
     }
 
@@ -965,7 +1387,8 @@ mod tests {
         std::fs::remove_file(record_path(&data, "op"))?;
         std::fs::remove_file(journal_path(&data).join(INDEX_NAME))?;
 
-        assert!(OperationJournal::open(&data).is_err());
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
         Ok(())
     }
 
@@ -976,7 +1399,8 @@ mod tests {
         drop(OperationJournal::open(&data)?);
         std::fs::remove_file(journal_path(&data).join(INDEX_NAME))?;
 
-        assert!(OperationJournal::open(&data).is_err());
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
         Ok(())
     }
 
@@ -1025,10 +1449,19 @@ mod tests {
     fn malformed_index_fails_closed() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
         let (_dir, data) = data_dir()?;
-        drop(OperationJournal::open(&data)?);
+        let existing = request("existing", "pkg");
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        drop(journal);
         std::fs::write(journal_path(&data).join(INDEX_NAME), b"{}")?;
 
-        assert!(OperationJournal::open(&data).is_err());
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(
+            journal.admit("authority", &existing)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
         Ok(())
     }
 
@@ -1043,6 +1476,35 @@ mod tests {
 
         assert!(journal.admit("authority", &request).is_err());
         assert!(journal.complete("authority", &request, Outcome::Succeeded).is_err());
+        assert!(journal.admit("authority", &self::request("new", "pkg")).is_err());
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.admit("authority", &self::request("new", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn record_with_empty_authority_is_corrupt() -> anyhow::Result<()> {
+        // oracle: mutant a record that lost its authority ID is accepted as an intact recorded result
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        let path = record_path(&data, "existing");
+        let mut record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        record["authority_id"] = "".into();
+        std::fs::write(&path, serde_json::to_vec(&record)?)?;
+
+        assert!(journal.admit("authority", &existing).is_err());
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        drop(journal);
+        assert!(
+            OperationJournal::open(&data)?
+                .admit("authority", &request("new", "pkg"))
+                .is_err()
+        );
         Ok(())
     }
 

@@ -39,7 +39,10 @@ When upgrading from a release without the UniGetUI Package Broker option, setup 
 
 ## Package operation journal recovery
 
-If the Agent logs `Cannot open the device-management operation journal; package writes are unavailable`, it does not start remote package operations and reports `UNKNOWN` to the authority.
+When its operation journal cannot be trusted, the Agent refuses new remote package writes and reports `UNKNOWN` to the authority.
+Previously recorded operations with intact records retain their recorded results.
+It logs `Cannot open the device-management operation journal; package writes are unavailable` or `Package operation journal is unrecoverable; package writes are unavailable` when it detects damage.
+The refusal remains until the journal is recovered and the Agent is restarted.
 Discovery and inventory remain available when their own dependencies are healthy.
 An `UNKNOWN` result does not prove that an earlier operation with the same ID did not run.
 
