@@ -194,10 +194,6 @@ impl DeviceManagementContext {
         Ok((self, entered, resume))
     }
 
-    pub(crate) fn available_operation_workers_for_test(&self) -> usize {
-        self.operations().available_workers()
-    }
-
     pub(crate) async fn submit_operation_for_test(
         &self,
         request: agent_channel_proto::PackageOperationRequest,

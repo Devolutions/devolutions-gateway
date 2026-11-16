@@ -1318,12 +1318,19 @@ mod tests {
                 })
                 .await?;
         }
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while context.available_operation_workers_for_test() != 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await?;
+        events
+            .send(Event::RenewRequested {
+                id: "burst-consumed".to_owned(),
+                reason: "test".to_owned(),
+            })
+            .await?;
+        // The channel is FIFO and acknowledges on receipt, so these acknowledgements follow the burst's dispatch.
+        for expected in ["renewal", "burst-consumed"] {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(10), acks.recv()).await?,
+                Some(expected.to_owned())
+            );
+        }
         let busy = tokio::time::timeout(Duration::from_secs(10), context.submit_operation_for_test(new)).await?;
         assert_eq!(busy.error, "agent busy: nothing was started");
 
@@ -1346,10 +1353,6 @@ mod tests {
             }
         })
         .await?;
-        assert_eq!(
-            tokio::time::timeout(Duration::from_secs(10), acks.recv()).await?,
-            Some("renewal".to_owned())
-        );
         assert!(streams.reconcile(stream("current")).await);
         let (replacement, replacement_events, _acks, replacement_dropped) =
             bounded_test_channel(report_channel.reporter());

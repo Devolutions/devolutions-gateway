@@ -216,11 +216,6 @@ impl Coordinator {
         Arc::clone(&self.workers).try_acquire_owned().ok()
     }
 
-    #[cfg(all(test, windows))]
-    pub(super) fn available_workers(&self) -> usize {
-        self.workers.available_permits()
-    }
-
     fn submit<F, Fut>(
         self: &Arc<Self>,
         journal: Arc<OperationJournal>,
@@ -271,7 +266,7 @@ impl Coordinator {
         }
 
         // INVARIANT: The tracked lock stays held from this check through worker acquisition.
-        // An admission publishes membership and reacquires this lock before releasing its slot.
+        // A queued admission rechecks capacity after acquiring the I/O permit.
         if !journal.has_index_capacity(&name) {
             drop(tracked);
             reply(result(operation_id, journal_full()));
@@ -1077,7 +1072,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: base da3890c admitted a burst of up to eight concurrent requests (`MAX_CONCURRENT_REQUESTS`).
+    // oracle: reference Devolutions/devolutions-gateway@da3890c85816:devolutions-agent/src/device_management/mod.rs
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn new_operations_queue_behind_a_stalled_journal_write_until_eight_are_in_flight() -> anyhow::Result<()> {
@@ -1242,18 +1237,25 @@ mod tests {
         wait_for_stall(entered).await?;
         resume.send(())?;
 
-        let second = results.pop().expect("two submissions");
-        let first = results.pop().expect("two submissions");
-        assert!(tokio::time::timeout(Duration::from_secs(10), first).await??.success);
-        let full = tokio::time::timeout(Duration::from_secs(10), second).await??;
-        assert_eq!(full.operation_id, numbered_id(1));
-        assert!(!full.success);
+        let mut settled = Vec::new();
+        for result in results {
+            settled.push(tokio::time::timeout(Duration::from_secs(10), result).await??);
+        }
+        let (full, succeeded): (Vec<_>, Vec<_>) = settled.into_iter().partition(|result| !result.success);
+        let [full] = full.as_slice() else {
+            panic!("exactly one operation must be refused");
+        };
+        let [succeeded] = succeeded.as_slice() else {
+            panic!("exactly one operation must succeed");
+        };
+        assert_eq!(succeeded.error, "");
         assert_eq!(full.error, "agent journal full: nothing was started");
         assert_eq!(full.status, i32::from(PackageOperationStatus::Unspecified));
         assert_eq!(full.execution_started, None);
         assert_eq!(executions.load(Ordering::SeqCst), 1);
-        assert!(!journal.may_contain(&numbered_id(1)));
-        assert_eq!(journal.lookup("authority", &request_with_id(&numbered_id(1)))?, None);
+        assert!(!journal.may_contain(&full.operation_id));
+        assert_eq!(journal.lookup("authority", &request_with_id(&full.operation_id))?, None);
+        assert!(journal.may_contain(&succeeded.operation_id));
         Ok(())
     }
 
