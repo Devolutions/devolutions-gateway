@@ -433,6 +433,7 @@ An intact record without a recorded outcome reports `UNKNOWN` during refusal.
 The refusal lasts for the life of the Agent process and recurs after restart if the journal remains damaged.
 Discovery and inventory remain available when their own dependencies are healthy.
 Already active operations are not assumed to have stopped.
+After restart, if an index entry and its record are both lost, the surviving journal cannot identify that operation and the operation ID may execute again.
 If SYSTEM, an administrator or the Agent account removes the index between its integrity check and atomic replacement, the Agent can recreate it from memory without detecting the loss.
 If one of these accounts replaces the records directory after the check and before admission completes, the Agent can write to a disconnected directory without detecting the loss.
 When the operation journal is missing, the Agent creates a new one; operations recorded only in the missing journal may execute again.

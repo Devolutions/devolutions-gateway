@@ -59,6 +59,7 @@ To recover the journal, use an elevated administrator session:
 5. Start the service and check the Agent log for journal errors.
 
 Resetting the journal, or restoring a backup that lacks recent records, allows previously recorded operation IDs to execute again.
+If an index entry and its record are both lost, the loss can go undetected after restart and that operation ID may execute again.
 Accept that risk before resetting or restoring the journal; do not remove only individual journal files.
 If the log names the initialization lock, remove `.package-operations-initialization.lock` beside the journal while all Agent instances are stopped.
 The lock file holds no operation records.
