@@ -318,7 +318,7 @@ The Agent waits for the response at most 3 minutes from recording the result, in
 The wait ends when the response arrives, when the connection closes or when that time has passed, and the Agent then reports the result.
 On an error response, including the `UnsupportedCommand` that `CONTRACT.package-management.md §registration` specifies for a command UniGetUI does not list, the Agent ends the wait without sending another `RescanInventory`.
 The response never changes the reported result: a rejected, unanswered or unsent `RescanInventory` only delays the report by the time the Agent waited.
-The Agent also sends no `RescanInventory` when the operation's `ExecutePackageOperation` was never written to the connection, when the delivery repeats an operation ID, when remote inventory is disabled, or when the connection already has 8 outstanding requests.
+The Agent also sends no `RescanInventory` when it could not record the result in its operation journal, when the operation's `ExecutePackageOperation` was never written to the connection, when the delivery repeats an operation ID, when remote inventory is disabled, when the Agent service is already stopping once the result is recorded, or when the connection already has 8 outstanding requests.
 When 8 operations are already waiting for a rescan, the Agent reports a further operation's result without sending `RescanInventory`.
 The Authority does not infer from an operation result that a rescan completed.
 An inventory request after the result still returns the last completed scan, as `CONTRACT.package-management.md §inventory` specifies.
