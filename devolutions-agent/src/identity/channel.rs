@@ -5,6 +5,8 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use agent_channel_client::{Channel, Closure, ClosureClass, ErrorCode, Event, Reporter, TerminalCode};
@@ -394,6 +396,9 @@ struct Link<C> {
     url: Url,
     key_name: String,
     state: LinkState,
+    warned_malformed_operation_id: bool,
+    #[cfg(windows)]
+    journal_full_warned: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -519,6 +524,9 @@ impl<C: LinkChannel> Links<C> {
             url,
             key_name,
             state: LinkState::Opening { at: now },
+            warned_malformed_operation_id: false,
+            #[cfg(windows)]
+            journal_full_warned: Arc::new(AtomicBool::new(false)),
         };
         if self.authenticated() {
             self.replacement = Some(link);
@@ -574,6 +582,9 @@ impl<C: LinkChannel> Links<C> {
                 }
                 if let Some(active) = &mut self.active {
                     active.state = LinkState::Authenticated;
+                    active.warned_malformed_operation_id = false;
+                    #[cfg(windows)]
+                    active.journal_full_warned.store(false, Ordering::Relaxed);
                     info!(url = %active.url, "Agent channel authenticated");
                 }
             }
@@ -600,15 +611,30 @@ impl<C: LinkChannel> Links<C> {
                 // stored config stays; the authority sends it again after the next `Hello`.
                 Err(error) => warn!(%error, "Ignoring an Agent Identity config pushed on the agent channel"),
             },
+            // UNTESTED: A real Authority stream must keep reporting while journal I/O stalls.
+            // The saturation test uses fake channel events; exercise an authenticated stream when changing this dispatch.
             Some(Event::DeviceManagement { id, request }) => {
-                if let Some(reporter) = self.link(role).and_then(|link| link.channel.reporter()) {
+                if crate::device_management::has_unrecorded_malformed_operation_id(&self.device_management, &request) {
+                    if let Some(link) = self.link_mut(role)
+                        && !std::mem::replace(&mut link.warned_malformed_operation_id, true)
+                    {
+                        warn!("Ignoring package operation with malformed operation ID");
+                    }
+                } else if let Some(link) = self.link(role)
+                    && let Some(reporter) = link.channel.reporter()
+                {
+                    let channel_reporter = crate::device_management::ChannelReporter {
+                        reporter,
+                        #[cfg(windows)]
+                        journal_full_warned: Arc::clone(&link.journal_full_warned),
+                    };
                     crate::device_management::handle(
                         self.device_management.clone(),
                         self.identity_id,
                         self.authority_id,
                         id,
                         request,
-                        reporter,
+                        channel_reporter,
                         self.workers_shutdown.subscribe(),
                     );
                 }
@@ -709,12 +735,57 @@ async fn next_link_event<C: LinkChannel>(link: Option<&mut Link<C>>) -> (LinkId,
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use agent_channel_client::TransientKind;
     use rstest::rstest;
+    use tracing::{Metadata, Subscriber, span};
 
     use super::*;
+
+    struct Warnings(Arc<AtomicUsize>, &'static str);
+
+    struct MessageContains {
+        needle: &'static str,
+        matched: bool,
+    }
+
+    impl tracing::field::Visit for MessageContains {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "message" && format!("{value:?}").contains(self.needle) {
+                self.matched = true;
+            }
+        }
+    }
+
+    impl Subscriber for Warnings {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+            *metadata.level() == tracing::Level::WARN
+        }
+
+        fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+            span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            let mut message = MessageContains {
+                needle: self.1,
+                matched: false,
+            };
+            event.record(&mut message);
+            if message.matched {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        fn enter(&self, _: &span::Id) {}
+
+        fn exit(&self, _: &span::Id) {}
+    }
 
     /// A channel whose events the test sends; it records whether it was dropped.
     struct TestChannel {
@@ -745,6 +816,61 @@ mod tests {
             dropped: Arc::clone(&dropped),
         };
         (channel, events, dropped)
+    }
+
+    #[cfg(windows)]
+    struct BoundedTestChannel {
+        events: mpsc::Receiver<Event>,
+        acknowledgements: mpsc::UnboundedSender<String>,
+        reporter: Reporter,
+        dropped: Arc<AtomicBool>,
+    }
+
+    #[cfg(windows)]
+    impl LinkChannel for BoundedTestChannel {
+        fn ack(&self, correlation_id: &str) {
+            let _ = self.acknowledgements.send(correlation_id.to_owned());
+        }
+
+        fn next_event(&mut self) -> impl Future<Output = Option<Event>> + Send {
+            self.events.recv()
+        }
+
+        fn reporter(&self) -> Option<Reporter> {
+            Some(self.reporter.clone())
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for BoundedTestChannel {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg(windows)]
+    fn bounded_test_channel(
+        reporter: Reporter,
+    ) -> (
+        BoundedTestChannel,
+        mpsc::Sender<Event>,
+        mpsc::UnboundedReceiver<String>,
+        Arc<AtomicBool>,
+    ) {
+        let (events, receiver) = mpsc::channel(16);
+        let (acknowledgements, acks) = mpsc::unbounded_channel();
+        let dropped = Arc::new(AtomicBool::new(false));
+        (
+            BoundedTestChannel {
+                events: receiver,
+                acknowledgements,
+                reporter,
+                dropped: Arc::clone(&dropped),
+            },
+            events,
+            acks,
+            dropped,
+        )
     }
 
     fn url() -> Url {
@@ -798,7 +924,7 @@ mod tests {
     }
 
     /// Waits until the streams report an authenticated stream.
-    async fn wait_until_authenticated(streams: &mut Streams<TestChannel>) {
+    async fn wait_until_authenticated<C: LinkChannel + Send + 'static>(streams: &mut Streams<C>) {
         tokio::time::timeout(Duration::from_secs(10), async {
             while !streams.authenticated() {
                 streams.wait().await;
@@ -809,7 +935,7 @@ mod tests {
     }
 
     /// Waits for a terminal notice, which the test, unlike a runner, doesn't act on.
-    async fn wait_for_terminal(streams: &mut Streams<TestChannel>) {
+    async fn wait_for_terminal<C: LinkChannel + Send + 'static>(streams: &mut Streams<C>) {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if std::iter::from_fn(|| streams.try_next_notice()).any(|notice| matches!(notice, Notice::Terminal(_)))
@@ -912,6 +1038,349 @@ mod tests {
         let mut acknowledged: Vec<&str> = pushed.acks.iter().map(|(_, id)| id.as_str()).collect();
         acknowledged.sort_unstable();
         assert_eq!(acknowledged, ["update-2", "update-3", "update-4", "update-5"]);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn malformed_operation_ids_are_ignored_and_warned_once_per_connection() {
+        use agent_channel_proto::device_management_request::Request;
+        use agent_channel_proto::{DeviceManagementRequest, PackageOperationRequest};
+
+        struct ProbeChannel(Arc<AtomicUsize>);
+
+        impl LinkChannel for ProbeChannel {
+            fn ack(&self, _: &str) {}
+
+            fn next_event(&mut self) -> impl Future<Output = Option<Event>> + Send {
+                std::future::pending()
+            }
+
+            fn reporter(&self) -> Option<Reporter> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                None
+            }
+        }
+
+        let warnings = Arc::new(AtomicUsize::new(0));
+        let _subscriber = tracing::subscriber::set_default(Warnings(
+            Arc::clone(&warnings),
+            "Ignoring package operation with malformed operation ID",
+        ));
+        let reporter_requests = Arc::new(AtomicUsize::new(0));
+        let now = Instant::now();
+        #[cfg(windows)]
+        let (_root, context) = {
+            let root = tempfile::Builder::new()
+                .prefix("channel-validation-")
+                .tempdir()
+                .expect("test directory is created");
+            let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+            let legacy = PackageOperationRequest {
+                operation_id: "legacy-id".to_owned(),
+                ..Default::default()
+            };
+            let (context, _entered, _resume) = DeviceManagementContext::default()
+                .with_recorded_operation_for_test(data, &legacy)
+                .expect("test journal opens");
+            (root, context)
+        };
+        #[cfg(not(windows))]
+        let context = DeviceManagementContext::default();
+        let mut links = Links::with_device_management(Uuid::nil(), Uuid::nil(), context);
+        links.reconcile(stream("current"));
+        let link = links.open(
+            url(),
+            "current".to_owned(),
+            ProbeChannel(Arc::clone(&reporter_requests)),
+            now,
+        );
+        links.handle(link, Some(Event::Authenticated), now);
+        let operation = |operation_id: String| {
+            Some(Event::DeviceManagement {
+                id: Uuid::new_v4().to_string(),
+                request: DeviceManagementRequest {
+                    request: Some(Request::PackageOperation(PackageOperationRequest {
+                        operation_id,
+                        ..Default::default()
+                    })),
+                },
+            })
+        };
+
+        for invalid in [
+            "a".repeat(65_485),
+            String::new(),
+            "abcdef012345-6789-0123-456789abcdef".to_owned(),
+            "abcdef01-2345-6789-0123-456789abcdeg".to_owned(),
+            "ABCDEF01-2345-6789-ABCD-EF0123456789".to_owned(),
+        ] {
+            links.handle(link, operation(invalid), now);
+        }
+        assert_eq!(reporter_requests.load(Ordering::SeqCst), 0);
+        assert_eq!(warnings.load(Ordering::SeqCst), 1);
+
+        #[cfg(windows)]
+        {
+            links.handle(link, operation("legacy-id".to_owned()), now);
+            assert_eq!(reporter_requests.load(Ordering::SeqCst), 1);
+        }
+        let recorded_requests = reporter_requests.load(Ordering::SeqCst);
+        for valid in [
+            "abcdef01-2345-6789-abcd-ef0123456789",
+            "01234567-0123-4567-8901-234567890123",
+            "00000000-0000-0000-0000-000000000000",
+            "550e8400-e29b-11d4-a716-446655440000",
+        ] {
+            links.handle(link, operation(valid.to_owned()), now);
+        }
+        assert_eq!(reporter_requests.load(Ordering::SeqCst), recorded_requests + 4);
+
+        links.handle(link, closed_transiently(Duration::from_secs(1)), now);
+        let before_reconnect = warnings.load(Ordering::SeqCst);
+        links.handle(link, Some(Event::Authenticated), now + Duration::from_secs(1));
+        links.handle(link, operation("not-a-uuid".to_owned()), now);
+        assert_eq!(reporter_requests.load(Ordering::SeqCst), recorded_requests + 4);
+        assert_eq!(warnings.load(Ordering::SeqCst), before_reconnect + 1);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_full_journal_warns_once_per_connection() -> anyhow::Result<()> {
+        use agent_channel_client::{ChannelClient, HelloFields, Settings, Target};
+        use agent_channel_proto::device_management_request::Request;
+        use agent_channel_proto::{DeviceManagementRequest, PackageOperationRequest};
+
+        let root = tempfile::Builder::new().prefix("channel-full-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let context = DeviceManagementContext::default().with_full_journal_for_test(data)?;
+        let key = device_key::generate(
+            &device_key::KeyBackend::File { dir: data.join("keys") },
+            &device_key::new_key_name("test"),
+        )?;
+        let client = ChannelClient::new(http_client_proxy::ProxyConfig::Off, &[], Settings::default())?;
+        let report_channel = client.connect(Target {
+            url: Url::parse("https://127.0.0.1:1")?,
+            key: Arc::from(key),
+            leaf_certificate_der: Vec::new(),
+            hello: Arc::new(|| HelloFields {
+                metadata: Default::default(),
+                config_revision: 0,
+                capabilities: Vec::new(),
+            }),
+        })?;
+        let (channel, _events, _acks, _dropped) = bounded_test_channel(report_channel.reporter());
+        let mut links = Links::with_device_management(Uuid::nil(), Uuid::nil(), context);
+        let now = Instant::now();
+        links.reconcile(stream("current"));
+        let link = links.open(url(), "current".to_owned(), channel, now);
+        let warnings = Arc::new(AtomicUsize::new(0));
+        let _subscriber =
+            tracing::subscriber::set_default(Warnings(Arc::clone(&warnings), "Package operation journal is full"));
+        links.handle(link, Some(Event::Authenticated), now);
+        let operation = || {
+            Some(Event::DeviceManagement {
+                id: Uuid::new_v4().to_string(),
+                request: DeviceManagementRequest {
+                    request: Some(Request::PackageOperation(PackageOperationRequest {
+                        operation_id: Uuid::new_v4().to_string(),
+                        ..Default::default()
+                    })),
+                },
+            })
+        };
+        for _ in 0..3 {
+            links.handle(link, operation(), now);
+        }
+        assert_eq!(warnings.load(Ordering::SeqCst), 1);
+
+        links.handle(link, closed_transiently(Duration::from_secs(1)), now);
+        links.handle(link, Some(Event::Authenticated), now + Duration::from_secs(1));
+        links.handle(link, operation(), now);
+        assert_eq!(warnings.load(Ordering::SeqCst), 2);
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn saturated_journal_keeps_channel_traffic_reconnect_and_shutdown_live() -> anyhow::Result<()> {
+        use agent_channel_client::{ChannelClient, HelloFields, Settings, Target};
+        use agent_channel_proto::device_management_request::Request;
+        use agent_channel_proto::{DeviceManagementRequest, PackageOperationRequest};
+
+        let root = tempfile::Builder::new().prefix("channel-overload-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let operation = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let (context, entered, resume) = DeviceManagementContext::default()
+            .with_remote_features(true, false)
+            .with_recorded_operation_for_test(data, &operation)?;
+        let blocked = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let new = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+
+        let key = device_key::generate(
+            &device_key::KeyBackend::File { dir: data.join("keys") },
+            &device_key::new_key_name("test"),
+        )?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        drop(listener);
+        let client = ChannelClient::new(http_client_proxy::ProxyConfig::Off, &[], Settings::default())?;
+        let report_channel = client.connect(Target {
+            url: Url::parse(&format!("https://{address}"))?,
+            key: Arc::from(key),
+            leaf_certificate_der: Vec::new(),
+            hello: Arc::new(|| HelloFields {
+                metadata: Default::default(),
+                config_revision: 0,
+                capabilities: Vec::new(),
+            }),
+        })?;
+
+        let mut streams = Streams::spawn_with(Uuid::nil(), Uuid::nil(), context.clone());
+        assert!(streams.reconcile(stream("current")).await);
+        let (channel, events, mut acks, first_dropped) = bounded_test_channel(report_channel.reporter());
+        streams.open(url(), "current".to_owned(), move || Ok(channel));
+        events.send(Event::Authenticated).await?;
+        wait_until_authenticated(&mut streams).await;
+        events
+            .send(Event::DeviceManagement {
+                id: Uuid::new_v4().to_string(),
+                request: DeviceManagementRequest {
+                    request: Some(Request::PackageOperation(blocked.clone())),
+                },
+            })
+            .await?;
+        tokio::time::timeout(
+            Duration::from_secs(12),
+            tokio::task::spawn_blocking(move || entered.recv_timeout(Duration::from_secs(10))),
+        )
+        .await???;
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for _ in 0..64 {
+                events
+                    .send(Event::DeviceManagement {
+                        id: Uuid::new_v4().to_string(),
+                        request: DeviceManagementRequest {
+                            request: Some(Request::PackageOperation(operation.clone())),
+                        },
+                    })
+                    .await?;
+            }
+            events.send(config_update(4)).await?;
+            events
+                .send(Event::RenewRequested {
+                    id: "renewal".to_owned(),
+                    reason: "test".to_owned(),
+                })
+                .await?;
+            events
+                .send(Event::Reconnect {
+                    id: "reconnect".to_owned(),
+                    reason: "test".to_owned(),
+                })
+                .await?;
+            Ok::<(), mpsc::error::SendError<Event>>(())
+        })
+        .await??;
+
+        let busy = tokio::time::timeout(Duration::from_secs(10), context.submit_operation_for_test(new)).await?;
+        assert_eq!(busy.error, "agent busy: nothing was started");
+
+        let mut saw_config = false;
+        let mut saw_renewal = false;
+        let mut saw_reconnect = false;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !(saw_config && saw_renewal && saw_reconnect) {
+                while let Some(notice) = streams.try_next_notice() {
+                    match notice {
+                        Notice::ConfigUpdate(pushed) => saw_config = pushed.config["revision"] == 4,
+                        Notice::RenewRequested { .. } => saw_renewal = true,
+                        Notice::StreamNeeded => saw_reconnect = true,
+                        _ => {}
+                    }
+                }
+                if !(saw_config && saw_renewal && saw_reconnect) {
+                    streams.wait().await;
+                }
+            }
+        })
+        .await?;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), acks.recv()).await?,
+            Some("renewal".to_owned())
+        );
+        assert!(streams.reconcile(stream("current")).await);
+        let (replacement, replacement_events, _acks, replacement_dropped) =
+            bounded_test_channel(report_channel.reporter());
+        streams.open(url(), "current".to_owned(), move || Ok(replacement));
+        replacement_events.send(Event::Authenticated).await?;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !first_dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        replacement_events
+            .send(closed(ClosureClass::Terminal(TerminalCode::IdentityRevoked), None))
+            .await?;
+        wait_for_terminal(&mut streams).await;
+        assert!(replacement_dropped.load(Ordering::SeqCst));
+        assert!(!streams.reconcile(stream("current")).await);
+
+        let mut stopping = Streams::spawn_with(Uuid::nil(), Uuid::nil(), context.clone());
+        assert!(stopping.reconcile(stream("current")).await);
+        let (channel, events, mut acks, dropped) = bounded_test_channel(report_channel.reporter());
+        stopping.open(url(), "current".to_owned(), move || Ok(channel));
+        events.send(Event::Authenticated).await?;
+        wait_until_authenticated(&mut stopping).await;
+        events
+            .send(Event::DeviceManagement {
+                id: Uuid::new_v4().to_string(),
+                request: DeviceManagementRequest {
+                    request: Some(Request::PackageOperation(operation.clone())),
+                },
+            })
+            .await?;
+        events
+            .send(Event::RenewRequested {
+                id: "before-shutdown".to_owned(),
+                reason: "test".to_owned(),
+            })
+            .await?;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), acks.recv()).await?,
+            Some("before-shutdown".to_owned())
+        );
+        drop(stopping);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+
+        resume.send(())?;
+        let blocked = tokio::time::timeout(Duration::from_secs(10), context.submit_operation_for_test(blocked)).await?;
+        assert_eq!(blocked.error, "remote package writes are disabled");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), context.submit_operation_for_test(operation))
+                .await?
+                .success
+        );
         Ok(())
     }
 

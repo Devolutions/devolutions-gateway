@@ -3,18 +3,23 @@
 //! The Broker's in-process record of the issued grant is the only source of start evidence.
 //! Once the grant may have reached UniGetUI, the verdict is unknown whatever UniGetUI answers or fails to answer.
 
+use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use agent_channel_proto::{
     PackageOperationRequest, PackageOperationResult, PackageOperationStatus, PackageOperationType,
 };
 use now_package_broker::remote_grant::{GrantSpec, OutcomeSummary};
 use now_policy_api::{Elevation, ManagerName, Operation, PackageIdentifier, Scope, VersionString};
+use parking_lot::Mutex;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 use win_api_wrappers::identity::sid::Sid;
 
 use super::DeviceManagementContext;
-use super::operation_journal::{Admission, OperationJournal, Outcome, Settled};
+use super::operation_journal::{Admission, OperationJournal, Outcome, Settled, record_name};
 
 /// Managers whose Broker builders exist on Windows.
 const SUPPORTED_MANAGERS: [ManagerName; 10] = [
@@ -29,6 +34,8 @@ const SUPPORTED_MANAGERS: [ManagerName; 10] = [
     ManagerName::Scoop,
     ManagerName::Vcpkg,
 ];
+
+const JOURNAL_WARNING_DELAY: Duration = Duration::from_secs(5);
 
 /// A validated request, in the Broker's vocabulary.
 #[derive(Debug, PartialEq, Eq)]
@@ -165,66 +172,352 @@ impl Plan {
     }
 }
 
-/// Runs one remote package operation and returns its result.
-///
-/// Admission and execution run in one detached task, so the operation reaches its recorded outcome even when the
-/// caller stops waiting, and an admitted record always has its guard.
+type Reply = Box<dyn FnOnce(PackageOperationResult) + Send>;
+
+pub(super) const JOURNAL_FULL_ERROR: &str = "agent journal full: nothing was started";
+
+struct Delivery {
+    authority_id: String,
+    request: PackageOperationRequest,
+    reply: Reply,
+}
+
+#[derive(Clone, Copy)]
+enum Stage {
+    Lookup,
+    Admission,
+    Running,
+}
+
+struct Tracked {
+    delivery: Delivery,
+    stage: Stage,
+}
+
+/// Coordinates journal lookups and operations without blocking the channel consumer.
+pub(super) struct Coordinator {
+    workers: Arc<Semaphore>,
+    admission: Arc<Semaphore>,
+    tracked: Mutex<HashMap<String, Tracked>>,
+}
+
+impl Default for Coordinator {
+    fn default() -> Self {
+        Self {
+            workers: Arc::new(Semaphore::new(super::MAX_CONCURRENT_REQUESTS)),
+            admission: Arc::new(Semaphore::new(1)),
+            tracked: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Coordinator {
+    pub(super) fn try_worker(&self) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.workers).try_acquire_owned().ok()
+    }
+
+    fn submit<F, Fut>(
+        self: &Arc<Self>,
+        journal: Arc<OperationJournal>,
+        authority_id: String,
+        request: PackageOperationRequest,
+        reply: Reply,
+        execute: F,
+    ) where
+        F: FnOnce(Pending) -> Fut + Send + 'static,
+        Fut: Future<Output = Settled> + Send + 'static,
+    {
+        let operation_id = request.operation_id.clone();
+        let name = record_name(&operation_id);
+        let mut tracked = self.tracked.lock();
+        if let Some(existing) = tracked.get_mut(&name) {
+            if !matches!(existing.stage, Stage::Lookup) && existing.delivery.request != request {
+                drop(tracked);
+                warn!("Package operation ID was used for a different request");
+                reply(result(operation_id, unknown(false)));
+                return;
+            }
+            existing.delivery = Delivery {
+                authority_id,
+                request,
+                reply,
+            };
+            return;
+        }
+
+        if journal.may_contain(&operation_id) {
+            tracked.insert(
+                name.clone(),
+                Tracked {
+                    delivery: Delivery {
+                        authority_id,
+                        request,
+                        reply,
+                    },
+                    stage: Stage::Lookup,
+                },
+            );
+            drop(tracked);
+            let coordinator = Arc::clone(self);
+            tokio::spawn(async move {
+                coordinator.lookup(journal, name).await;
+            });
+            return;
+        }
+
+        // INVARIANT: The tracked lock stays held from this check through slot acquisition.
+        // An admission publishes membership and reacquires this lock before releasing its slot.
+        if !journal.has_index_capacity(&name) {
+            drop(tracked);
+            reply(result(
+                operation_id,
+                Settled {
+                    outcome: failure(JOURNAL_FULL_ERROR),
+                    execution_started: None,
+                },
+            ));
+            return;
+        }
+
+        let admission = Arc::clone(&self.admission).try_acquire_owned();
+        let worker = self.try_worker();
+        let (Ok(admission), Some(worker)) = (admission, worker) else {
+            drop(tracked);
+            reply(result(
+                operation_id,
+                Settled {
+                    outcome: failure("agent busy: nothing was started"),
+                    execution_started: None,
+                },
+            ));
+            return;
+        };
+        tracked.insert(
+            name,
+            Tracked {
+                delivery: Delivery {
+                    authority_id: authority_id.clone(),
+                    request: request.clone(),
+                    reply,
+                },
+                stage: Stage::Admission,
+            },
+        );
+        drop(tracked);
+        let coordinator = Arc::clone(self);
+        tokio::spawn(async move {
+            coordinator
+                .admit(journal, authority_id, request, admission, worker, execute)
+                .await;
+        });
+    }
+
+    async fn lookup(self: Arc<Self>, journal: Arc<OperationJournal>, name: String) {
+        enum Decision {
+            Retry,
+            Wait,
+        }
+
+        loop {
+            let admission = Arc::clone(&self.admission)
+                .acquire_owned()
+                .await
+                .expect("admission semaphore stays open");
+            let (authority_id, request) = {
+                let tracked = self.tracked.lock();
+                let delivery = &tracked.get(&name).expect("lookup is tracked").delivery;
+                (delivery.authority_id.clone(), delivery.request.clone())
+            };
+            let lookup = {
+                let (journal, authority_id, request) = (Arc::clone(&journal), authority_id.clone(), request.clone());
+                journal_io(move || journal.lookup(&authority_id, &request)).await
+            };
+            let lookup = match lookup {
+                Ok(Ok(Some(admission))) => Some(admission),
+                Ok(Ok(None)) => {
+                    error!("Possibly recorded package operation is absent from the journal");
+                    None
+                }
+                Ok(Err(error)) => {
+                    error!(error = format!("{error:#}"), "Package operation journal lookup failed");
+                    None
+                }
+                Err(error) => {
+                    error!(%error, "Package operation journal lookup was interrupted");
+                    None
+                }
+            };
+
+            let decision = {
+                let mut tracked = self.tracked.lock();
+                let current = tracked.get_mut(&name).expect("lookup is tracked");
+                if current.delivery.request != request {
+                    Decision::Retry
+                } else if matches!(lookup, Some(Admission::InFlight)) {
+                    current.stage = Stage::Running;
+                    Decision::Wait
+                } else {
+                    let settled = match lookup {
+                        Some(Admission::Recorded(settled)) => settled,
+                        Some(Admission::PayloadMismatch) => {
+                            warn!("Package operation ID was used for a different request");
+                            unknown(false)
+                        }
+                        Some(Admission::Admitted) => {
+                            error!("Read-only package operation lookup admitted an operation");
+                            unknown(false)
+                        }
+                        Some(Admission::InFlight) => unreachable!("in-flight lookup is handled above"),
+                        None => unknown(false),
+                    };
+                    let delivery = tracked.remove(&name).expect("lookup is tracked").delivery;
+                    drop(tracked);
+                    drop(admission);
+                    (delivery.reply)(result(delivery.request.operation_id, settled));
+                    return;
+                }
+            };
+            drop(admission);
+            match decision {
+                Decision::Retry => continue,
+                Decision::Wait => {
+                    let settled = wait(journal, authority_id, request).await;
+                    self.finish(name, settled);
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn admit<F, Fut>(
+        self: Arc<Self>,
+        journal: Arc<OperationJournal>,
+        authority_id: String,
+        request: PackageOperationRequest,
+        admission: OwnedSemaphorePermit,
+        worker: OwnedSemaphorePermit,
+        execute: F,
+    ) where
+        F: FnOnce(Pending) -> Fut + Send + 'static,
+        Fut: Future<Output = Settled> + Send + 'static,
+    {
+        let name = record_name(&request.operation_id);
+        let outcome = {
+            let (journal, authority_id, request) = (Arc::clone(&journal), authority_id.clone(), request.clone());
+            journal_io(move || journal.admit(&authority_id, &request)).await
+        };
+        let outcome = match outcome {
+            Ok(Ok(outcome)) => Some(outcome),
+            Ok(Err(error)) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Package operation journal admission failed"
+                );
+                None
+            }
+            Err(error) => {
+                error!(%error, "Package operation journal admission was interrupted");
+                None
+            }
+        };
+        let settled = match outcome {
+            Some(Admission::Admitted) => {
+                let pending = Pending {
+                    journal: Arc::clone(&journal),
+                    authority_id: authority_id.clone(),
+                    request: request.clone(),
+                    armed: true,
+                };
+                self.running(&name);
+                drop(admission);
+                match tokio::spawn(execute(pending)).await {
+                    Ok(settled) => settled,
+                    Err(error) => {
+                        error!(%error, "Package operation task was interrupted");
+                        wait(journal, authority_id, request).await
+                    }
+                }
+            }
+            Some(Admission::InFlight) => {
+                self.running(&name);
+                drop(admission);
+                wait(journal, authority_id, request).await
+            }
+            Some(Admission::Recorded(settled)) => settled,
+            Some(Admission::PayloadMismatch) => {
+                warn!("Package operation ID was used for a different request");
+                unknown(false)
+            }
+            None => unknown(false),
+        };
+        drop(worker);
+        self.finish(name, settled);
+    }
+
+    fn running(&self, name: &str) {
+        self.tracked.lock().get_mut(name).expect("operation is tracked").stage = Stage::Running;
+    }
+
+    fn finish(&self, name: String, settled: Settled) {
+        let delivery = self
+            .tracked
+            .lock()
+            .remove(&name)
+            .expect("operation is tracked")
+            .delivery;
+        (delivery.reply)(result(delivery.request.operation_id, settled));
+    }
+}
+
+async fn journal_io<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> anyhow::Result<T> {
+    let mut task = tokio::task::spawn_blocking(work);
+    let result = tokio::select! {
+        biased;
+        result = &mut task => result,
+        () = tokio::time::sleep(JOURNAL_WARNING_DELAY) => {
+            warn!(
+                elapsed_secs = JOURNAL_WARNING_DELAY.as_secs(),
+                "Package operation journal access is stalled"
+            );
+            task.await
+        }
+    };
+    Ok(result?)
+}
+
+pub(super) fn submit(
+    context: DeviceManagementContext,
+    authority_id: Uuid,
+    request: PackageOperationRequest,
+    reply: Reply,
+) {
+    let Some(journal) = context.journal().cloned() else {
+        reply(result(request.operation_id, unknown(false)));
+        return;
+    };
+    let coordinator = Arc::clone(context.operations());
+    coordinator.submit(journal, authority_id.to_string(), request, reply, move |pending| {
+        execute(context, pending)
+    });
+}
+
+#[cfg(test)]
 pub(super) async fn run(
     context: &DeviceManagementContext,
     authority_id: Uuid,
     request: PackageOperationRequest,
 ) -> PackageOperationResult {
     let operation_id = request.operation_id.clone();
-    let authority_id = authority_id.to_string();
-    let journal = context.journal().cloned();
-    let task = tokio::spawn(settle(context.clone(), authority_id.clone(), request.clone()));
-    let settled = match (task.await, journal) {
-        (Ok(settled), _) => settled,
-        // The task panicked; its guard has ended any admitted record.
-        (Err(_), Some(journal)) => wait(journal, authority_id, request).await,
-        (Err(_), None) => unknown(false),
-    };
-    result(operation_id, settled)
-}
-
-async fn settle(context: DeviceManagementContext, authority_id: String, request: PackageOperationRequest) -> Settled {
-    let Some(journal) = context.journal().cloned() else {
-        return unknown(false);
-    };
-
-    let admission = {
-        let (journal, authority_id, request) = (Arc::clone(&journal), authority_id.clone(), request.clone());
-        tokio::task::spawn_blocking(move || journal.admit(&authority_id, &request)).await
-    };
-    let admission = match admission {
-        Ok(Ok(admission)) => admission,
-        Ok(Err(error)) => {
-            error!(
-                error = format!("{error:#}"),
-                "Package operation journal admission failed"
-            );
-            return unknown(false);
-        }
-        Err(_) => return unknown(false),
-    };
-
-    match admission {
-        Admission::Admitted => {
-            let pending = Pending {
-                journal: Arc::clone(&journal),
-                authority_id: authority_id.clone(),
-                request: request.clone(),
-                armed: true,
-            };
-            execute(context, pending).await
-        }
-        Admission::InFlight => wait(journal, authority_id, request).await,
-        Admission::Recorded(settled) => settled,
-        Admission::PayloadMismatch => {
-            warn!("Package operation ID was used for a different request");
-            unknown(false)
-        }
-    }
+    let (send, receive) = tokio::sync::oneshot::channel();
+    submit(
+        context.clone(),
+        authority_id,
+        request,
+        Box::new(move |result| {
+            let _ = send.send(result);
+        }),
+    );
+    receive.await.unwrap_or_else(|_| result(operation_id, unknown(false)))
 }
 
 async fn wait(journal: Arc<OperationJournal>, authority_id: String, request: PackageOperationRequest) -> Settled {
@@ -290,15 +583,25 @@ impl Pending {
 
 impl Drop for Pending {
     fn drop(&mut self) {
-        if self.armed
-            && let Err(error) = self
-                .journal
-                .complete(&self.authority_id, &self.request, Outcome::Unknown)
-        {
-            error!(
-                error = format!("{error:#}"),
-                "Cannot record an interrupted package operation"
-            );
+        if self.armed {
+            let journal = Arc::clone(&self.journal);
+            let authority_id = self.authority_id.clone();
+            let request = self.request.clone();
+            // UNTESTED: A detached cleanup must not delay service stop if journal I/O never returns.
+            // Check service shutdown with stalled journal I/O when changing this path.
+            if let Err(error) = std::thread::Builder::new()
+                .name("package-operation-cleanup".to_owned())
+                .spawn(move || {
+                    if let Err(error) = journal.complete(&authority_id, &request, Outcome::Unknown) {
+                        error!(
+                            error = format!("{error:#}"),
+                            "Cannot record an interrupted package operation"
+                        );
+                    }
+                })
+            {
+                error!(%error, "Cannot start interrupted package operation cleanup");
+            }
         }
     }
 }
@@ -380,11 +683,13 @@ fn result(operation_id: String, settled: Settled) -> PackageOperationResult {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     fn request(operation: PackageOperationType, manager: &str, source: &str, scope: &str) -> PackageOperationRequest {
         PackageOperationRequest {
-            operation_id: "op-1".to_owned(),
+            operation_id: "11111111-2222-4333-8444-555555555555".to_owned(),
             r#type: operation.into(),
             manager: manager.to_owned(),
             source: source.to_owned(),
@@ -393,6 +698,603 @@ mod tests {
             reported_scope: (operation != PackageOperationType::Install).then(String::new),
             ..Default::default()
         }
+    }
+
+    fn test_journal() -> anyhow::Result<(tempfile::TempDir, Arc<OperationJournal>)> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let journal = Arc::new(OperationJournal::open(data)?);
+        Ok((root, journal))
+    }
+
+    fn response() -> (Reply, tokio::sync::oneshot::Receiver<PackageOperationResult>) {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        (
+            Box::new(move |result| {
+                let _ = send.send(result);
+            }),
+            receive,
+        )
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn in_flight_redelivery_receives_the_original_result_at_capacity() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let (first_reply, first_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "first-authority".to_owned(),
+            request.clone(),
+            first_reply,
+            move |pending| async move {
+                started.send(()).expect("start receiver is alive");
+                released.await.expect("release sender is alive");
+                pending.finish(Outcome::Succeeded, false).await
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(10), running).await??;
+
+        let mut other_workers = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            other_workers.push(permit);
+        }
+        let (latest_reply, mut latest_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "second-authority".to_owned(),
+            request.clone(),
+            latest_reply,
+            |_| async { panic!("a redelivery must not execute again") },
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), first_result)
+                .await?
+                .is_err()
+        );
+        assert!(matches!(
+            latest_result.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        release.send(()).expect("operation is waiting");
+        let result = tokio::time::timeout(Duration::from_secs(10), latest_result).await??;
+        assert!(result.success);
+        assert_eq!(result.error, "");
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unspecified));
+        assert_eq!(result.execution_started, None);
+        assert_eq!(
+            journal.admit("second-authority", &request)?,
+            Admission::Recorded(Settled {
+                outcome: Outcome::Succeeded,
+                execution_started: None,
+            })
+        );
+        drop(other_workers);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn recorded_redeliveries_wait_without_blocking_a_new_busy_answer() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let recorded = PackageOperationRequest {
+            operation_id: "legacy-id".to_owned(),
+            ..request(PackageOperationType::Install, "Winget", "winget", "user")
+        };
+        assert_eq!(journal.admit("first-authority", &recorded)?, Admission::Admitted);
+        journal.complete("first-authority", &recorded, Outcome::Succeeded)?;
+        let admission = Arc::clone(&coordinator.admission).acquire_owned().await?;
+
+        let (old_reply, old_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "first-authority".to_owned(),
+            recorded.clone(),
+            old_reply,
+            |_| async { panic!("a recorded operation must not execute again") },
+        );
+        let (latest_reply, mut latest_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "second-authority".to_owned(),
+            recorded,
+            latest_reply,
+            |_| async { panic!("a recorded operation must not execute again") },
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), old_result)
+                .await?
+                .is_err()
+        );
+        assert!(matches!(
+            latest_result.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        let new = PackageOperationRequest {
+            operation_id: "11111111-2222-4333-8444-555555555556".to_owned(),
+            ..request(PackageOperationType::Install, "Winget", "winget", "user")
+        };
+        let (busy_reply, busy_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "first-authority".to_owned(),
+            new.clone(),
+            busy_reply,
+            |_| async { panic!("an overloaded operation must not execute") },
+        );
+        let busy = tokio::time::timeout(Duration::from_secs(10), busy_result).await??;
+        assert!(!busy.success);
+        assert_eq!(busy.error, "agent busy: nothing was started");
+        assert_eq!(busy.status, i32::from(PackageOperationStatus::Unspecified));
+        assert_eq!(busy.execution_started, None);
+
+        drop(admission);
+        let replay = tokio::time::timeout(Duration::from_secs(10), latest_result).await??;
+        assert!(replay.success);
+
+        let (later_reply, later_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "first-authority".to_owned(),
+            new,
+            later_reply,
+            |pending| async move { pending.finish(Outcome::Succeeded, false).await },
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), later_result)
+                .await??
+                .success
+        );
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_different_payload_cannot_replace_an_in_flight_operation() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let original = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let changed = PackageOperationRequest {
+            package_id: "different".to_owned(),
+            ..original.clone()
+        };
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let (original_reply, original_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "first-authority".to_owned(),
+            original,
+            original_reply,
+            move |pending| async move {
+                started.send(()).expect("start receiver is alive");
+                released.await.expect("release sender is alive");
+                pending.finish(Outcome::Succeeded, false).await
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(10), running).await??;
+        let (changed_reply, changed_result) = response();
+        coordinator.submit(
+            journal,
+            "second-authority".to_owned(),
+            changed,
+            changed_reply,
+            |_| async { panic!("a different payload must not execute") },
+        );
+        let changed = tokio::time::timeout(Duration::from_secs(10), changed_result).await??;
+        assert!(!changed.success);
+        assert_eq!(changed.status, i32::from(PackageOperationStatus::Unknown));
+
+        release.send(()).expect("operation is waiting");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), original_result)
+                .await??
+                .success
+        );
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn redelivery_attaches_before_and_during_stalled_admission() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let mut journal = OperationJournal::open(data)?;
+        let (entered, resume) = journal.pause_index_write_for_test();
+        let journal = Arc::new(journal);
+        let coordinator = Arc::new(Coordinator::default());
+        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let executions = Arc::new(AtomicUsize::new(0));
+        let (first_reply, mut first_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            request.clone(),
+            first_reply,
+            {
+                let executions = Arc::clone(&executions);
+                move |pending| async move {
+                    executions.fetch_add(1, Ordering::SeqCst);
+                    pending.finish(Outcome::Succeeded, false).await
+                }
+            },
+        );
+        assert!(!journal.may_contain(&request.operation_id));
+
+        let (second_reply, mut second_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            request.clone(),
+            second_reply,
+            |_| async { panic!("a redelivery must not execute again") },
+        );
+        assert!(matches!(
+            first_result.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
+
+        let new = PackageOperationRequest {
+            operation_id: "11111111-2222-4333-8444-555555555556".to_owned(),
+            ..request.clone()
+        };
+        let (busy_reply, mut busy_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            new,
+            busy_reply,
+            |_| async { panic!("an overloaded operation must not execute") },
+        );
+        assert_eq!(busy_result.try_recv()?.error, "agent busy: nothing was started");
+
+        tokio::time::timeout(
+            Duration::from_secs(12),
+            tokio::task::spawn_blocking(move || entered.recv_timeout(Duration::from_secs(10))),
+        )
+        .await???;
+        let changed = PackageOperationRequest {
+            package_id: "different".to_owned(),
+            ..request.clone()
+        };
+        let (changed_reply, mut changed_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            changed,
+            changed_reply,
+            |_| async { panic!("a changed payload must not execute") },
+        );
+        assert_eq!(
+            changed_result.try_recv()?.status,
+            i32::from(PackageOperationStatus::Unknown)
+        );
+
+        let (latest_reply, latest_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "another-authority".to_owned(),
+            request,
+            latest_reply,
+            |_| async { panic!("a redelivery must not execute again") },
+        );
+        assert!(matches!(
+            second_result.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
+        resume.send(())?;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), latest_result)
+                .await??
+                .success
+        );
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_recorded_id_with_a_different_payload_is_unknown_at_capacity() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let original = request(PackageOperationType::Install, "Winget", "winget", "user");
+        assert_eq!(journal.admit("authority", &original)?, Admission::Admitted);
+        journal.complete("authority", &original, Outcome::Succeeded)?;
+        let mut permits = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            permits.push(permit);
+        }
+
+        let changed = PackageOperationRequest {
+            package_id: "different".to_owned(),
+            ..original.clone()
+        };
+        let (reply, result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            changed,
+            reply,
+            |_| async { panic!("a changed payload must not execute") },
+        );
+        let result = tokio::time::timeout(Duration::from_secs(10), result).await??;
+        assert_eq!(result.operation_id, original.operation_id);
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+        assert_eq!(
+            journal.lookup("authority", &original)?,
+            Some(Admission::Recorded(Settled {
+                outcome: Outcome::Succeeded,
+                execution_started: None,
+            }))
+        );
+        drop(permits);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_changed_redelivery_during_lookup_receives_unknown() -> anyhow::Result<()> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let mut journal = OperationJournal::open(data)?;
+        let recorded = request(PackageOperationType::Install, "Winget", "winget", "user");
+        journal.admit("authority", &recorded)?;
+        journal.complete("authority", &recorded, Outcome::Succeeded)?;
+        let (entered, resume) = journal.pause_index_write_for_test();
+        let journal = Arc::new(journal);
+        let other = PackageOperationRequest {
+            operation_id: "11111111-2222-4333-8444-555555555556".to_owned(),
+            ..recorded.clone()
+        };
+        let writer = tokio::task::spawn_blocking({
+            let journal = Arc::clone(&journal);
+            let other = other.clone();
+            move || journal.admit("authority", &other)
+        });
+        tokio::time::timeout(
+            Duration::from_secs(12),
+            tokio::task::spawn_blocking(move || entered.recv_timeout(Duration::from_secs(10))),
+        )
+        .await???;
+
+        let coordinator = Arc::new(Coordinator::default());
+        let (first_reply, mut first_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            recorded.clone(),
+            first_reply,
+            |_| async { panic!("a recorded operation must not execute again") },
+        );
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while coordinator.admission.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        let changed = PackageOperationRequest {
+            package_id: "different".to_owned(),
+            ..recorded
+        };
+        let (changed_reply, changed_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            changed,
+            changed_reply,
+            |_| async { panic!("a changed payload must not execute") },
+        );
+        assert!(matches!(
+            first_result.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
+        resume.send(())?;
+        assert_eq!(writer.await??, Admission::Admitted);
+        let result = tokio::time::timeout(Duration::from_secs(10), changed_result).await??;
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+        journal.complete("authority", &other, Outcome::Unknown)?;
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_full_journal_rejects_a_new_operation_without_recording_it() -> anyhow::Result<()> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let mut journal = OperationJournal::open(data)?;
+        journal.exhaust_index_for_test();
+        let mut journal = Arc::new(journal);
+        let coordinator = Arc::new(Coordinator::default());
+        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let mut permits = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            permits.push(permit);
+        }
+        let (reply, result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            request.clone(),
+            reply,
+            |_| async { panic!("an operation cannot start when the journal is full") },
+        );
+
+        let result = tokio::time::timeout(Duration::from_secs(10), result).await??;
+        assert_eq!(result.operation_id, request.operation_id);
+        assert!(!result.success);
+        assert_eq!(result.error, "agent journal full: nothing was started");
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unspecified));
+        assert_eq!(result.execution_started, None);
+        assert!(!journal.may_contain(&request.operation_id));
+
+        drop(permits);
+        Arc::get_mut(&mut journal)
+            .expect("the refused operation did not retain the journal")
+            .restore_index_limit_for_test();
+        let (reply, later) = response();
+        coordinator.submit(journal, "authority".to_owned(), request, reply, |pending| async move {
+            pending.finish(Outcome::Succeeded, false).await
+        });
+        assert!(tokio::time::timeout(Duration::from_secs(10), later).await??.success);
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_full_journal_still_replays_recorded_operations_at_worker_capacity() -> anyhow::Result<()> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let mut journal = OperationJournal::open(data)?;
+        let recorded = request(PackageOperationType::Install, "Winget", "winget", "user");
+        journal.admit("authority", &recorded)?;
+        journal.complete("authority", &recorded, Outcome::Succeeded)?;
+        journal.exhaust_index_for_test();
+        let journal = Arc::new(journal);
+        let coordinator = Arc::new(Coordinator::default());
+        let mut permits = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            permits.push(permit);
+        }
+        let (sender, replay) = response();
+        coordinator.submit(journal, "authority".to_owned(), recorded, sender, |_| async {
+            panic!("a recorded operation must not execute again")
+        });
+        assert!(tokio::time::timeout(Duration::from_secs(10), replay).await??.success);
+        drop(permits);
+        Ok(())
+    }
+
+    // oracle: mutant a stalled journal is not warned, or repeatedly warns
+    #[tokio::test]
+    async fn a_stalled_journal_admission_warns_once() -> anyhow::Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use tracing::{Metadata, Subscriber, span};
+
+        struct Warnings(Arc<AtomicUsize>);
+
+        impl Subscriber for Warnings {
+            fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+                *metadata.level() == tracing::Level::WARN
+            }
+
+            fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+                span::Id::from_u64(1)
+            }
+
+            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+
+            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+
+            fn event(&self, _: &tracing::Event<'_>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn enter(&self, _: &span::Id) {}
+
+            fn exit(&self, _: &span::Id) {}
+        }
+
+        let warnings = Arc::new(AtomicUsize::new(0));
+        let _subscriber = tracing::subscriber::set_default(Warnings(Arc::clone(&warnings)));
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let mut journal = OperationJournal::open(data)?;
+        let (entered, resume) = journal.pause_index_write_for_test();
+        let journal = Arc::new(journal);
+        let coordinator = Arc::new(Coordinator::default());
+        let (reply, result) = response();
+        coordinator.submit(
+            journal,
+            "authority".to_owned(),
+            request(PackageOperationType::Install, "Winget", "winget", "user"),
+            reply,
+            |pending| async move { pending.finish(Outcome::Succeeded, false).await },
+        );
+        tokio::time::timeout(
+            Duration::from_secs(12),
+            tokio::task::spawn_blocking(move || entered.recv_timeout(Duration::from_secs(10))),
+        )
+        .await???;
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        let first = warnings.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let second = warnings.load(Ordering::SeqCst);
+        resume.send(())?;
+        assert!(tokio::time::timeout(Duration::from_secs(10), result).await??.success);
+        assert_eq!((first, second), (1, 1));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn dropping_an_interrupted_operation_does_not_block_the_runtime_during_a_journal_stall() -> anyhow::Result<()> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let mut journal = OperationJournal::open(data)?;
+        let interrupted = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let interrupted_for_wait = interrupted.clone();
+        assert_eq!(journal.admit("authority", &interrupted)?, Admission::Admitted);
+        let (entered, resume) = journal.pause_index_write_for_test();
+        let journal = Arc::new(journal);
+        let writer = {
+            let journal = Arc::clone(&journal);
+            std::thread::spawn(move || {
+                let blocked = PackageOperationRequest {
+                    operation_id: "11111111-2222-4333-8444-555555555557".to_owned(),
+                    ..Default::default()
+                };
+                journal.admit("authority", &blocked)
+            })
+        };
+        entered.recv_timeout(Duration::from_secs(10))?;
+        let (dropped, drop_finished) = std::sync::mpsc::channel();
+        let runtime = {
+            let journal = Arc::clone(&journal);
+            std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("test runtime starts");
+                runtime.block_on(async move {
+                    tokio::spawn(async move {
+                        drop(Pending {
+                            journal,
+                            authority_id: "authority".to_owned(),
+                            request: interrupted,
+                            armed: true,
+                        });
+                        let _ = dropped.send(());
+                    })
+                    .await
+                    .expect("operation task completes");
+                });
+            })
+        };
+        let returned_before_resume = drop_finished.recv_timeout(Duration::from_secs(5));
+        resume.send(())?;
+        writer.join().expect("journal writer thread completed")?;
+        runtime.join().expect("test runtime thread completed");
+        assert_eq!(
+            journal.wait("authority", &interrupted_for_wait)?.outcome,
+            Outcome::Unknown
+        );
+
+        assert!(returned_before_resume.is_ok());
+        Ok(())
     }
 
     #[rstest::rstest]
@@ -649,8 +1551,14 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn operation_without_a_journal_is_unknown_and_never_dispatched() {
+        let context = DeviceManagementContext::default();
+        let mut permits = Vec::new();
+        while let Some(permit) = context.operations().try_worker() {
+            permits.push(permit);
+        }
+        assert!(!permits.is_empty());
         let result = run(
-            &DeviceManagementContext::default(),
+            &context,
             Uuid::nil(),
             request(PackageOperationType::Install, "winget", "winget", "user"),
         )

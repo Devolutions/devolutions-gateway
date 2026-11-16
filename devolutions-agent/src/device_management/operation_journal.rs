@@ -162,13 +162,16 @@ impl Membership {
         if self.names.contains(&name) {
             return Ok(());
         }
-        // Each added name is ASCII, so JSON adds only quotes and, after the first name, a comma.
-        let added = (name.len() + 2 + usize::from(!self.names.is_empty())) as u64;
-        let index_size = self.index_size + added;
+        let index_size = self.size_with(&name);
         ensure!(index_size <= limit, "package operation journal index is too large");
         self.names.insert(name);
         self.index_size = index_size;
         Ok(())
+    }
+
+    fn size_with(&self, name: &str) -> u64 {
+        // Each added name is ASCII, so JSON adds only quotes and, after the first name, a comma.
+        self.index_size + (name.len() + 2 + usize::from(!self.names.is_empty())) as u64
     }
 }
 
@@ -343,6 +346,13 @@ impl OperationJournal {
         operation_id.is_empty() || self.membership.load().names.contains(&record_name(operation_id))
     }
 
+    /// Returns whether the membership index has room for a record named `name`.
+    #[cfg(windows)]
+    pub(super) fn has_index_capacity(&self, name: &str) -> bool {
+        let membership = self.membership.load();
+        membership.names.contains(name) || membership.size_with(name) <= self.index_size_limit
+    }
+
     /// Reads an existing operation under ["Package operations"] without admitting a new one.
     ///
     /// Returns `None` only when the journal establishes absence.
@@ -371,6 +381,16 @@ impl OperationJournal {
         };
         assert!(self.index_write_hook.get_mut().replace(hook).is_none());
         (entered_rx, resume_tx)
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn exhaust_index_for_test(&mut self) {
+        self.index_size_limit = self.membership.load().index_size;
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn restore_index_limit_for_test(&mut self) {
+        self.index_size_limit = MAX_INDEX_SIZE;
     }
 
     /// Opens the journal, creating it when the data directory or the journal directory is missing.
@@ -797,6 +817,20 @@ mod tests {
         journal_path(data).join(record_name(operation_id))
     }
 
+    fn assert_membership_matches_records(journal: &OperationJournal, data: &Utf8Path) -> anyhow::Result<()> {
+        let index: Index = serde_json::from_slice(&std::fs::read(journal_path(data).join(INDEX_NAME))?)?;
+        let mut records = BTreeSet::new();
+        for entry in std::fs::read_dir(journal_path(data))? {
+            let name = entry?.file_name().into_string().expect("record name is UTF-8");
+            if name != INDEX_NAME {
+                records.insert(name);
+            }
+        }
+        assert_eq!(&journal.membership.load().names, &index.operations);
+        assert_eq!(records, index.operations);
+        Ok(())
+    }
+
     #[test]
     fn membership_tracks_the_agents_own_writes_after_reopen() -> anyhow::Result<()> {
         // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
@@ -806,17 +840,21 @@ mod tests {
 
         // oracle: mutant a new ID cannot be distinguished from recorded operations
         assert!(!journal.may_contain("new"));
+        assert_membership_matches_records(&journal, &data)?;
         journal.admit("authority", &request)?;
         journal.complete("authority", &request, Outcome::Succeeded)?;
+        assert_membership_matches_records(&journal, &data)?;
         journal.admit("authority", &self::request("pending", "pkg"))?;
         assert!(journal.may_contain("recorded"));
         assert!(journal.may_contain("pending"));
+        assert_membership_matches_records(&journal, &data)?;
         drop(journal);
 
         let journal = OperationJournal::open(&data)?;
         assert!(journal.may_contain("recorded"));
         assert!(journal.may_contain("pending"));
         assert!(!journal.may_contain("new"));
+        assert_membership_matches_records(&journal, &data)?;
         Ok(())
     }
 

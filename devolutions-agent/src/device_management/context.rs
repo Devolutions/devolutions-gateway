@@ -14,6 +14,8 @@ use now_package_broker::registration::RegistrationHandle;
 use now_package_broker::server::BrokerState;
 
 #[cfg(windows)]
+use super::operation::Coordinator;
+#[cfg(windows)]
 use super::operation_journal::OperationJournal;
 #[cfg(windows)]
 use super::user_registry::UserRegistry;
@@ -34,6 +36,8 @@ pub(crate) struct DeviceManagementContext {
     users: Option<Arc<UserRegistry>>,
     #[cfg(windows)]
     journal: Option<Arc<OperationJournal>>,
+    #[cfg(windows)]
+    operations: Arc<Coordinator>,
 }
 
 /// A context with no services, and both remote features enabled, as the configuration defaults them.
@@ -50,6 +54,8 @@ impl Default for DeviceManagementContext {
             users: None,
             #[cfg(windows)]
             journal: None,
+            #[cfg(windows)]
+            operations: Arc::new(Coordinator::default()),
         }
     }
 }
@@ -154,6 +160,45 @@ impl DeviceManagementContext {
     /// The durable operation journal; `None` makes package writes unavailable.
     pub(super) fn journal(&self) -> Option<&Arc<OperationJournal>> {
         self.journal.as_ref()
+    }
+
+    pub(super) fn operations(&self) -> &Arc<Coordinator> {
+        &self.operations
+    }
+}
+
+#[cfg(all(test, windows))]
+impl DeviceManagementContext {
+    pub(crate) fn with_full_journal_for_test(mut self, data_dir: &Utf8Path) -> anyhow::Result<Self> {
+        let mut journal = OperationJournal::open(data_dir)?;
+        journal.exhaust_index_for_test();
+        self.journal = Some(Arc::new(journal));
+        Ok(self)
+    }
+
+    pub(crate) fn with_recorded_operation_for_test(
+        mut self,
+        data_dir: &Utf8Path,
+        request: &agent_channel_proto::PackageOperationRequest,
+    ) -> anyhow::Result<(Self, std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>)> {
+        use super::operation_journal::{Admission, Outcome};
+
+        let mut journal = OperationJournal::open(data_dir)?;
+        anyhow::ensure!(
+            journal.admit(&uuid::Uuid::nil().to_string(), request)? == Admission::Admitted,
+            "test operation was not admitted"
+        );
+        journal.complete(&uuid::Uuid::nil().to_string(), request, Outcome::Succeeded)?;
+        let (entered, resume) = journal.pause_index_write_for_test();
+        self.journal = Some(Arc::new(journal));
+        Ok((self, entered, resume))
+    }
+
+    pub(crate) async fn submit_operation_for_test(
+        &self,
+        request: agent_channel_proto::PackageOperationRequest,
+    ) -> agent_channel_proto::PackageOperationResult {
+        super::operation::run(self, uuid::Uuid::nil(), request).await
     }
 }
 
@@ -302,6 +347,11 @@ mod tests {
             package_id: "different".to_owned(),
             ..request.clone()
         };
+        let mut permits = Vec::new();
+        while let Some(permit) = context.operations().try_worker() {
+            permits.push(permit);
+        }
+        assert!(!permits.is_empty());
 
         let result = operation::run(&context, authority, changed).await;
 
@@ -313,6 +363,76 @@ mod tests {
                 execution_started: Some(true),
             })
         );
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_new_operation_at_capacity_is_busy_and_can_be_delivered_later() -> anyhow::Result<()> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let journal = Arc::new(OperationJournal::open(data)?);
+        let context = DeviceManagementContext {
+            journal: Some(Arc::clone(&journal)),
+            ..Default::default()
+        }
+        .with_remote_features(true, false);
+        let request = PackageOperationRequest {
+            operation_id: "new-operation".to_owned(),
+            ..Default::default()
+        };
+        let mut permits = Vec::new();
+        while let Some(permit) = context.operations().try_worker() {
+            permits.push(permit);
+        }
+        assert!(!permits.is_empty());
+
+        let busy = operation::run(&context, Uuid::nil(), request.clone()).await;
+        assert_eq!(busy.operation_id, "new-operation");
+        assert!(!busy.success);
+        assert_eq!(busy.error, "agent busy: nothing was started");
+        assert_eq!(busy.status, i32::from(PackageOperationStatus::Unspecified));
+        assert_eq!(busy.execution_started, None);
+
+        drop(permits);
+        let later = operation::run(&context, Uuid::nil(), request).await;
+        assert_eq!(later.error, "remote package writes are disabled");
+        assert_eq!(later.status, i32::from(PackageOperationStatus::Unspecified));
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn a_recorded_operation_is_replayed_at_capacity() -> anyhow::Result<()> {
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let data = Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let journal = Arc::new(OperationJournal::open(data)?);
+        let request = PackageOperationRequest {
+            operation_id: "recorded-operation".to_owned(),
+            ..Default::default()
+        };
+        let authority = Uuid::nil();
+        assert_eq!(journal.admit(&authority.to_string(), &request)?, Admission::Admitted);
+        journal.mark_started(&authority.to_string(), &request)?;
+        journal.complete(&authority.to_string(), &request, Outcome::Succeeded)?;
+        let context = DeviceManagementContext {
+            journal: Some(journal),
+            ..Default::default()
+        };
+        let mut permits = Vec::new();
+        while let Some(permit) = context.operations().try_worker() {
+            permits.push(permit);
+        }
+        assert!(!permits.is_empty());
+
+        let replay = operation::run(&context, authority, request).await;
+
+        assert_eq!(replay.operation_id, "recorded-operation");
+        assert!(replay.success);
+        assert_eq!(replay.error, "");
+        assert_eq!(replay.status, i32::from(PackageOperationStatus::Unspecified));
+        assert_eq!(replay.execution_started, Some(true));
         Ok(())
     }
 }
