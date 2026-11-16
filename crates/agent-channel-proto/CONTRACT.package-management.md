@@ -179,6 +179,7 @@ An unlisted command receives `UnsupportedCommand` without starting work.
 | `command` | `arguments` | `result` |
 | --- | --- | --- |
 | `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
+| `RescanInventory` | none | `{}` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
 `GetInventorySnapshot.managers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
@@ -193,6 +194,7 @@ An installed-package item may omit `systemRestartPending` when no value was capt
 `GetInventorySnapshot` returns scan timestamps as RFC 3339 strings with UTC offset zero, at most nine fractional digits and no leap seconds.
 `updateCompletedAt` may be omitted or null when no complete update scan is available; in that case, `updates` is empty.
 When UniGetUI cannot produce the installed snapshot required by `CONTRACT.package-management.md §inventory`, it answers `Failed` or `UnsupportedCommand` without a snapshot.
+`CONTRACT.package-management.md §inventory-rescan` specifies `RescanInventory`.
 `operation` is `Install`, `Update` or `Uninstall`; `version` is empty when not requested.
 `scope` is the administrator's requested execution scope, `User` or `Machine`.
 `sourceName` is empty for uninstall and may be empty for update, as specified in `CONTRACT.package-management.md §operations`.
@@ -296,6 +298,36 @@ The device view keeps every observation in a separate row; a count of those rows
 Equal source names do not establish a shared feed or prove an installed package's origin.
 An unmapped scope does not establish either ownership class.
 Omission from a snapshot does not prove that a package was uninstalled.
+
+<a id="inventory-rescan"></a>
+## Inventory rescan
+
+`RescanInventory` is a registration command with empty `arguments`.
+On `RescanInventory`, UniGetUI reloads its installed-package list and its available-update list.
+It answers `ok` true with an empty object as `result` only after both scans completed and `GetInventorySnapshot` returns their results.
+The scans that answer a `RescanInventory` start after UniGetUI received that request.
+When a scan is running at that time, UniGetUI waits for it to end and then starts the new scans.
+Requests received while scans are waiting to start share those scans, so UniGetUI has at most one rescan waiting to start.
+When a scan fails or cannot start, UniGetUI answers `Failed` or `Busy`.
+A rescan only lists packages: because of it, UniGetUI runs no repair or recovery action and installs, updates or uninstalls nothing.
+A UniGetUI that predates the command answers `UnsupportedCommand`, as `CONTRACT.package-management.md §registration` specifies for an unlisted command.
+
+The Agent sends `RescanInventory` when a package operation that it sent to UniGetUI as `ExecutePackageOperation` reaches its final result, whether success, failure or `UNKNOWN`.
+It sends the request on the connection that carried the operation, after it recorded the result in its operation journal and before it reports the result to the Authority.
+It waits for the response at most 3 minutes, and no longer than until 30 minutes after it sent the operation's `ExecutePackageOperation`, and then reports the result.
+The response never changes the reported result: a rejected, unanswered or unsent `RescanInventory` only delays the report by the time the Agent waited.
+The Agent sends no `RescanInventory` for an operation whose `ExecutePackageOperation` was never written to the connection, or for a repeated delivery of an operation ID.
+A rescan is best effort: the Agent may report a result without sending `RescanInventory` or awaiting its response.
+The Authority does not infer from an operation result that a rescan completed.
+An inventory request after the result still returns the last completed scan, as `CONTRACT.package-management.md §inventory` specifies.
+
+The Agent has at most one outstanding `RescanInventory` per connection.
+An operation waits for a `RescanInventory` that the Agent sent after that operation reached its final result, never for one sent earlier.
+While one is outstanding, the Agent holds at most one further `RescanInventory` unsent, which every operation finalized meanwhile shares, and sends it when the outstanding one is answered.
+It does not send a held `RescanInventory` that no operation still waits for.
+A `RescanInventory` that is unanswered when that wait ends stays outstanding, and the Agent closes a connection whose `RescanInventory` is unanswered after 30 minutes.
+A wait for a rescan does not reduce the number of discovery, inventory and package-operation requests that the Agent serves concurrently.
+When the Agent service stops during the wait, the wait ends and the recorded result is unchanged.
 
 <a id="operations"></a>
 ## Package operations
