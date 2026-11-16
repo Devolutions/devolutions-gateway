@@ -87,17 +87,13 @@ pub(super) async fn normalize_grant_request(request: Request, next: Next) -> Res
 }
 
 /// Authenticates and consumes one grant after the shared facade validates its request envelope.
-#[expect(
-    clippy::result_large_err,
-    reason = "the shared API contract requires ErrorResponse values"
-)]
 pub(super) async fn execute_grant(
     state: &BrokerState,
     client: &PipeClient,
     identity: Option<&PipeIdentity>,
     request: PackageRequest,
     grant: PackageGrant,
-) -> Result<GrantExecutionResponse, ErrorResponse> {
+) -> Result<GrantExecutionResponse, Box<ErrorResponse>> {
     let received_at = Utc::now();
 
     client
@@ -114,7 +110,7 @@ pub(super) async fn execute_grant(
         .ok_or_else(|| error_response(ErrorCode::Unauthorized, "pipe client authentication failed"))?;
 
     if let Err((code, message)) = check_request(&request) {
-        return Err(error_response(code, message));
+        return Err(Box::new(error_response(code, message)));
     }
 
     // Built before the grant is consumed, so a request the builder rejects spends nothing.
