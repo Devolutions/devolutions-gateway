@@ -919,8 +919,12 @@ mod tests {
         let settled = tokio::time::timeout(Duration::from_secs(5), &mut operation)
             .await??
             .settled;
-        assert_eq!(settled, unknown(true));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -1008,8 +1012,12 @@ mod tests {
         .await?
         .settled;
 
-        assert_eq!(settled, unknown(false));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: None,
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -1046,8 +1054,12 @@ mod tests {
         .await?
         .settled;
 
-        assert_eq!(settled, unknown(false));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: None,
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -1055,7 +1067,14 @@ mod tests {
     #[tokio::test]
     async fn pending_delivery_retains_possible_send_evidence() -> anyhow::Result<()> {
         let (settled, may_have_been_sent) = tracked_delivery_result(std::future::pending()).await?;
-        assert_eq!(settled, unknown(false));
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        assert_eq!(
+            settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: None,
+            }
+        );
         assert!(may_have_been_sent);
         Ok(())
     }
@@ -1075,7 +1094,14 @@ mod tests {
             Err(error)
         })
         .await?;
-        assert_eq!(settled, unknown(false));
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        assert_eq!(
+            settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: None,
+            }
+        );
         assert_eq!(may_have_been_sent, expected);
         Ok(())
     }
@@ -1111,14 +1137,15 @@ mod tests {
         .await?;
 
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
-        assert_eq!(completion.settled, unknown(false));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: None,
+        };
+        assert_eq!(completion.settled, expected);
         assert!(may_have_been_sent);
         assert!(!completion.durably_recorded);
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
-        assert_eq!(
-            journal.admit("authority", &request)?,
-            Admission::Recorded(unknown(false))
-        );
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -1156,7 +1183,14 @@ mod tests {
         .await
         .settled;
 
-        assert_eq!(settled, unknown(false));
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        assert_eq!(
+            settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: None,
+            }
+        );
         assert_eq!(may_have_been_sent, polled.get());
         Ok(())
     }
@@ -1192,7 +1226,14 @@ mod tests {
         )
         .await
         .settled;
-        assert_eq!(settled, unknown(false));
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        assert_eq!(
+            settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: None,
+            }
+        );
         assert!(!may_have_been_sent);
         Ok(())
     }
@@ -1223,8 +1264,12 @@ mod tests {
 
         shutdown.signal();
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
-        assert_eq!(settled, unknown(true));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         tokio::time::timeout(Duration::from_secs(5), shutdown.all_closed()).await?;
         Ok(())
     }
@@ -1355,7 +1400,10 @@ mod tests {
         let reopened = OperationJournal::open(data)?;
         assert_eq!(
             reopened.admit("authority", &request)?,
-            Admission::Recorded(unknown(true))
+            Admission::Recorded(Settled {
+                outcome: Outcome::Unknown,
+                execution_started: Some(true),
+            })
         );
         Ok(())
     }
@@ -1379,14 +1427,15 @@ mod tests {
 
         // oracle: mutant a completed journal write is mistaken for failure after a start-write error
         assert!(completion.durably_recorded);
-        assert_eq!(completion.settled, unknown(true));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(completion.settled, expected);
         drop(journal);
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let reopened = OperationJournal::open(data)?;
-        assert_eq!(
-            reopened.admit("authority", &request)?,
-            Admission::Recorded(completion.settled)
-        );
+        assert_eq!(reopened.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -1430,8 +1479,12 @@ mod tests {
                 .is_err()
         );
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
-        assert_eq!(settled, unknown(false));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: None,
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
