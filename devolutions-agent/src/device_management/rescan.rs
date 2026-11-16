@@ -57,6 +57,17 @@ pub(super) async fn after_operation(
     deadline: Instant,
     shutdown: impl Future<Output = ()>,
 ) {
+    wait_for_rescan(waiting, endpoint, RESCAN_WAIT, deadline, shutdown).await;
+}
+
+/// Performs the wait of [`after_operation`], giving up after `longest` or at `deadline`, whichever comes first.
+async fn wait_for_rescan(
+    waiting: &Semaphore,
+    endpoint: &impl RescanEndpoint,
+    longest: Duration,
+    deadline: Instant,
+    shutdown: impl Future<Output = ()>,
+) {
     let Ok(_permit) = waiting.try_acquire() else {
         warn!("Too many operations wait for a UniGetUI rescan, so none is requested");
         return;
@@ -72,15 +83,15 @@ pub(super) async fn after_operation(
             Ok(()) => debug!("UniGetUI rescan completed"),
             Err(error) => warn!(error = format!("{error:#}"), "UniGetUI rescan did not complete"),
         },
-        () = tokio::time::sleep_until(wait_end(Instant::now(), deadline)) => {
+        () = tokio::time::sleep_until(wait_end(Instant::now(), longest, deadline)) => {
             warn!("UniGetUI rescan was not answered in time");
         }
     }
 }
 
-/// Returns when a wait that starts at `now` gives up.
-fn wait_end(now: Instant, deadline: Instant) -> Instant {
-    deadline.min(now + RESCAN_WAIT)
+/// Returns when a wait of at most `longest` that starts at `now` gives up.
+fn wait_end(now: Instant, longest: Duration, deadline: Instant) -> Instant {
+    deadline.min(now + longest)
 }
 
 #[cfg(test)]
@@ -167,7 +178,26 @@ mod tests {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
         let now = Instant::now();
 
-        assert_eq!(wait_end(now, now + time_left), now + longest);
+        assert_eq!(wait_end(now, RESCAN_WAIT, now + time_left), now + longest);
+    }
+
+    #[tokio::test]
+    async fn unanswered_rescan_holds_the_wait_no_longer_than_its_cap() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let waiting = Semaphore::new(1);
+        let endpoint = FakeEndpoint::silent();
+        let longest = Duration::from_millis(50);
+        let start = Instant::now();
+        let deadline = start + THIRTY_MINUTES;
+
+        let wait = wait_for_rescan(&waiting, &endpoint, longest, deadline, pending());
+        tokio::time::timeout(GUARD, wait)
+            .await
+            .expect("the wait gives up long before the deadline");
+
+        let waited = start.elapsed();
+        assert!(longest <= waited, "{waited:?}");
+        assert_eq!(endpoint.asked.get(), 1);
     }
 
     #[tokio::test]
