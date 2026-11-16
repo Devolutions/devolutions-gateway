@@ -1130,7 +1130,10 @@ mod tests {
 
         assert!(journal.admit("authority", &request("second", "pkg")).is_err());
         assert!(!journal.may_contain("second"));
+        assert!(!journal.has_index_capacity(&record_name("second")));
         journal.index_size_limit += 1;
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        assert!(journal.has_index_capacity(&record_name("second")));
         assert_eq!(
             journal.admit("authority", &request("second", "pkg"))?,
             Admission::Admitted
