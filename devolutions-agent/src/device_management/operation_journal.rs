@@ -369,30 +369,6 @@ impl OperationJournal {
         self.read_admission(&state, &name, request, &encoded)
     }
 
-    #[cfg(test)]
-    pub(crate) fn pause_index_write_for_test(
-        &mut self,
-    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
-        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
-        let hook = tests::IndexWriteHook::Pause {
-            entered: entered_tx,
-            resume: resume_rx,
-        };
-        assert!(self.index_write_hook.get_mut().replace(hook).is_none());
-        (entered_rx, resume_tx)
-    }
-
-    #[cfg(all(test, windows))]
-    pub(crate) fn exhaust_index_for_test(&mut self) {
-        self.index_size_limit = self.membership.load().index_size;
-    }
-
-    #[cfg(all(test, windows))]
-    pub(crate) fn restore_index_limit_for_test(&mut self) {
-        self.index_size_limit = MAX_INDEX_SIZE;
-    }
-
     /// Opens the journal, creating it when the data directory or the journal directory is missing.
     ///
     /// A journal deleted whole cannot be told from a first run, so operations recorded in it may execute again.
@@ -734,6 +710,32 @@ fn locate(authority_id: &str, request: &PackageOperationRequest) -> anyhow::Resu
     ensure!(!authority_id.is_empty(), "authority ID is empty");
     ensure!(!request.operation_id.is_empty(), "operation ID is empty");
     Ok((record_name(&request.operation_id), hex::encode(request.encode_to_vec())))
+}
+
+#[cfg(test)]
+impl OperationJournal {
+    pub(crate) fn pause_index_write_for_test(
+        &mut self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let hook = tests::IndexWriteHook::Pause {
+            entered: entered_tx,
+            resume: resume_rx,
+        };
+        assert!(self.index_write_hook.get_mut().replace(hook).is_none());
+        (entered_rx, resume_tx)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn exhaust_index_for_test(&mut self) {
+        self.index_size_limit = self.membership.load().index_size;
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn restore_index_limit_for_test(&mut self) {
+        self.index_size_limit = MAX_INDEX_SIZE;
+    }
 }
 
 #[cfg(test)]

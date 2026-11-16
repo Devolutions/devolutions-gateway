@@ -434,6 +434,20 @@ impl Coordinator {
                     Ok(settled) => settled,
                     Err(error) => {
                         error!(%error, "Package operation task was interrupted");
+                        let cleanup = {
+                            let (journal, authority_id, request) =
+                                (Arc::clone(&journal), authority_id.clone(), request.clone());
+                            journal_io(move || journal.complete(&authority_id, &request, Outcome::Unknown)).await
+                        };
+                        match cleanup {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) | Err(error) => {
+                                error!(
+                                    error = format!("{error:#}"),
+                                    "Cannot record an interrupted package operation"
+                                );
+                            }
+                        }
                         wait(journal, authority_id, request).await
                     }
                 }
@@ -499,25 +513,6 @@ pub(super) fn submit(
     coordinator.submit(journal, authority_id.to_string(), request, reply, move |pending| {
         execute(context, pending)
     });
-}
-
-#[cfg(test)]
-pub(super) async fn run(
-    context: &DeviceManagementContext,
-    authority_id: Uuid,
-    request: PackageOperationRequest,
-) -> PackageOperationResult {
-    let operation_id = request.operation_id.clone();
-    let (send, receive) = tokio::sync::oneshot::channel();
-    submit(
-        context.clone(),
-        authority_id,
-        request,
-        Box::new(move |result| {
-            let _ = send.send(result);
-        }),
-    );
-    receive.await.unwrap_or_else(|_| result(operation_id, unknown(false)))
 }
 
 async fn wait(journal: Arc<OperationJournal>, authority_id: String, request: PackageOperationRequest) -> Settled {
@@ -679,6 +674,25 @@ fn result(operation_id: String, settled: Settled) -> PackageOperationResult {
         status: status.into(),
         execution_started: settled.execution_started,
     }
+}
+
+#[cfg(test)]
+pub(super) async fn run(
+    context: &DeviceManagementContext,
+    authority_id: Uuid,
+    request: PackageOperationRequest,
+) -> PackageOperationResult {
+    let operation_id = request.operation_id.clone();
+    let (send, receive) = tokio::sync::oneshot::channel();
+    submit(
+        context.clone(),
+        authority_id,
+        request,
+        Box::new(move |result| {
+            let _ = send.send(result);
+        }),
+    );
+    receive.await.unwrap_or_else(|_| result(operation_id, unknown(false)))
 }
 
 #[cfg(test)]
@@ -1174,6 +1188,61 @@ mod tests {
         });
         assert!(tokio::time::timeout(Duration::from_secs(10), replay).await??.success);
         drop(permits);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn an_interrupted_operation_settles_if_its_cleanup_cannot_start() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let (callback, mut receiver) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            request.clone(),
+            callback,
+            |mut pending| async move {
+                // Simulate a cleanup thread that could not start.
+                pending.armed = false;
+                drop(pending);
+                panic!("injected interruption without cleanup");
+            },
+        );
+
+        let outcome = tokio::time::timeout(Duration::from_secs(10), &mut receiver).await;
+        if outcome.is_err() {
+            journal.complete("authority", &request, Outcome::Unknown)?;
+            let _ = tokio::time::timeout(Duration::from_secs(10), receiver).await;
+        }
+        let result = outcome??;
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+
+        let (callback, replayed) = response();
+        coordinator.submit(journal, "authority".to_owned(), request, callback, |_| async {
+            panic!("an interrupted operation must not execute again");
+        });
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), replayed).await??.status,
+            i32::from(PackageOperationStatus::Unknown)
+        );
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    #[tokio::test]
+    async fn an_interrupted_operation_preserves_an_already_recorded_result() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let (reply, response) = response();
+        coordinator.submit(journal, "authority".to_owned(), request, reply, |pending| async move {
+            pending.finish(Outcome::Succeeded, false).await;
+            panic!("injected interruption after completion");
+        });
+
+        assert!(tokio::time::timeout(Duration::from_secs(10), response).await??.success);
         Ok(())
     }
 
