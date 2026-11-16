@@ -102,6 +102,8 @@ impl DeviceManagementContext {
             .fold(data_dir.to_owned(), |path, leaf| path.join(leaf));
         // UNTESTED: A journal-open failure must not disable live inventory, which shares this context.
         // The context test has no authenticated UniGetUI client; request inventory with a corrupt journal when changing this.
+        // UNTESTED: A damaged journal must remain in this context until the Agent process exits.
+        // Check the service and context lifecycle before allowing a journal to be reopened.
         let journal = match OperationJournal::open(data_dir) {
             Ok(journal) => Some(Arc::new(journal)),
             Err(error) => {
