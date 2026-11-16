@@ -678,6 +678,62 @@ mod connection {
         respond(&mut client, rescan_done(&id_of(&request))).await;
 
         assert_eq!(call.await.expect("call task"), Ok(()));
+        assert_nothing_written(&mut client).await;
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rescan_answered_with_a_non_empty_result_is_complete() {
+        // oracle: mutant a rescan answered as done with a non-empty result is reported as failed
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let call = rescan(&endpoint(&registry));
+        let request = read_json(&mut client).await;
+
+        respond(
+            &mut client,
+            json!({"kind": "Response", "id": id_of(&request), "ok": true, "result": {"packages": 3}}),
+        )
+        .await;
+
+        assert_eq!(call.await.expect("call task"), Ok(()));
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rescan_is_not_sent_while_eight_requests_are_outstanding() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let mut snapshots = Vec::new();
+        let mut ids = Vec::new();
+        for _ in 0..8 {
+            snapshots.push(tokio::spawn({
+                let endpoint = endpoint.clone();
+                async move { endpoint.request("GetInventorySnapshot", json!({})).await }
+            }));
+            ids.push(id_of(&read_json(&mut client).await));
+        }
+
+        let error = rescan(&endpoint)
+            .await
+            .expect("call task")
+            .expect_err("no request slot is free");
+        assert!(!error.may_have_been_sent(), "{error:?}");
+        assert_nothing_written(&mut client).await;
+        respond(
+            &mut client,
+            json!({"kind": "Response", "id": ids[0], "ok": true, "result": []}),
+        )
+        .await;
+        snapshots.remove(0).await.expect("call task").expect("snapshot result");
+
+        let call = rescan(&endpoint);
+        let request = read_json(&mut client).await;
+        assert_eq!(request["command"], "RescanInventory");
+        respond(&mut client, rescan_done(&id_of(&request))).await;
+        assert_eq!(call.await.expect("call task"), Ok(()));
         task.abort();
     }
 
