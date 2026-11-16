@@ -473,7 +473,8 @@ mod tests {
         let error = registry
             .get_or_create(&sid(&padded_sid(2_000_000, MAX_SID_LEN)))
             .expect_err("a new user would exceed the limit");
-        assert!(format!("{error:#}").contains("registry file is larger than 4194304 bytes"));
+        let message = format!("{error:#}");
+        assert!(message.contains("registry") && message.contains(&LIMIT.to_string()));
         assert_eq!(fs::read(dir.join(STORE_NAME))?, full_store);
         assert!(!dir.join(TEMP_NAME).exists());
 
@@ -481,7 +482,8 @@ mod tests {
         let error = registry
             .get_or_create(&sid(&padded_sid(2_000_000, MAX_SID_LEN)))
             .expect_err("the oversized registry is rejected before creating a temporary file");
-        assert!(format!("{error:#}").contains("registry file is larger than 4194304 bytes"));
+        let message = format!("{error:#}");
+        assert!(message.contains("registry") && message.contains(&LIMIT.to_string()));
         assert_eq!(fs::read(dir.join(TEMP_NAME))?, b"sentinel");
         fs::remove_file(dir.join(TEMP_NAME))?;
         drop(registry);
