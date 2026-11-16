@@ -308,26 +308,29 @@ It answers `ok` true with an empty object as `result` only after both scans comp
 The scans that answer a `RescanInventory` start after UniGetUI received that request.
 When a scan is running at that time, UniGetUI waits for it to end and then starts the new scans.
 Requests received while scans are waiting to start share those scans, so UniGetUI has at most one rescan waiting to start.
-When a scan fails or cannot start, UniGetUI answers `Failed` or `Busy`.
-A rescan only lists packages: because of it, UniGetUI runs no repair or recovery action and installs, updates or uninstalls nothing.
-A UniGetUI that predates the command answers `UnsupportedCommand`, as `CONTRACT.package-management.md §registration` specifies for an unlisted command.
+When a scan fails or cannot start, UniGetUI answers with an error, and the Agent treats every error code alike.
+A rescan only lists packages: because of it, UniGetUI starts nothing but the listing of installed packages and available updates, so it runs no repair or recovery action and installs, updates or uninstalls nothing.
 
 The Agent sends `RescanInventory` when a package operation that it sent to UniGetUI as `ExecutePackageOperation` reaches its final result, whether success, failure or `UNKNOWN`.
 It sends the request on the connection that carried the operation, after it recorded the result in its operation journal and before it reports the result to the Authority.
-It waits for the response at most 3 minutes, and no longer than until 30 minutes after it sent the operation's `ExecutePackageOperation`, and then reports the result.
+When that connection is closed, the Agent sends no `RescanInventory`, including on another connection of the same instance.
+The Agent waits for the response at most 3 minutes from recording the result, including the time the request is held unsent, and no longer than until 30 minutes after it sent the operation's `ExecutePackageOperation`.
+The wait ends when the response arrives, when the connection closes or when that time has passed, and the Agent then reports the result.
+On an error response, including the `UnsupportedCommand` that `CONTRACT.package-management.md §registration` specifies for a command UniGetUI does not list, the Agent ends the wait without sending another `RescanInventory`.
 The response never changes the reported result: a rejected, unanswered or unsent `RescanInventory` only delays the report by the time the Agent waited.
-The Agent sends no `RescanInventory` for an operation whose `ExecutePackageOperation` was never written to the connection, or for a repeated delivery of an operation ID.
-A rescan is best effort: the Agent may report a result without sending `RescanInventory` or awaiting its response.
+The Agent sends no `RescanInventory` in three cases: the operation's `ExecutePackageOperation` was never written to the connection, the delivery repeats an operation ID, or remote inventory is disabled.
+When 8 operations are already waiting for a rescan, the Agent reports a further operation's result without sending `RescanInventory`.
 The Authority does not infer from an operation result that a rescan completed.
 An inventory request after the result still returns the last completed scan, as `CONTRACT.package-management.md §inventory` specifies.
 
-The Agent has at most one outstanding `RescanInventory` per connection.
+The Agent has at most one outstanding `RescanInventory` per connection, and it counts as one of that connection's 8 outstanding requests.
 An operation waits for a `RescanInventory` that the Agent sent after that operation reached its final result, never for one sent earlier.
 While one is outstanding, the Agent holds at most one further `RescanInventory` unsent, which every operation finalized meanwhile shares, and sends it when the outstanding one is answered.
 It does not send a held `RescanInventory` that no operation still waits for.
-A `RescanInventory` that is unanswered when that wait ends stays outstanding, and the Agent closes a connection whose `RescanInventory` is unanswered after 30 minutes.
-A wait for a rescan does not reduce the number of discovery, inventory and package-operation requests that the Agent serves concurrently.
-When the Agent service stops during the wait, the wait ends and the recorded result is unchanged.
+A `RescanInventory` that is unanswered when an operation's wait ends stays outstanding.
+The Agent closes a connection whose `RescanInventory` is unanswered 30 minutes after the Agent sent it.
+Operations that wait for a rescan do not count toward the Agent's limits on concurrent discovery, inventory and package-operation requests, so none of those requests is refused as busy because of them.
+When the Agent service stops during the wait, the Agent stops waiting, and the recorded result is unchanged and is returned to a later delivery of the operation ID as `CONTRACT.package-management.md §operations` specifies.
 
 <a id="operations"></a>
 ## Package operations
