@@ -101,8 +101,8 @@ type RescanOutcome = Option<Result<(), RequestError>>;
 struct Rescans {
     /// The rescan that was written last, which is outstanding until it carries an outcome.
     outstanding: Option<watch::Receiver<RescanOutcome>>,
-    /// The rescan that waits for the outstanding one to end, shared by every caller that arrives meanwhile.
-    queued: Option<watch::Receiver<RescanOutcome>>,
+    /// The rescan that is held unsent until the outstanding one ends, shared by every caller that arrives meanwhile.
+    held: Option<watch::Receiver<RescanOutcome>>,
 }
 
 impl ConnectionHandle {
@@ -165,13 +165,13 @@ impl ConnectionHandle {
     /// Asks UniGetUI to reload its package lists and waits for the answer to a request written after this call.
     ///
     /// A request that was already written says nothing about what changed since, so a caller never shares it.
-    /// Callers that arrive while a rescan is outstanding share the next one, which is written once that one ended.
-    /// Dropping the returned future abandons the wait but not a written request, which stays outstanding until it ends.
+    /// Callers that arrive while a rescan is outstanding share the next one, which is held until that one ended.
+    /// Dropping the returned future abandons only the wait: a written request stays outstanding until it ends, and a held one is still sent.
     pub(super) async fn rescan_inventory(self: &Arc<Self>) -> Result<(), RequestError> {
         let mut outcome = {
             let mut rescans = self.rescans.lock();
-            match &rescans.queued {
-                Some(queued) => queued.clone(),
+            match &rescans.held {
+                Some(held) => held.clone(),
                 None => {
                     let (publish, outcome) = watch::channel(None);
                     let previous = rescans
@@ -179,7 +179,7 @@ impl ConnectionHandle {
                         .clone()
                         .filter(|previous| previous.borrow().is_none());
                     if previous.is_some() {
-                        rescans.queued = Some(outcome.clone());
+                        rescans.held = Some(outcome.clone());
                     } else {
                         rescans.outstanding = Some(outcome.clone());
                     }
@@ -201,7 +201,7 @@ impl ConnectionHandle {
 
     /// Sends one `RescanInventory` once `previous` ended, and publishes its outcome.
     ///
-    /// A queued rescan that no caller waits for any more is not sent.
+    /// A held rescan is sent even when no caller waits for it any more, so that its scans cover what changed while `previous` was outstanding.
     async fn run_rescan(
         self: Arc<Self>,
         previous: Option<watch::Receiver<RescanOutcome>>,
@@ -211,16 +211,9 @@ impl ConnectionHandle {
             // A sender dropped without an outcome also means that the previous rescan ended.
             let _ = previous.wait_for(Option::is_some).await;
 
-            // UNTESTED: A caller never joins a queued rescan that is being discarded, because it joins under this lock.
-            // The tests run on one thread and cannot interleave a join with the check below.
-            // Keep the removal from `queued` and the check for remaining callers under one lock when changing either.
+            // Callers join the held rescan under this lock, and it leaves `held` before it is written, so none joins a written request.
             let mut rescans = self.rescans.lock();
-            rescans.queued = None;
-            // The receiver that `queued` held is gone, so the channel is closed exactly when no caller waits.
-            if publish.is_closed() {
-                return;
-            }
-            rescans.outstanding = Some(publish.subscribe());
+            rescans.outstanding = rescans.held.take();
         }
 
         let outcome = self.request(RESCAN_COMMAND, json!({})).await.map(drop);

@@ -64,7 +64,7 @@ impl RegisteredEndpoint {
     /// `Ok` means that both scans completed.
     /// The answer comes from a `RescanInventory` written to this endpoint's connection after this call, never from an earlier one.
     /// The connection has at most one such request outstanding, so the call may first wait for that one to end.
-    /// Dropping the returned future abandons the wait but not a written request.
+    /// Dropping the returned future abandons only the wait: a written request stays outstanding, and one held behind it is still sent.
     /// The only bound on the wait is the connection's own deadline for the request, so a caller that needs a shorter one applies it.
     pub async fn rescan_inventory(&self) -> Result<(), RequestError> {
         self.connection.rescan_inventory().await

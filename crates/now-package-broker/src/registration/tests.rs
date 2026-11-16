@@ -763,7 +763,7 @@ mod connection {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn queued_rescan_that_no_caller_awaits_is_not_sent() {
+    async fn held_rescan_is_sent_after_its_callers_gave_up() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
         let registry = Arc::new(Registry::default());
         let (mut client, task) = serve(&registry, 1);
@@ -778,9 +778,45 @@ mod connection {
         respond(&mut client, rescan_done(&id_of(&first_request))).await;
 
         assert_eq!(first.await.expect("call task"), Ok(()));
+        let held_request = read_json(&mut client).await;
+        assert_eq!(held_request["command"], "RescanInventory");
+        assert_ne!(id_of(&held_request), id_of(&first_request));
+        respond(&mut client, rescan_done(&id_of(&held_request))).await;
         assert_nothing_written(&mut client).await;
-        assert!(!task.is_finished(), "the connection stays open");
+        assert!(!task.is_finished(), "the response answered an outstanding request");
+        let later = rescan(&endpoint);
+        let later_request = read_json(&mut client).await;
+        assert_eq!(later_request["command"], "RescanInventory");
+        assert_ne!(id_of(&later_request), id_of(&held_request));
+        respond(&mut client, rescan_done(&id_of(&later_request))).await;
+        assert_eq!(later.await.expect("call task"), Ok(()));
         task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn closed_connection_ends_the_outstanding_rescan_and_drops_the_held_one() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let first = rescan(&endpoint);
+        read_json(&mut client).await;
+        let second = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+
+        client.shutdown().await.expect("close the client's side");
+
+        task.await.expect("connection task").expect("client closed");
+        let first_error = first.await.expect("call task").expect_err("the rescan is unanswered");
+        assert!(matches!(first_error, RequestError::Unanswered(_)), "{first_error:?}");
+        let second_error = second.await.expect("call task").expect_err("the held rescan fails");
+        assert!(!second_error.may_have_been_sent(), "{second_error:?}");
+        let mut written = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut written))
+            .await
+            .expect("the Agent's side closes")
+            .expect("read what the Agent wrote");
+        assert!(written.is_empty(), "no further frame is written");
     }
 
     #[tokio::test(start_paused = true)]

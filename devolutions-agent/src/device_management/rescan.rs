@@ -49,6 +49,7 @@ impl RescanEndpoint for now_package_broker::registration::RegisteredEndpoint {
 /// `deadline` is the latest time that report may be held back to.
 /// The wait gives up after [`RESCAN_WAIT`] or at `deadline`, whichever comes first.
 /// The rescan is requested even when `deadline` has passed, because a later inventory still benefits from it.
+/// For the same reason, a wait that ends before the answer does not withdraw the rescan.
 /// A permit from `waiting` is held for the duration of the wait, and no rescan is requested when none is free.
 /// Nothing is returned, because no outcome of the rescan changes the recorded result.
 pub(super) async fn after_operation(
@@ -57,6 +58,8 @@ pub(super) async fn after_operation(
     deadline: Instant,
     shutdown: impl Future<Output = ()>,
 ) {
+    // UNTESTED: The cap applied to operations is `RESCAN_WAIT`, and a longer one delays every operation's result.
+    // The tests cannot pause the clock to observe three minutes; check that this argument stays `RESCAN_WAIT`.
     wait_for_rescan(waiting, endpoint, RESCAN_WAIT, deadline, shutdown).await;
 }
 
