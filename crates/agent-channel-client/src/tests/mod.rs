@@ -1500,6 +1500,80 @@ async fn a_dropped_channel_stops_waiting_for_an_authority_that_keeps_its_side_op
     Ok(())
 }
 
+fn queue_large_inventory_reports(reporter: &Reporter) -> DeviceManagementReport {
+    use agent_channel_proto::device_management_report::Report;
+    use agent_channel_proto::{InstalledPackage, InventoryReport};
+
+    let report = DeviceManagementReport {
+        report: Some(Report::Inventory(InventoryReport {
+            packages: vec![InstalledPackage {
+                name: "x".repeat(48_000),
+                ..InstalledPackage::default()
+            }],
+            ..InventoryReport::default()
+        })),
+    };
+    for _ in 0..512 {
+        reporter.send(None, report.clone());
+    }
+    report
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
+#[tokio::test]
+async fn dropping_a_channel_stops_it_when_the_authority_stops_reading_reports() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let hello = hello_fields();
+    let target = identity.target_with_hello(&authority.url, Arc::clone(&hello));
+    let mut channel = client(&authority, Settings::default())?.connect(target)?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    queue_large_inventory_reports(&channel.reporter());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    drop(channel);
+
+    wait_until("the release of the target", || Arc::strong_count(&hello) == 1).await;
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: regression #2194
+#[tokio::test]
+async fn a_full_outbound_buffer_does_not_block_reopening_with_queued_reports() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut first = authority.next_opening().await.accept();
+    first.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let reporter = channel.reporter();
+    let report = queue_large_inventory_reports(&reporter);
+    let queued_id = new_id();
+    reporter.send(Some(queued_id.clone()), report);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    first
+        .close_response(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    drop(first);
+    let mut second = authority.next_opening().await.accept();
+    second.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    for _ in 0..=512 {
+        if second.receive().await.correlation_id.as_deref() == Some(queued_id.as_str()) {
+            return Ok(());
+        }
+    }
+    panic!("the report queued before the stream closed was not sent after reopening");
+}
+
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {

@@ -257,6 +257,11 @@ impl ServerStream {
         self.outbound.send(Err(status)).await.expect("stream closed");
     }
 
+    /// Ends the response without dropping the unread request stream.
+    pub(super) async fn close_response(&self, status: Status) {
+        self.outbound.send(Err(status)).await.expect("stream closed");
+    }
+
     /// Waits for the client's next message.
     pub(super) async fn receive(&mut self) -> AgentMessage {
         tokio::time::timeout(WAIT, self.inbound.message())

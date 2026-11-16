@@ -89,6 +89,7 @@ async fn stream_once(
     // Acknowledgements sent before this stream authenticated answer an earlier stream's messages.
     while acks.try_recv().is_ok() {}
     events.send(Event::Authenticated).await.ok()?;
+    let mut reports_open = true;
     loop {
         tokio::select! {
             // Acknowledgements come first, so that those queued before the caller dropped the channel are sent.
@@ -106,9 +107,17 @@ async fn stream_once(
                 // A stream that can't take the acknowledgement has closed, which its next message reports.
                 let _ = opened.outbound.send(ack).await;
             }
-            Some(report) = reports.recv() => {
-                // A stream that can't take the report has closed, which its next message reports.
-                let _ = opened.outbound.send(report).await;
+            // Reserve before dequeueing so a stalled stream can close without losing a queued report.
+            report = async {
+                let permit = opened.outbound.clone().reserve_owned().await.ok()?;
+                let report = reports.recv().await?;
+                Some((permit, report))
+            }, if reports_open => {
+                if let Some((permit, report)) = report {
+                    permit.send(report);
+                } else {
+                    reports_open = false;
+                }
             }
             message = opened.inbound.message() => match trusted(message) {
                 Ok(Some(message)) => {
