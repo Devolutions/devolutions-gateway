@@ -714,8 +714,17 @@ mod tests {
         }
     }
 
+    /// The system temporary directory can be writable by other accounts, which fails the journal's check of the
+    /// directories above, so tests use the user's local application data directory where there is one.
+    fn test_tempdir() -> std::io::Result<tempfile::TempDir> {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        tempfile::Builder::new().prefix("operation-").tempdir_in(base)
+    }
+
     fn test_journal() -> anyhow::Result<(tempfile::TempDir, Arc<OperationJournal>)> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let journal = Arc::new(OperationJournal::open(data)?);
         Ok((root, journal))
@@ -922,7 +931,7 @@ mod tests {
     async fn redelivery_attaches_before_and_during_stalled_admission() -> anyhow::Result<()> {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let mut journal = OperationJournal::open(data)?;
         let (entered, resume) = journal.pause_index_write_for_test();
@@ -1060,7 +1069,7 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn a_changed_redelivery_during_lookup_receives_unknown() -> anyhow::Result<()> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let mut journal = OperationJournal::open(data)?;
         let recorded = request(PackageOperationType::Install, "Winget", "winget", "user");
@@ -1125,7 +1134,7 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn a_full_journal_rejects_a_new_operation_without_recording_it() -> anyhow::Result<()> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let mut journal = OperationJournal::open(data)?;
         journal.exhaust_index_for_test();
@@ -1169,7 +1178,7 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn a_full_journal_still_replays_recorded_operations_at_worker_capacity() -> anyhow::Result<()> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let mut journal = OperationJournal::open(data)?;
         let recorded = request(PackageOperationType::Install, "Winget", "winget", "user");
@@ -1279,7 +1288,7 @@ mod tests {
 
         let warnings = Arc::new(AtomicUsize::new(0));
         let _subscriber = tracing::subscriber::set_default(Warnings(Arc::clone(&warnings)));
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let mut journal = OperationJournal::open(data)?;
         let (entered, resume) = journal.pause_index_write_for_test();
@@ -1311,7 +1320,7 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn dropping_an_interrupted_operation_does_not_block_the_runtime_during_a_journal_stall() -> anyhow::Result<()> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let mut journal = OperationJournal::open(data)?;
         let interrupted = request(PackageOperationType::Install, "Winget", "winget", "user");

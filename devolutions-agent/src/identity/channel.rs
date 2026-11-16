@@ -848,6 +848,16 @@ mod tests {
         }
     }
 
+    /// The system temporary directory can be writable by other accounts, which fails the journal's check of the
+    /// directories above, so tests use the user's local application data directory where there is one.
+    #[cfg(windows)]
+    fn test_tempdir(prefix: &str) -> std::io::Result<tempfile::TempDir> {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        tempfile::Builder::new().prefix(prefix).tempdir_in(base)
+    }
+
     #[cfg(windows)]
     fn bounded_test_channel(
         reporter: Reporter,
@@ -1071,10 +1081,7 @@ mod tests {
         let now = Instant::now();
         #[cfg(windows)]
         let (_root, context) = {
-            let root = tempfile::Builder::new()
-                .prefix("channel-validation-")
-                .tempdir()
-                .expect("test directory is created");
+            let root = test_tempdir("channel-validation-").expect("test directory is created");
             let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
             let legacy = PackageOperationRequest {
                 operation_id: "legacy-id".to_owned(),
@@ -1152,7 +1159,7 @@ mod tests {
         use agent_channel_proto::device_management_request::Request;
         use agent_channel_proto::{DeviceManagementRequest, PackageOperationRequest};
 
-        let root = tempfile::Builder::new().prefix("channel-full-").tempdir()?;
+        let root = test_tempdir("channel-full-")?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let context = DeviceManagementContext::default().with_full_journal_for_test(data)?;
         let key = device_key::generate(
@@ -1212,7 +1219,7 @@ mod tests {
         use agent_channel_proto::device_management_request::Request;
         use agent_channel_proto::{DeviceManagementRequest, PackageOperationRequest};
 
-        let root = tempfile::Builder::new().prefix("channel-overload-").tempdir()?;
+        let root = test_tempdir("channel-overload-")?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let operation = PackageOperationRequest {
             operation_id: Uuid::new_v4().to_string(),

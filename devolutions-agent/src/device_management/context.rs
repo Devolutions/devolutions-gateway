@@ -369,7 +369,10 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn a_new_operation_at_capacity_is_busy_and_can_be_delivered_later() -> anyhow::Result<()> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
         let data = Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let journal = Arc::new(OperationJournal::open(data)?);
         let context = DeviceManagementContext {
@@ -405,7 +408,10 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn a_recorded_operation_is_replayed_at_capacity() -> anyhow::Result<()> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
         let data = Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let journal = Arc::new(OperationJournal::open(data)?);
         let request = PackageOperationRequest {
