@@ -706,6 +706,10 @@ impl BrokerState {
         filter_manager_capabilities(supported_manager_capabilities(), &available)
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
@@ -729,6 +733,10 @@ impl BrokerState {
     ///
     /// The pipe server calls it after authenticating the client; an in-process caller supplies the user itself.
     /// Follow the operation with `tracker`.
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     pub async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
@@ -838,6 +846,10 @@ impl BrokerState {
         })
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     async fn status_for_client(
         &self,
         request: StatusRequest,
@@ -867,6 +879,10 @@ impl BrokerState {
         })
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     async fn cancel_for_client(
         &self,
         request: CancelRequest,

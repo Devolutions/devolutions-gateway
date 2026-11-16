@@ -13,7 +13,7 @@ pub(crate) fn make_environment_block(env: HashMap<String, String>) -> anyhow::Re
     let mut block = Vec::<u16>::new();
 
     // Keep existing user environment variables (e.g. APPDATA, USERPROFILE, etc.)
-    for (key, value) in std::env::vars().chain(env.into_iter()) {
+    for (key, value) in std::env::vars().chain(env) {
         ensure_no_nulls(&key)?;
         ensure_no_nulls(&value)?;
 

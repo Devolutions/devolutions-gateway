@@ -81,6 +81,7 @@ pub(crate) fn config_fits_envelope(config: &Value) -> bool {
 /// The agent's messages, where a message larger than [`ENVELOPE_LIMIT`] is [`Undecodable`].
 /// tonic refuses such a message with `OUT_OF_RANGE` once it reads the message's length prefix, and fails the stream
 /// with another code for every other error, such as a broken transport.
+#[expect(clippy::result_large_err, reason = "tonic's service API carries errors as Status")]
 fn agent_messages(client: Streaming<Received>) -> impl Stream<Item = Result<Received, Status>> + Unpin + Send {
     client.map(|message| match message {
         Err(status) if status.code() == Code::OutOfRange => Ok(Err(Undecodable)),
@@ -146,6 +147,7 @@ fn rejection_status(rejection: Rejection, now: i64) -> Status {
 
 impl ChannelService {
     /// Serves one `AgentChannel/Connect` call.
+    #[expect(clippy::result_large_err, reason = "tonic's service API carries errors as Status")]
     pub(crate) async fn connect(
         self,
         request: Request<Streaming<Received>>,

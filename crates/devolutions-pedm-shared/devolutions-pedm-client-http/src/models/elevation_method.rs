@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
 pub enum ElevationMethod {
     #[serde(rename = "LocalAdmin")]
+    #[default]
     LocalAdmin,
     #[serde(rename = "VirtualAccount")]
     VirtualAccount,
@@ -26,11 +27,5 @@ impl std::fmt::Display for ElevationMethod {
             Self::LocalAdmin => write!(f, "LocalAdmin"),
             Self::VirtualAccount => write!(f, "VirtualAccount"),
         }
-    }
-}
-
-impl Default for ElevationMethod {
-    fn default() -> ElevationMethod {
-        Self::LocalAdmin
     }
 }

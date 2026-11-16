@@ -468,7 +468,9 @@ fn parse_listing(bytes: &[u8], entries: &mut Vec<(OsString, u32, u32)>) -> io::R
             .get(start..start.checked_add(name_length).ok_or_else(invalid)?)
             .ok_or_else(invalid)?;
         let units: Vec<u16> = name
-            .chunks_exact(size_of::<u16>())
+            .as_chunks::<{ size_of::<u16>() }>()
+            .0
+            .iter()
             .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
             .collect();
         let name = OsString::from_wide(&units);

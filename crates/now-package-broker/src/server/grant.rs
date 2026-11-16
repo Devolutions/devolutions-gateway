@@ -87,6 +87,10 @@ pub(super) async fn normalize_grant_request(request: Request, next: Next) -> Res
 }
 
 /// Authenticates and consumes one grant after the shared facade validates its request envelope.
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
 pub(super) async fn execute_grant(
     state: &BrokerState,
     client: &PipeClient,

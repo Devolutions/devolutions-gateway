@@ -720,8 +720,6 @@ pub(super) async fn run(mut ctx: Context) -> anyhow::Result<()> {
 mod tests {
     use std::os::windows::process::ExitStatusExt as _;
 
-    use tokio::io::AsyncWriteExt as _;
-
     use super::*;
 
     #[test]

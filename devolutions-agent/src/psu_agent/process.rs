@@ -257,6 +257,10 @@ struct OutputBackpressure {
 }
 
 impl OutputBackpressure {
+    #[expect(
+        clippy::result_large_err,
+        reason = "mirrors mpsc::Sender::send, which hands back the unsent message"
+    )]
     async fn send(
         &self,
         outgoing_tx: &mpsc::Sender<AgentMessage>,

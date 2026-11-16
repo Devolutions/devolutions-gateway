@@ -991,7 +991,6 @@ mod unix_tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use std::fs;
-    use std::io::Write as _;
 
     use ::windows::Win32::Security::{
         CONTAINER_INHERIT_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE, WinBuiltinAdministratorsSid, WinBuiltinUsersSid,

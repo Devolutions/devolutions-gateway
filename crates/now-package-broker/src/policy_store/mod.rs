@@ -296,6 +296,10 @@ impl PolicyStore {
         self.publish_observation(observation);
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     pub(crate) async fn replace(
         &self,
         request: PolicyReplacementRequest,
@@ -574,6 +578,10 @@ impl PolicyStore {
     }
 
     #[cfg(test)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the shared API contract requires ErrorResponse values"
+    )]
     pub(crate) async fn replace_for_tests(
         &self,
         request: PolicyReplacementRequest,

@@ -1123,8 +1123,6 @@ fn to_listener_urls(
 pub mod dto {
     use std::collections::HashMap;
 
-    use secrecy::ExposeSecret as _;
-
     use super::*;
 
     /// Source of truth for Gateway configuration
