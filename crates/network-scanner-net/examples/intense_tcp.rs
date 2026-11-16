@@ -1,4 +1,6 @@
 #![allow(unused_crate_dependencies)]
+#![expect(clippy::print_stdout, reason = "the example reports its results on the console")]
+#![expect(clippy::print_stderr, reason = "the example reports errors on the console")]
 
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -71,6 +73,7 @@ async fn tcp_client() -> anyhow::Result<()> {
                 tokio::time::timeout(std::time::Duration::from_secs(1), recv_future).await??;
                 let received = buffer[..size]
                     .iter()
+                    // SAFETY: The echo server sends back the `size` bytes written, which `recv` stores in `buffer`.
                     .map(|x| unsafe { x.assume_init() })
                     .collect::<Vec<u8>>();
                 assert_eq!(received, data.as_bytes());

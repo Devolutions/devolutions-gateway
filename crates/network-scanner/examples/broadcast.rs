@@ -24,7 +24,7 @@ pub async fn main() -> anyhow::Result<()> {
         let handle = tokio::spawn(async move {
             let mut receiver = broadcast(subnet.broadcast, Duration::from_secs(3), runtime, TaskManager::new())
                 .await
-                .unwrap();
+                .expect("start the broadcast");
             while let Some(addr) = receiver.recv().await {
                 tracing::info!("Received: {:?}", addr);
             }
