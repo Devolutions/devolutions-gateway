@@ -436,10 +436,20 @@ Otherwise, when operation or journal-admission capacity is full, an ID proven no
 The budget counts orphan record names as well as indexed names.
 The Agent logs a warning about the full journal once per connection.
 The Agent does not record either failure.
-Either answer means this Agent process did not admit or start an operation with that ID.
-A later delivery is treated as new unless the operation ID has since been recorded.
-The Agent continues processing channel traffic while journal admission is saturated.
-It imposes no package-operation rate limit on the Authority.
+Either answer means this Agent process had not admitted or started an operation with that ID when it decided to refuse the delivery.
+After any Authority receives a known result for an operation ID, including either capacity failure, no Authority sends that ID again.
+An administrator's retry is a new operation with a new ID.
+An operation ID identifies one operation across all of an Agent's Authorities.
+Authorities that send the same ID coordinate its deliveries and results.
+Because the Agent does not record either failure, a later delivery of that ID is treated as new unless the ID has since been recorded, even if the Authority violates that rule by sending it after receiving the failure.
+If an ID has been sent to the Agent more than once and the Authority cannot prove that at most one delivery reached the Agent, it treats either capacity failure as provisional.
+It does not record or display a provisional capacity failure as the operation's outcome.
+Any result for that ID other than these two capacity failures, including `UNKNOWN`, takes precedence over a provisional capacity failure regardless of arrival order.
+The Authority ignores either capacity failure after a result that is not one of those two failures.
+If the Authority knows that at most one delivery reached the Agent, either capacity failure is a final known result.
+DVLS does not redeliver an operation ID, so either failure is final for DVLS.
+Saturated journal admission does not itself block the Agent from processing channel traffic.
+The Agent imposes no package-operation rate limit on the Authority.
 The journal assumes that, while the Agent holds it open, this Agent process is its only writer.
 The in-memory membership does not see records another process creates under a privileged account until the next Agent start.
 A delivery whose operation ID matches a recorded or in-flight operation but has a different payload is rejected without submission and reports `UNKNOWN`.

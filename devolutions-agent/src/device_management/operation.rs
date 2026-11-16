@@ -867,14 +867,19 @@ mod tests {
         coordinator.submit(
             Arc::clone(&journal),
             "first-authority".to_owned(),
-            new,
+            new.clone(),
             later_reply,
-            |pending| async move { pending.finish(Outcome::Succeeded, false).await },
+            |pending| async move { pending.finish(Outcome::Unknown, true).await },
         );
-        assert!(
-            tokio::time::timeout(Duration::from_secs(10), later_result)
-                .await??
-                .success
+        let later = tokio::time::timeout(Duration::from_secs(10), later_result).await??;
+        assert_eq!(later.status, i32::from(PackageOperationStatus::Unknown));
+        assert_eq!(later.execution_started, Some(true));
+        assert_eq!(
+            journal.lookup("first-authority", &new)?,
+            Some(Admission::Recorded(Settled {
+                outcome: Outcome::Unknown,
+                execution_started: Some(true),
+            }))
         );
         Ok(())
     }

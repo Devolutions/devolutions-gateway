@@ -347,7 +347,7 @@ impl OperationJournal {
     }
 
     /// Returns whether the membership index has room for a record named `name`.
-    #[cfg(windows)]
+    #[cfg(any(windows, test))]
     pub(super) fn has_index_capacity(&self, name: &str) -> bool {
         let membership = self.membership.load();
         membership.names.contains(name) || membership.size_with(name) <= self.index_size_limit
@@ -1115,6 +1115,28 @@ mod tests {
         assert!(journal.admit("authority", &request("beyond", "pkg")).is_err());
         assert!(!journal.may_contain("beyond"));
         assert!(journal.may_contain("orphan"));
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn an_index_at_its_budget_reopens_with_its_records() -> anyhow::Result<()> {
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let recorded = request("first", "pkg");
+        journal.admit("authority", &recorded)?;
+        journal.complete("authority", &recorded, Outcome::Succeeded)?;
+        let limit = std::fs::metadata(journal_path(&data).join(INDEX_NAME))?.len();
+        drop(journal);
+
+        let reopened = OperationJournal::open_with_index_size_limit(&data, limit);
+        assert!(reopened.is_ok(), "an index at its budget must reopen: {reopened:?}");
+        let reopened = reopened?;
+        assert_eq!(
+            reopened.lookup("authority", &recorded)?,
+            Some(Admission::Recorded(settled(Outcome::Succeeded)))
+        );
         Ok(())
     }
 
