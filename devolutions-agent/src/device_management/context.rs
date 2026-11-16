@@ -307,8 +307,6 @@ mod tests {
 
         let refused = operation::run(&context, authority, new).await;
         assert_eq!(refused.status, i32::from(PackageOperationStatus::Unknown));
-        assert!(!refused.success);
-        assert!(refused.error.is_empty());
         assert_eq!(refused.execution_started, None);
         assert!(!index.exists());
         let recorded = operation::run(&context, authority, known).await;

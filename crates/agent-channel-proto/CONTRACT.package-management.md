@@ -426,6 +426,7 @@ A repeated operation ID with a different payload is rejected without submission 
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
 When the Agent detects a missing, corrupt or unindexed record in an existing journal, it refuses new remote package writes on that device and reports `UNKNOWN`.
 The same refusal applies when the journal's records directory or index is missing, or the index is corrupt or inconsistent with its records.
+After detecting a missing index, the Agent does not recreate it during that process's lifetime.
 When a journal write fails and its state cannot be trusted, the Agent also refuses new remote package writes.
 During refusal, a repeated delivery with the same payload and an intact, valid record returns its recorded status without dispatch.
 A delivery without a record, or with a missing or corrupt record, reports `UNKNOWN` without dispatch.
