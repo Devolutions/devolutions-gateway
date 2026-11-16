@@ -8,7 +8,7 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
 
-use super::{set_if_specified, set_if_true, validate_package_version};
+use super::{set_if_specified, set_if_true, uses_default_source, validate_package_version};
 
 const NUGET_ORG_V3_SOURCE: &str = "https://api.nuget.org/v3/index.json";
 /// NuGet version range syntax, such as `[1.0,2.0)` or `1.*`.
@@ -105,12 +105,19 @@ fn validate_dotnet_request(request: &PackageRequest) -> anyhow::Result<()> {
 }
 
 fn append_source(command: &mut Vec<String>, request: &PackageRequest) -> anyhow::Result<()> {
-    command.push("--source".to_owned());
-    command.push(dotnet_source(request)?.to_owned());
+    if let Some(source) = dotnet_source(request)? {
+        command.push("--source".to_owned());
+        command.push(source.to_owned());
+    }
     Ok(())
 }
 
-fn dotnet_source(request: &PackageRequest) -> anyhow::Result<&str> {
+/// The canonical feed to pass as `--source`, or `None` to use the NuGet configuration's default feeds.
+fn dotnet_source(request: &PackageRequest) -> anyhow::Result<Option<&'static str>> {
+    if uses_default_source(".NET", request)? {
+        return Ok(None);
+    }
+
     if !request.source.name.eq_ignore_ascii_case("nuget.org") {
         bail!(".NET install and update operations only support the nuget.org source");
     }
@@ -122,7 +129,7 @@ fn dotnet_source(request: &PackageRequest) -> anyhow::Result<&str> {
         bail!(".NET nuget.org source URL must match the broker-trusted canonical URL");
     }
 
-    Ok(NUGET_ORG_V3_SOURCE)
+    Ok(Some(NUGET_ORG_V3_SOURCE))
 }
 
 pub(crate) fn trusted_dotnet_executable() -> String {
@@ -199,6 +206,40 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn empty_source_update_omits_source_flag() {
+        let mut request = make_request();
+        request.operation = Operation::Update;
+        request.source.name = String::new();
+        request.source.url = None;
+        let cmd = build_dotnet_command(&request).expect("empty source");
+        assert!(!cmd.contains(&"--source".to_owned()));
+    }
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = None;
+            if operation == Operation::Uninstall {
+                request.package.architecture = None;
+            }
+            build_dotnet_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_dotnet_command(&request).expect_err("install requires a named source");
+
+        let mut request = make_request();
+        request.operation = Operation::Update;
+        request.source.name = String::new();
+        request.source.url = Some("https://example.test/".to_owned());
+        build_dotnet_command(&request).expect_err("empty source cannot carry a URL");
+    }
     #[test]
     fn install_uses_trusted_program_files_dotnet_and_nuget_source() {
         let request = make_request();

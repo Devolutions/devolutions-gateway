@@ -2,18 +2,22 @@
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::{self, StartupInfo};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
+use win_api_wrappers::thread::{ThreadAttributeList, ThreadAttributeType};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{self, CommandLine, Pipe, WideString};
-use windows::Win32::Foundation::WAIT_TIMEOUT;
+use windows::Win32::Foundation::{HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation, WAIT_TIMEOUT};
+use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::Threading::{
     CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
 };
@@ -129,18 +133,24 @@ pub(super) fn create_process(
 
     // Capture pipes are only set up when requested. They must be kept alive through
     // process creation, and the child's ends closed afterwards so the reader sees EOF.
+    //
+    // Strict sinks create every end non-inheritable and later make only the child's own ends
+    // inheritable (see `StrictSpawn`), so the read ends can never be inherited by any child.
+    let strict_sink = event_sink.filter(|sink| sink.is_strict());
+    let strict_capture = capture && strict_sink.is_some();
     let inheritable = SecurityAttributesInit {
         inherit_handle: true,
         ..Default::default()
     }
     .init();
+    let pipe_attributes = if strict_capture { None } else { Some(&inheritable) };
     let (stdout_read, stderr_read, held_write_ends, held_stdin_read) = if capture {
         let (out_read, out_write) =
-            Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stdout capture pipe")?;
+            Pipe::new_anonymous(pipe_attributes, 0).context("failed to create stdout capture pipe")?;
         let (err_read, err_write) =
-            Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stderr capture pipe")?;
+            Pipe::new_anonymous(pipe_attributes, 0).context("failed to create stderr capture pipe")?;
         // Empty stdin (write end closed immediately so the child reads EOF).
-        let (in_read, in_write) = Pipe::new_anonymous(Some(&inheritable), 0).context("failed to create stdin pipe")?;
+        let (in_read, in_write) = Pipe::new_anonymous(pipe_attributes, 0).context("failed to create stdin pipe")?;
         drop(in_write);
 
         startup_info.flags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
@@ -164,7 +174,20 @@ pub(super) fn create_process(
 
     debug!("Calling process::create_process_as_user");
 
-    let process_info = match process::create_process_as_user(
+    // Strict capture: restrict inheritance to the child's three std handles, for as short
+    // a window as possible. Dropped (clearing the inherit flags) right after creation.
+    let strict_spawn = match (&held_write_ends, &held_stdin_read) {
+        (Some((out_write, err_write)), Some(in_read)) if strict_capture => Some(
+            StrictSpawn::begin(
+                [&in_read.handle, &out_write.handle, &err_write.handle],
+                &mut startup_info,
+            )
+            .context("failed to restrict handle inheritance for the output capture")?,
+        ),
+        _ => None,
+    };
+
+    let spawn_result = process::create_process_as_user(
         Some(token),
         Some(&resolved_exe),
         Some(&cmd_line),
@@ -176,7 +199,10 @@ pub(super) fn create_process(
         Some(&user_vars),
         None,
         &mut startup_info,
-    ) {
+    );
+    drop(strict_spawn);
+
+    let process_info = match spawn_result {
         Ok(info) => info,
         Err(error) => {
             error!(
@@ -213,12 +239,41 @@ pub(super) fn create_process(
     // Drain each pipe on a separate thread so a child producing more output than a pipe
     // buffer can hold does not deadlock against our wait-for-exit. Chunks are forwarded
     // to the event sink as they arrive; a bounded tail is kept for diagnostics.
-    let stdout_reader = stdout_read.map(|pipe| spawn_output_reader(pipe, event_sink.cloned(), OutputStream::Stdout));
-    let stderr_reader = stderr_read.map(|pipe| spawn_output_reader(pipe, event_sink.cloned(), OutputStream::Stderr));
+    //
+    // The guard marks the stream incomplete on every exit path that does not confirm both
+    // readers drained their pipe to EOF (early `?` returns, panics, reader failures).
+    let mut completeness = CompletenessGuard::new(event_sink);
+    if strict_capture && !STRICT_CAPTURE_COMPLETION_TRUSTED {
+        warn!(
+            session_id,
+            "Strict output capture cannot be proven complete; the event stream will end without Finish"
+        );
+        completeness.mark_now();
+    }
+    // Strict sinks use polling readers that can be stopped; a descendant that inherited a
+    // write end can otherwise keep a blocking read pending after the child exited.
+    let reader_stop = ReaderStop::default();
+    let _stop_on_drop = StopOnDrop(reader_stop.clone());
+    let stdout_reader = stdout_read.map(|pipe| {
+        spawn_output_reader(
+            pipe,
+            event_sink.cloned(),
+            OutputStream::Stdout,
+            strict_sink.map(|_| reader_stop.clone()),
+        )
+    });
+    let stderr_reader = stderr_read.map(|pipe| {
+        spawn_output_reader(
+            pipe,
+            event_sink.cloned(),
+            OutputStream::Stderr,
+            strict_sink.map(|_| reader_stop.clone()),
+        )
+    });
 
     let deadline = Instant::now() + OperationTracker::operation_timeout();
-    // INVARIANT: whenever the loop breaks, the process has exited (or was terminated),
-    // so the capture reader below observes EOF and joining it cannot block.
+    // Whenever the loop breaks, the process has exited (or was terminated). Readers then
+    // reach EOF unless a descendant retains a write end; strict sinks bound that wait below.
     let outcome = loop {
         if let Some(cancel) = cancel
             && cancel.is_cancelled()
@@ -252,9 +307,23 @@ pub(super) fn create_process(
     };
 
     // Join the reader threads on every outcome so they are never left detached.
-    let stdout_tail = stdout_reader.map(|handle| handle.join().unwrap_or_default());
-    let stderr_tail = stderr_reader.map(|handle| handle.join().unwrap_or_default());
-    let stdout = combined_output_tail(stdout_tail, stderr_tail);
+    let drain = strict_sink.map(|sink| PostExitDrain {
+        stop: &reader_stop,
+        sink,
+        timeout: POST_EXIT_DRAIN_TIMEOUT,
+    });
+    let (stdout_tail, stderr_tail) = drain_readers(stdout_reader, stderr_reader, drain);
+    let readers_complete =
+        stdout_tail.as_ref().is_none_or(|r| r.complete) && stderr_tail.as_ref().is_none_or(|r| r.complete);
+    if readers_complete {
+        completeness.disarm();
+    } else if strict_sink.is_some() {
+        warn!(
+            session_id,
+            "Output capture was incomplete; the event stream will end without Finish"
+        );
+    }
+    let stdout = combined_output_tail(stdout_tail.map(|r| r.tail), stderr_tail.map(|r| r.tail));
 
     match outcome {
         WaitOutcome::Canceled => Err(anyhow::Error::new(OperationCanceled)),
@@ -287,20 +356,245 @@ enum WaitOutcome {
     TimedOut,
 }
 
+/// Whether strict output capture may report a stream as complete.
+///
+/// `StrictSpawn` keeps the broker's read ends and unrelated handles out of the child, but
+/// the child's own pipe ends are inheritable between `begin` and `Drop`, and the Agent
+/// process creates other children with unrestricted handle inheritance that no lock held
+/// here can exclude. Such a child could inherit a write end, inject output, or hold the pipe
+/// open. Until that cross-spawn window is closed, strict sinks never receive `Finish` for
+/// captured output.
+const STRICT_CAPTURE_COMPLETION_TRUSTED: bool = false;
+
+/// Serializes the inheritable window of strict spawns against each other.
+static STRICT_SPAWN_LOCK: Mutex<()> = Mutex::new(());
+
+/// Restricts a strict capture spawn to the child's three std handles.
+///
+/// The handles are made inheritable only for the lifetime of this value, and
+/// `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` ensures no other inheritable handle of the process
+/// reaches the child.
+struct StrictSpawn {
+    handles: [HANDLE; 3],
+    // Owns the memory `startup_info.attribute_list` points into; must outlive the spawn.
+    _attributes: ThreadAttributeList,
+    _handle_list: ThreadAttributeType<'static>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl StrictSpawn {
+    fn begin(handles: [&Handle; 3], startup_info: &mut StartupInfo) -> anyhow::Result<Self> {
+        let lock = STRICT_SPAWN_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let handles = handles.map(Handle::raw);
+
+        let handle_list = ThreadAttributeType::HandleList(handles.to_vec());
+        let mut attributes = ThreadAttributeList::with_count(1)?;
+        attributes.update(&handle_list)?;
+        startup_info.attribute_list = Some(Some(attributes.raw()));
+
+        // Constructed first so a failure while marking handles still clears them.
+        let spawn = Self {
+            handles,
+            _attributes: attributes,
+            _handle_list: handle_list,
+            _lock: lock,
+        };
+        for handle in spawn.handles {
+            set_inheritable(handle, true)?;
+        }
+        Ok(spawn)
+    }
+}
+
+impl Drop for StrictSpawn {
+    fn drop(&mut self) {
+        for handle in self.handles {
+            if let Err(error) = set_inheritable(handle, false) {
+                warn!(%error, "Failed to clear handle inheritance after spawn");
+            }
+        }
+    }
+}
+
+fn set_inheritable(handle: HANDLE, inheritable: bool) -> windows::core::Result<()> {
+    let flags = if inheritable {
+        HANDLE_FLAG_INHERIT
+    } else {
+        HANDLE_FLAGS(0)
+    };
+    // SAFETY: `handle` is a valid handle owned by a live `Pipe` of the caller.
+    unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT.0, flags) }
+}
+
+/// What an output reader thread produced.
+struct ReaderResult {
+    /// Tail-bounded copy of the stream.
+    tail: Vec<u8>,
+    /// Whether the pipe was drained to EOF with every chunk handed to the sink.
+    complete: bool,
+}
+
+/// Marks the sink incomplete on drop unless disarmed.
+struct CompletenessGuard<'a> {
+    sink: Option<&'a OperationEventSink>,
+}
+
+impl<'a> CompletenessGuard<'a> {
+    fn new(sink: Option<&'a OperationEventSink>) -> Self {
+        Self { sink }
+    }
+
+    fn disarm(&mut self) {
+        self.sink = None;
+    }
+
+    /// Mark the sink incomplete now and keep it marked.
+    fn mark_now(&self) {
+        if let Some(sink) = self.sink {
+            sink.mark_incomplete();
+        }
+    }
+}
+
+impl Drop for CompletenessGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(sink) = self.sink {
+            sink.mark_incomplete();
+        }
+    }
+}
+
+fn join_output_reader(handle: std::thread::JoinHandle<ReaderResult>) -> ReaderResult {
+    handle.join().unwrap_or_else(|_| {
+        error!("Output reader thread panicked");
+        ReaderResult {
+            tail: Vec::new(),
+            complete: false,
+        }
+    })
+}
+
+/// How long a strict sink waits, after the process exited, for the readers to reach EOF.
+///
+/// A descendant that inherited a write end can keep the pipe open indefinitely; output
+/// is then declared incomplete rather than waiting for it.
+const POST_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How often a polling reader checks its pipe and stop request.
+const READER_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Cooperative stop request for polling output readers.
+#[derive(Clone, Default)]
+struct ReaderStop(Arc<AtomicBool>);
+
+impl ReaderStop {
+    fn stop(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// Stops the readers on drop so no polling thread outlives `create_process`.
+struct StopOnDrop(ReaderStop);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
+/// Post-exit wait configuration for strict sinks.
+struct PostExitDrain<'a> {
+    stop: &'a ReaderStop,
+    sink: &'a OperationEventSink,
+    timeout: Duration,
+}
+
+/// Join both readers; with `drain`, first give them `timeout` to reach EOF and otherwise
+/// mark the output incomplete and stop them.
+///
+/// Stopping is race-free because polling readers check the request on every iteration
+/// instead of blocking inside `ReadFile`, so the joins below always return.
+fn drain_readers(
+    stdout: Option<std::thread::JoinHandle<ReaderResult>>,
+    stderr: Option<std::thread::JoinHandle<ReaderResult>>,
+    drain: Option<PostExitDrain<'_>>,
+) -> (Option<ReaderResult>, Option<ReaderResult>) {
+    if let Some(drain) = drain {
+        let deadline = Instant::now() + drain.timeout;
+        let all_finished =
+            || stdout.as_ref().is_none_or(|h| h.is_finished()) && stderr.as_ref().is_none_or(|h| h.is_finished());
+        while !all_finished() && Instant::now() < deadline {
+            std::thread::sleep(READER_POLL_INTERVAL);
+        }
+        if !all_finished() {
+            warn!("Output pipes stayed open after process exit; output is incomplete");
+            drain.sink.mark_incomplete();
+            drain.stop.stop();
+        }
+    }
+    (stdout.map(join_output_reader), stderr.map(join_output_reader))
+}
+
+/// Bytes currently readable from `pipe` without blocking.
+fn pipe_bytes_available(pipe: &Pipe) -> std::io::Result<u32> {
+    let mut available = 0u32;
+    // SAFETY: the handle is a valid pipe handle owned by `pipe`, and `available` is a
+    // live out-pointer; the other optional pointers are null.
+    unsafe { PeekNamedPipe(pipe.handle.raw(), None, 0, None, Some(&mut available), None) }?;
+    Ok(available)
+}
+
+/// A read error that merely signals the write end was closed (end of stream).
+fn is_end_of_stream(error: &std::io::Error) -> bool {
+    // ERROR_BROKEN_PIPE is how a closed anonymous pipe write end surfaces from `ReadFile`;
+    // the wrapper reports it as the HRESULT form of the Win32 code.
+    const ERROR_BROKEN_PIPE: i32 = 109;
+    const HRESULT_BROKEN_PIPE: i32 = 0x8007_006Du32.cast_signed();
+    error.kind() == std::io::ErrorKind::BrokenPipe
+        || matches!(error.raw_os_error(), Some(ERROR_BROKEN_PIPE | HRESULT_BROKEN_PIPE))
+}
+
 /// Spawn a thread draining one output pipe until EOF.
 ///
 /// Raw chunks are forwarded to the event sink (when present) as they arrive; the
-/// thread returns a tail-bounded copy of the stream for diagnostics.
+/// thread returns a tail-bounded copy of the stream for diagnostics. A read error
+/// other than end-of-stream marks the sink incomplete.
+///
+/// With `stop`, the thread polls the pipe instead of blocking in a read, so it can be
+/// stopped while a retained write end keeps the pipe open; a stopped reader is incomplete.
 fn spawn_output_reader(
     mut pipe: Pipe,
     sink: Option<OperationEventSink>,
     stream: OutputStream,
-) -> std::thread::JoinHandle<Vec<u8>> {
+    stop: Option<ReaderStop>,
+) -> std::thread::JoinHandle<ReaderResult> {
     std::thread::spawn(move || {
         let mut buffer = Vec::new();
         let mut chunk = [0u8; 8192];
+        let mut complete = true;
         loop {
-            match pipe.read(&mut chunk) {
+            let read_result = match &stop {
+                Some(stop) => {
+                    if stop.is_stopped() {
+                        complete = false;
+                        break;
+                    }
+                    match pipe_bytes_available(&pipe) {
+                        Ok(0) => {
+                            std::thread::sleep(READER_POLL_INTERVAL);
+                            continue;
+                        }
+                        Ok(_) => pipe.read(&mut chunk),
+                        Err(error) => Err(error),
+                    }
+                }
+                None => pipe.read(&mut chunk),
+            };
+            match read_result {
                 Ok(0) => break,
                 Ok(read) => {
                     if let Some(sink) = &sink {
@@ -315,10 +609,18 @@ fn spawn_output_reader(
                         buffer.drain(..excess);
                     }
                 }
-                Err(_) => break,
+                Err(error) if is_end_of_stream(&error) => break,
+                Err(error) => {
+                    warn!(?stream, %error, "Output pipe read failed");
+                    complete = false;
+                    if let Some(sink) = &sink {
+                        sink.mark_incomplete();
+                    }
+                    break;
+                }
             }
         }
-        buffer
+        ReaderResult { tail: buffer, complete }
     })
 }
 
@@ -502,6 +804,7 @@ fn is_trusted_winget_path(candidate: &Path, env: &UserEnv<'_>) -> bool {
 mod tests {
     use std::collections::HashMap;
 
+    use now_policy_api::event_channel::EventFrame;
     use win_api_wrappers::identity::sid::Sid;
     use win_api_wrappers::security::acl::{
         Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
@@ -512,6 +815,158 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
 
     use super::*;
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn reader_treats_closed_write_end_as_complete_end_of_stream() {
+        use std::io::Write as _;
+
+        let (read, mut write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        write.write_all(b"hello").expect("write to pipe");
+        drop(write);
+
+        let result = spawn_output_reader(read, None, OutputStream::Stdout, None)
+            .join()
+            .expect("reader thread");
+        assert!(result.complete, "closed write end is a normal EOF, not a read failure");
+        assert_eq!(result.tail, b"hello");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn polling_reader_treats_closed_write_end_as_complete_end_of_stream() {
+        use std::io::Write as _;
+
+        let (read, mut write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        write.write_all(b"hello").expect("write to pipe");
+        drop(write);
+
+        let result = spawn_output_reader(read, None, OutputStream::Stdout, Some(ReaderStop::default()))
+            .join()
+            .expect("reader thread");
+        assert!(result.complete);
+        assert_eq!(result.tail, b"hello");
+    }
+
+    // oracle: mutant dropped complete output or Finish after a normal EOF
+    #[tokio::test]
+    async fn strict_sink_without_retained_write_end_finishes() {
+        use std::io::Write as _;
+
+        let sink = OperationEventSink::new_strict();
+        let stop = ReaderStop::default();
+        let (read, mut write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        write.write_all(b"full").expect("write to pipe");
+        drop(write);
+        let reader = spawn_output_reader(read, Some(sink.clone()), OutputStream::Stdout, Some(stop.clone()));
+
+        let drain = PostExitDrain {
+            stop: &stop,
+            sink: &sink,
+            timeout: Duration::from_secs(5),
+        };
+        let (stdout, _) = drain_readers(Some(reader), None, Some(drain));
+        assert!(stdout.expect("stdout result").complete);
+        sink.finish();
+
+        assert_eq!(
+            [
+                sink.next_frame().await,
+                sink.next_frame().await,
+                sink.next_frame().await
+            ],
+            [
+                Some(EventFrame::Stdout("full".to_owned())),
+                Some(EventFrame::Finish),
+                None
+            ]
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn strict_sink_with_retained_write_end_stops_readers_without_finish() {
+        use std::io::Write as _;
+
+        let sink = OperationEventSink::new_strict();
+        let stop = ReaderStop::default();
+        let (read, mut retained_write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        retained_write.write_all(b"partial").expect("write to pipe");
+        let reader = spawn_output_reader(read, Some(sink.clone()), OutputStream::Stdout, Some(stop.clone()));
+
+        let started = Instant::now();
+        let drain = PostExitDrain {
+            stop: &stop,
+            sink: &sink,
+            timeout: Duration::from_millis(300),
+        };
+        // The write end stays open, as when a descendant inherited it: the join must
+        // still return, with the reader stopped rather than blocked forever.
+        let (stdout, _) = drain_readers(Some(reader), None, Some(drain));
+        // oracle: mutant reader waits indefinitely for an inherited write end
+        assert!(started.elapsed() < Duration::from_secs(5), "readers were not stopped");
+        let stdout = stdout.expect("stdout result");
+        assert!(!stdout.complete);
+        assert_eq!(stdout.tail, b"partial");
+        sink.finish();
+
+        assert_eq!(sink.next_frame().await, Some(EventFrame::Stdout("partial".to_owned())));
+        assert_eq!(sink.next_frame().await, None, "no Finish may follow incomplete output");
+        drop(retained_write);
+    }
+
+    // oracle: mutant inherited read ends or leaked inheritable write ends after spawn
+    #[test]
+    fn strict_spawn_makes_only_child_ends_inheritable_and_clears_them_on_drop() {
+        use windows::Win32::Foundation::GetHandleInformation;
+
+        fn is_inheritable(handle: &Handle) -> bool {
+            let mut flags = 0u32;
+            // SAFETY: `handle` is a valid handle and `flags` a live out-pointer.
+            unsafe { GetHandleInformation(handle.raw(), &mut flags) }.expect("query handle flags");
+            flags & HANDLE_FLAG_INHERIT.0 != 0
+        }
+
+        let (out_read, out_write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        let (err_read, err_write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        let (in_read, _in_write) = Pipe::new_anonymous(None, 0).expect("create pipe");
+        assert!(!is_inheritable(&out_read.handle), "pipes start non-inheritable");
+
+        let mut startup_info = StartupInfo::default();
+        let spawn = StrictSpawn::begin(
+            [&in_read.handle, &out_write.handle, &err_write.handle],
+            &mut startup_info,
+        )
+        .expect("begin strict spawn");
+        assert!(startup_info.attribute_list.is_some());
+        assert!(is_inheritable(&in_read.handle));
+        assert!(is_inheritable(&out_write.handle));
+        assert!(is_inheritable(&err_write.handle));
+        assert!(!is_inheritable(&out_read.handle));
+        assert!(!is_inheritable(&err_read.handle));
+
+        drop(spawn);
+        assert!(!is_inheritable(&in_read.handle));
+        assert!(!is_inheritable(&out_write.handle));
+        assert!(!is_inheritable(&err_write.handle));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn reader_panic_is_reported_as_incomplete() {
+        let handle = std::thread::spawn(|| -> ReaderResult { panic!("reader failure") });
+        assert!(!join_output_reader(handle).complete);
+    }
+
+    // UNTESTED: that a real child created by `create_process` with a strict sink receives
+    // only its three std handles (the handle-list restriction) and that the broker's read
+    // ends are never inherited; only the inheritance flags are checked above. Also untested:
+    // anonymous-pipe EOF with real child processes, and the post-exit drain against a real
+    // descendant holding an inherited write end (only an in-process retained write end is
+    // exercised). Strict captured output is deliberately never completed
+    // (`STRICT_CAPTURE_COMPLETION_TRUSTED`); legacy sinks still block in `ReadFile` and wait
+    // for such a descendant until it exits or the operation times out. Check these when
+    // changing handle inheritance, the reader threads, or the spawn/drain in `create_process`.
 
     fn grant(permissions: u32, sid: Sid) -> ExplicitAccess {
         ExplicitAccess {

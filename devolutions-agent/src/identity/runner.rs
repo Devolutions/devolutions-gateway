@@ -21,6 +21,7 @@ use uuid::Uuid;
 use super::RetryState;
 use super::channel::{Notice, Notices, PushedConfig, Streams, Want};
 use super::config::IdentityDebugConf;
+use crate::device_management::DeviceManagementContext;
 
 const CHECK_IN_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const CHANNEL_FAILURE_CHECK_IN_AFTER: Duration = Duration::from_secs(60 * 60);
@@ -37,6 +38,7 @@ pub(super) struct Shared {
     pub(super) client: Client,
     pub(super) channels: ChannelClient,
     pub(super) settings: IdentityDebugConf,
+    pub(super) device_management: DeviceManagementContext,
 }
 
 /// One runner per stored, non-rejected identity, keyed by authority.
@@ -118,6 +120,7 @@ struct Runner {
 
 impl Runner {
     fn new(shared: Arc<Shared>, identity: &StoredIdentity) -> Self {
+        let device_management = shared.device_management.clone();
         let mut runner = Self {
             shared,
             authority_id: identity.authority_id,
@@ -136,7 +139,7 @@ impl Runner {
             check_in_after_confirm: false,
             channel_url: None,
             warned_malformed_config: None,
-            streams: Streams::spawn(),
+            streams: Streams::spawn_with(identity.identity_id, identity.authority_id, device_management),
             notices: Notices::default(),
             confirm_unknown: identity.keys.pending.is_some(),
             channel_after_confirm: false,
@@ -609,6 +612,7 @@ impl Runner {
                 .into_iter()
                 .collect(),
             config_revision: config_revision.load(Ordering::Relaxed),
+            capabilities: vec![crate::device_management::CAPABILITY.to_owned()],
         })
     }
 

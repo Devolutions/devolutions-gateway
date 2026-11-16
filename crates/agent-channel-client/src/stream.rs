@@ -45,10 +45,11 @@ pub(crate) async fn run(
     target: Target,
     events: mpsc::Sender<Event>,
     mut acks: mpsc::UnboundedReceiver<String>,
+    mut reports: mpsc::UnboundedReceiver<AgentMessage>,
 ) {
     let mut backoff = BackoffState::default();
     loop {
-        let Some(closure) = stream_once(&shared, &target, &events, &mut acks, &mut backoff).await else {
+        let Some(closure) = stream_once(&shared, &target, &events, &mut acks, &mut reports, &mut backoff).await else {
             return;
         };
         let reopen_after = match closure.class {
@@ -74,6 +75,7 @@ async fn stream_once(
     target: &Target,
     events: &mpsc::Sender<Event>,
     acks: &mut mpsc::UnboundedReceiver<String>,
+    reports: &mut mpsc::UnboundedReceiver<AgentMessage>,
     backoff: &mut BackoffState,
 ) -> Option<Closure> {
     let mut opened = tokio::select! {
@@ -87,6 +89,7 @@ async fn stream_once(
     // Acknowledgements sent before this stream authenticated answer an earlier stream's messages.
     while acks.try_recv().is_ok() {}
     events.send(Event::Authenticated).await.ok()?;
+    let mut reports_open = true;
     loop {
         tokio::select! {
             // Acknowledgements come first, so that those queued before the caller dropped the channel are sent.
@@ -103,6 +106,18 @@ async fn stream_once(
                 };
                 // A stream that can't take the acknowledgement has closed, which its next message reports.
                 let _ = opened.outbound.send(ack).await;
+            }
+            // Reserve before dequeueing so a stalled stream can close without losing a queued report.
+            report = async {
+                let permit = opened.outbound.clone().reserve_owned().await.ok()?;
+                let report = reports.recv().await?;
+                Some((permit, report))
+            }, if reports_open => {
+                if let Some((permit, report)) = report {
+                    permit.send(report);
+                } else {
+                    reports_open = false;
+                }
             }
             message = opened.inbound.message() => match trusted(message) {
                 Ok(Some(message)) => {
@@ -187,6 +202,10 @@ fn push_event(message: ServerMessage) -> Option<Event> {
             id: message.id,
             config_json: update.config_json,
         }),
+        Payload::DeviceManagement(request) => Some(Event::DeviceManagement {
+            id: message.id,
+            request,
+        }),
         Payload::Welcome(_) | Payload::Ack(_) | Payload::Challenge(_) => None,
     }
 }
@@ -261,7 +280,7 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
         correlation_id: Some(challenge_id.to_owned()),
         payload: Some(agent_message::Payload::Hello(Hello {
             metadata: fields.metadata,
-            capabilities: Vec::new(),
+            capabilities: fields.capabilities,
             applied_state_versions: HashMap::from([("config".to_owned(), fields.config_revision)]),
             proof: proof.to_bytes().to_vec(),
         })),

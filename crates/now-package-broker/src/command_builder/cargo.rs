@@ -3,7 +3,7 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
-use super::{set_if_specified, validate_batch_arguments, validate_package_version};
+use super::{set_if_specified, uses_default_source, validate_batch_arguments, validate_package_version};
 
 const CRATES_IO_SOURCE_NAME: &str = "crates.io";
 const CRATES_IO_SOURCE_URL: &str = "https://index.crates.io";
@@ -67,16 +67,18 @@ fn validate_cargo_request(request: &PackageRequest) -> anyhow::Result<()> {
     if request.options.scope == Some(Scope::Machine) {
         bail!("cargo machine-scope operations are not supported by the broker");
     }
-    if !request.source.name.eq_ignore_ascii_case(CRATES_IO_SOURCE_NAME) {
-        bail!("cargo package source must be crates.io");
+    if !uses_default_source("cargo", request)? {
+        if !request.source.name.eq_ignore_ascii_case(CRATES_IO_SOURCE_NAME) {
+            bail!("cargo package source must be crates.io");
+        }
+        if let Some(url) = request.source.url.as_deref()
+            && !is_crates_io_url(url)
+        {
+            bail!("cargo package source URLs other than crates.io are not supported by the broker");
+        }
     }
     if !is_valid_crates_io_crate_name(&request.package.id.0) {
         bail!("cargo package identifier must be a valid crates.io crate name");
-    }
-    if let Some(url) = request.source.url.as_deref()
-        && !is_crates_io_url(url)
-    {
-        bail!("cargo package source URLs other than crates.io are not supported by the broker");
     }
     if let Some(architecture) = request.package.architecture
         && architecture != Architecture::Neutral
@@ -188,6 +190,32 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn empty_source_is_accepted_for_update_and_uninstall_only() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = None;
+            if operation == Operation::Uninstall {
+                request.package.version = None;
+            }
+            build_cargo_command(&request).expect("empty source");
+        }
+
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_cargo_command(&request).expect_err("install requires a named source");
+
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            request.source.url = Some("https://example.test/".to_owned());
+            build_cargo_command(&request).expect_err("empty source cannot carry a URL");
+        }
+    }
     #[test]
     fn install_uses_cargo_install_with_version_and_root() {
         let mut request = make_request();

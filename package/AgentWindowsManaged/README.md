@@ -28,11 +28,34 @@ msiexec /i DevolutionsAgent.msi /qn ADDLOCAL=F.Agent,F.Updater,F.Session,F.Packa
 | `F.PackageBroker` | Off | UniGetUI Package Broker. Sets `PackageBroker.Enabled` in `agent.json`. |
 | `F.Pedm` | Off | Devolutions PEDM (experimental). |
 
-The Package Broker rejects package requests until a package policy is deployed, by default in `%ProgramData%\Devolutions\PackageBroker\`.
+The Package Broker rejects local self-service requests until a package policy is deployed, by default in `%ProgramData%\Devolutions\PackageBroker\`.
 The installer neither installs nor changes that policy.
+
+For device management, enable the Package Broker and install UniGetUI for all users in an administrator-protected directory, such as `C:\Program Files\UniGetUI`.
+The Agent refuses to register an instance if standard users can modify its executable or add files to its containing directory.
 
 An upgrade without `ADDLOCAL` or `REMOVE` keeps the previous feature selection.
 When upgrading from a release without the UniGetUI Package Broker option, setup selects `F.PackageBroker` if `agent.json` already enables the broker.
+
+## Package operation journal recovery
+
+If the Agent logs `Cannot open the device-management operation journal; package writes are unavailable`, it does not start remote package operations and reports `UNKNOWN` to the authority.
+Discovery and inventory remain available when their own dependencies are healthy.
+An `UNKNOWN` result does not prove that an earlier operation with the same ID did not run.
+
+To recover the journal, use an elevated administrator session:
+
+1. Stop submitting package operations, wait for active operations to finish, and inspect any operations whose outcomes are unknown.
+2. Stop the `DevolutionsAgent` service and any other Agent instance using that data directory.
+3. Restore a trusted, complete and current backup of `%ProgramData%\Devolutions\Agent\package-operations`, including its original permissions.
+   If the Agent uses `DAGENT_CONFIG_PATH`, the journal is under that directory instead.
+   If no complete backup is available, move or delete the entire `package-operations` directory to create a new journal.
+4. Start the service and check the Agent log for journal errors.
+
+Resetting the journal, or restoring a backup that lacks recent records, allows previously recorded operation IDs to execute again.
+Accept that risk before resetting or restoring the journal; do not remove only individual journal files.
+If the log names the initialization lock, remove `.package-operations-initialization.lock` beside the journal while all Agent instances are stopped.
+The lock file holds no operation records.
 
 ## Agent Identity
 

@@ -106,6 +106,7 @@ fn hello_fields() -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
     Arc::new(|| HelloFields {
         metadata: HashMap::from([("hostname".to_owned(), "test-host".to_owned())]),
         config_revision: 7,
+        capabilities: Vec::new(),
     })
 }
 
@@ -198,6 +199,7 @@ async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::
             hello_hostname.lock().expect("hostname lock").clone(),
         )]),
         config_revision: 7,
+        capabilities: Vec::new(),
     });
     let _channel =
         client(&authority, Settings::default())?.connect(identity.target_with_hello(&authority.url, hello))?;
@@ -1498,6 +1500,80 @@ async fn a_dropped_channel_stops_waiting_for_an_authority_that_keeps_its_side_op
     Ok(())
 }
 
+fn queue_large_inventory_reports(reporter: &Reporter) -> DeviceManagementReport {
+    use agent_channel_proto::device_management_report::Report;
+    use agent_channel_proto::{InstalledPackage, InventoryReport};
+
+    let report = DeviceManagementReport {
+        report: Some(Report::Inventory(InventoryReport {
+            packages: vec![InstalledPackage {
+                name: "x".repeat(48_000),
+                ..InstalledPackage::default()
+            }],
+            ..InventoryReport::default()
+        })),
+    };
+    for _ in 0..512 {
+        reporter.send(None, report.clone());
+    }
+    report
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
+#[tokio::test]
+async fn dropping_a_channel_stops_it_when_the_authority_stops_reading_reports() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let hello = hello_fields();
+    let target = identity.target_with_hello(&authority.url, Arc::clone(&hello));
+    let mut channel = client(&authority, Settings::default())?.connect(target)?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    queue_large_inventory_reports(&channel.reporter());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    drop(channel);
+
+    wait_until("the release of the target", || Arc::strong_count(&hello) == 1).await;
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: regression #2194
+#[tokio::test]
+async fn a_full_outbound_buffer_does_not_block_reopening_with_queued_reports() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut first = authority.next_opening().await.accept();
+    first.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let reporter = channel.reporter();
+    let report = queue_large_inventory_reports(&reporter);
+    let queued_id = new_id();
+    reporter.send(Some(queued_id.clone()), report);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    first
+        .close_response(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    drop(first);
+    let mut second = authority.next_opening().await.accept();
+    second.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    for _ in 0..=512 {
+        if second.receive().await.correlation_id.as_deref() == Some(queued_id.as_str()) {
+            return Ok(());
+        }
+    }
+    panic!("the report queued before the stream closed was not sent after reopening");
+}
+
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
@@ -1538,6 +1614,75 @@ async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     next_event(&mut channel).await;
     channel.ack(&new_id);
     assert_eq!(second.receive().await.correlation_id, Some(new_id));
+    Ok(())
+}
+
+// oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory
+#[tokio::test]
+async fn unavailable_inventory_keeps_request_correlation_across_reopening() -> anyhow::Result<()> {
+    use agent_channel_proto::device_management_report::Report;
+    use agent_channel_proto::device_management_request::Request;
+    use agent_channel_proto::{
+        DeviceManagementRequest, InventoryUnavailable, InventoryUnavailableReason, SyncInventory,
+    };
+
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut first = authority.next_opening().await.accept();
+    first.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let request_id = new_id();
+    let target_user_uuid = "bb195c19-20e1-4ad9-8eca-d8396c153881";
+    let registry_epoch = "e154c84b-c928-40b5-9171-c970d960bd16";
+    first
+        .send(
+            &request_id,
+            None,
+            Payload::DeviceManagement(DeviceManagementRequest {
+                request: Some(Request::SyncInventory(SyncInventory {
+                    target_user_uuid: target_user_uuid.to_owned(),
+                    registry_epoch: registry_epoch.to_owned(),
+                })),
+            }),
+        )
+        .await;
+    assert!(matches!(
+        next_event(&mut channel).await,
+        Event::DeviceManagement { id, .. } if id == request_id
+    ));
+    first
+        .close(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+    next_closure(&mut channel).await;
+
+    channel.reporter().send(
+        Some(request_id.clone()),
+        DeviceManagementReport {
+            report: Some(Report::InventoryUnavailable(InventoryUnavailable {
+                target_user_uuid: target_user_uuid.to_owned(),
+                registry_epoch: registry_epoch.to_owned(),
+                reason: InventoryUnavailableReason::SafeEndpointUnavailable.into(),
+            })),
+        },
+    );
+    let mut second = authority.next_opening().await.accept();
+    second.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let message = second.receive().await;
+
+    assert_eq!(message.correlation_id.as_deref(), Some(request_id.as_str()));
+    assert!(matches!(
+        message.payload,
+        Some(agent_message::Payload::DeviceManagement(DeviceManagementReport {
+            report: Some(Report::InventoryUnavailable(InventoryUnavailable {
+                target_user_uuid: user_uuid,
+                registry_epoch: epoch,
+                reason: 1,
+            })),
+        })) if user_uuid == target_user_uuid && epoch == registry_epoch
+    ));
     Ok(())
 }
 

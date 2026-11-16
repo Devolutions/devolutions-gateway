@@ -17,7 +17,7 @@
 
 use std::collections::VecDeque;
 use std::mem;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use now_policy_api::event_channel::{EventFrame, MAX_EVENT_FRAME_BODY_BYTES};
 use tokio::sync::Notify;
@@ -89,6 +89,30 @@ impl Utf8StreamChunker {
         split_at_char_boundaries(decoded, MAX_EVENT_FRAME_BODY_BYTES)
     }
 
+    /// Like [`Self::push`], but fails instead of substituting invalid sequences.
+    pub fn push_strict(&mut self, bytes: &[u8]) -> Result<Vec<String>, InvalidUtf8> {
+        let mut buffer = mem::take(&mut self.pending);
+        buffer.extend_from_slice(bytes);
+
+        let (valid_len, incomplete_tail) = match core::str::from_utf8(&buffer) {
+            Ok(_) => (buffer.len(), false),
+            Err(error) if error.error_len().is_none() => (error.valid_up_to(), true),
+            Err(_) => return Err(InvalidUtf8),
+        };
+
+        if incomplete_tail {
+            self.pending = buffer.split_off(valid_len);
+        }
+        // INVARIANT: the first `valid_len` bytes were validated above.
+        let decoded = String::from_utf8(buffer).expect("validated prefix");
+        Ok(split_at_char_boundaries(decoded, MAX_EVENT_FRAME_BODY_BYTES))
+    }
+
+    /// Whether a character is still waiting for its remaining bytes.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// Flush the buffered incomplete sequence (if any) at end of stream.
     pub fn flush(&mut self) -> Option<String> {
         if self.pending.is_empty() {
@@ -100,6 +124,10 @@ impl Utf8StreamChunker {
         Some(char::REPLACEMENT_CHARACTER.to_string())
     }
 }
+
+/// Output that is not valid UTF-8 and so cannot be forwarded without alteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidUtf8;
 
 /// Split `text` into chunks of at most `max_bytes` bytes, cutting only at
 /// character boundaries.
@@ -156,6 +184,9 @@ struct QueueState {
     /// Set once `finish` was queued (or the channel was abandoned); no further
     /// items are accepted.
     closed: bool,
+    /// Strict sinks never alter or drop output: any loss closes the queue without
+    /// a `Finish` frame, so a reader sees end-of-stream before `Finish`.
+    strict: bool,
 }
 
 impl QueueState {
@@ -190,6 +221,22 @@ pub struct OperationEventSink {
 
 impl OperationEventSink {
     fn new() -> Self {
+        Self::with_strictness(false)
+    }
+
+    /// Sink for consumers that must know the output is complete.
+    ///
+    /// Output is never altered or evicted: invalid UTF-8, a full queue, or
+    /// [`Self::mark_incomplete`] closes the stream without `Finish`, and no
+    /// overflow frames are ever emitted.
+    // UNTESTED: Strict output must be exclusive to the submitting process; a same-user reader can take pipe bytes.
+    // Before exposing a strict channel, verify connected-handle duplication against the real service.
+    #[cfg(test)]
+    pub(crate) fn new_strict() -> Self {
+        Self::with_strictness(true)
+    }
+
+    fn with_strictness(strict: bool) -> Self {
         Self {
             queue: Arc::new(EventQueue {
                 state: Mutex::new(QueueState {
@@ -197,6 +244,7 @@ impl OperationEventSink {
                     stdout: StreamState::default(),
                     stderr: StreamState::default(),
                     closed: false,
+                    strict,
                 }),
                 notify: Notify::new(),
                 finished: CancellationToken::new(),
@@ -234,6 +282,18 @@ impl OperationEventSink {
         if state.closed {
             return;
         }
+        if state.strict {
+            if state.stdout.chunker.has_pending() || state.stderr.chunker.has_pending() {
+                Self::close_incomplete(state, &self.queue);
+            } else {
+                state.items.push_back(EventFrame::Finish);
+                state.closed = true;
+                drop(state);
+                self.queue.finished.cancel();
+                self.queue.notify.notify_one();
+            }
+            return;
+        }
         for stream in [OutputStream::Stdout, OutputStream::Stderr] {
             let tail = state.stream_mut(stream).chunker.flush();
             if let Some(tail) = tail {
@@ -245,6 +305,30 @@ impl OperationEventSink {
         drop(state);
         self.queue.finished.cancel();
         self.queue.notify.notify_one();
+    }
+
+    /// Whether the sink requires complete output.
+    pub fn is_strict(&self) -> bool {
+        self.queue.state.lock().unwrap_or_else(PoisonError::into_inner).strict
+    }
+
+    /// Record that output was lost or could not be read completely.
+    ///
+    /// On a strict sink this closes the stream without `Finish` (already queued
+    /// frames are still delivered first). On a legacy sink it does nothing.
+    pub fn mark_incomplete(&self) {
+        let state = self.queue.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.closed || !state.strict {
+            return;
+        }
+        Self::close_incomplete(state, &self.queue);
+    }
+
+    fn close_incomplete(mut state: MutexGuard<'_, QueueState>, queue: &EventQueue) {
+        state.closed = true;
+        drop(state);
+        queue.finished.cancel();
+        queue.notify.notify_one();
     }
 
     /// Abandon the queue: the client is gone, so buffered frames are released and
@@ -263,6 +347,30 @@ impl OperationEventSink {
     fn push_output(&self, stream: OutputStream, bytes: &[u8]) {
         let mut state = self.queue.state.lock().expect("event queue lock poisoned");
         if state.closed {
+            return;
+        }
+        if state.strict {
+            let chunks = match state.stream_mut(stream).chunker.push_strict(bytes) {
+                Ok(chunks) => chunks,
+                Err(InvalidUtf8) => {
+                    Self::close_incomplete(state, &self.queue);
+                    return;
+                }
+            };
+            let needed: usize = chunks.iter().map(String::len).sum();
+            if state.stream_mut(stream).queued_bytes + needed > PER_STREAM_BUDGET_BYTES {
+                Self::close_incomplete(state, &self.queue);
+                return;
+            }
+            let queued_any = !chunks.is_empty();
+            for chunk in chunks {
+                state.stream_mut(stream).queued_bytes += chunk.len();
+                state.items.push_back(data_frame(stream, chunk));
+            }
+            drop(state);
+            if queued_any {
+                self.queue.notify.notify_one();
+            }
             return;
         }
         let chunks = state.stream_mut(stream).chunker.push(bytes);
@@ -341,7 +449,7 @@ impl OperationEventSink {
 
     /// Wait for and take the next queued frame; `None` once the queue is closed
     /// and fully drained.
-    async fn next_frame(&self) -> Option<EventFrame> {
+    pub(crate) async fn next_frame(&self) -> Option<EventFrame> {
         loop {
             let notified = self.queue.notify.notified();
             {
@@ -448,6 +556,7 @@ mod windows_channel {
         operation_id: &str,
         client_sid: &Sid,
     ) -> anyhow::Result<(OperationEventSink, EventChannel)> {
+        let sink = OperationEventSink::new();
         let pipe_name = operation_pipe_name(operation_id);
         let pipe_path = format!(r"\\.\pipe\{pipe_name}");
 
@@ -471,7 +580,6 @@ mod windows_channel {
         }
         .with_context(|| format!("failed to create event channel pipe '{pipe_path}'"))?;
 
-        let sink = OperationEventSink::new();
         let descriptor = EventChannel {
             kind: EventChannelKind::LocalPipe,
             path: pipe_name,
@@ -843,6 +951,99 @@ mod tests {
         assert_eq!(stderr_overflow_frames, 1, "interleaved gaps must still coalesce");
         assert_eq!(stdout_skipped, (evictions_per_stream * frame_len) as u64);
         assert_eq!(stderr_skipped, (evictions_per_stream * frame_len) as u64);
+    }
+
+    async fn drain(sink: &OperationEventSink) -> Vec<EventFrame> {
+        let mut frames = Vec::new();
+        while let Some(frame) = sink.next_frame().await {
+            frames.push(frame);
+        }
+        frames
+    }
+
+    // oracle: mutant omitted complete output or Finish from the strict event queue
+    #[tokio::test]
+    async fn strict_sink_delivers_complete_output_with_finish() {
+        let sink = OperationEventSink::new_strict();
+        let text = "héllo".as_bytes();
+        sink.stdout(&text[..2]); // splits 'é'
+        sink.stdout(&text[2..]);
+        sink.stderr(b"err");
+        sink.finish();
+
+        let frames = drain(&sink).await;
+        let stdout: String = frames
+            .iter()
+            .filter_map(|f| {
+                if let EventFrame::Stdout(s) = f {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(stdout, "héllo");
+        assert_eq!(frames.last(), Some(&EventFrame::Finish));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn strict_sink_never_finishes_after_invalid_utf8() {
+        let sink = OperationEventSink::new_strict();
+        sink.stdout(b"ok");
+        sink.stdout(&[b'a', 0xff, b'b']);
+        sink.stdout(b"late");
+        sink.finish();
+
+        assert!(!drain(&sink).await.contains(&EventFrame::Finish));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn strict_sink_never_finishes_with_truncated_trailing_character() {
+        let sink = OperationEventSink::new_strict();
+        sink.stdout(&[b'x', 0xE2, 0x82]);
+        sink.finish();
+
+        assert!(!drain(&sink).await.contains(&EventFrame::Finish));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn strict_sink_never_finishes_on_overflow() {
+        let sink = OperationEventSink::new_strict();
+        for _ in 0..=(PER_STREAM_BUDGET_BYTES / (64 * 1024)) {
+            sink.stdout(&vec![b'a'; 64 * 1024]);
+        }
+        sink.finish();
+
+        assert!(!drain(&sink).await.contains(&EventFrame::Finish));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn strict_sink_mark_incomplete_suppresses_finish() {
+        let sink = OperationEventSink::new_strict();
+        sink.stdout(b"partial");
+        sink.mark_incomplete();
+        sink.stdout(b"more");
+        sink.finish();
+
+        assert!(!drain(&sink).await.contains(&EventFrame::Finish));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn legacy_sink_ignores_mark_incomplete() {
+        let sink = OperationEventSink::new();
+        sink.stdout(b"x");
+        sink.mark_incomplete();
+        sink.finish();
+
+        assert_eq!(
+            drain(&sink).await,
+            [EventFrame::Stdout("x".to_owned()), EventFrame::Finish]
+        );
     }
 
     #[tokio::test]

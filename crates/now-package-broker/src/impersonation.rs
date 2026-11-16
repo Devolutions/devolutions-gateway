@@ -6,9 +6,11 @@ use anyhow::Context as _;
 use tracing::error;
 use win_api_wrappers::handle::HandleWrapper as _;
 use win_api_wrappers::token::Token;
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Security::{
     ImpersonateLoggedOnUser, RevertToSelf, SecurityImpersonation, TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
 };
+use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 
 /// Duplicate `token` into an impersonation token usable with [`ThreadImpersonation`].
 ///
@@ -38,6 +40,16 @@ impl ThreadImpersonation {
     pub(crate) fn enter(token: &Token) -> anyhow::Result<Self> {
         // SAFETY: `token` is a live token handle; the call fails if it lacks the required access.
         unsafe { ImpersonateLoggedOnUser(token.handle().raw()) }.context("ImpersonateLoggedOnUser failed")?;
+
+        Ok(Self { _not_send: PhantomData })
+    }
+
+    /// Impersonate the client of the connected named pipe `pipe`, with the security context of the last message read from it.
+    ///
+    /// The caller must have read from the pipe, and the pipe must stay open while the guard lives.
+    pub(crate) fn enter_named_pipe_client(pipe: HANDLE) -> anyhow::Result<Self> {
+        // SAFETY: `pipe` is a live named pipe server handle owned by the caller; the call fails if no message was read.
+        unsafe { ImpersonateNamedPipeClient(pipe) }.context("ImpersonateNamedPipeClient failed")?;
 
         Ok(Self { _not_send: PhantomData })
     }

@@ -19,6 +19,20 @@ mod windows;
 pub use output::{ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, describe_exit_code, tail_utf8};
 #[cfg(windows)]
 pub use windows::WindowsExecutor;
+#[cfg(windows)]
+pub(crate) use windows::ensure_session_user;
+
+/// How strictly the executor checks the elevation of the token that launches the plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TokenElevationCheck {
+    /// Local-policy behavior: the token is obtained according to the request and only
+    /// pre/post operation commands are checked against it.
+    #[default]
+    Unchecked,
+    /// The launching token must match the requested elevation, independently of the manager scope.
+    /// A mismatch, including an already-elevated token with UAC disabled, fails before a process starts.
+    Exact,
+}
 
 /// Execution context passed from the server to the executor.
 ///
@@ -52,8 +66,10 @@ pub struct ExecutionContext {
     pub user_sid: Sid,
     /// Requested elevation level.
     pub elevation: Elevation,
-    /// Installation scope (machine scope requires elevation).
+    /// Installation scope passed to the manager.
     pub scope: Option<Scope>,
+    /// Whether the actual launching token's elevation must match the requirement exactly.
+    pub token_elevation_check: TokenElevationCheck,
     /// When true, capture the main command's combined stdout+stderr.
     ///
     /// Since API v0.3 this only controls whether output frames are pushed on the
@@ -71,6 +87,14 @@ pub struct ExecutionContext {
     /// chunks to the sink when [`ExecutionContext::capture_output`] is true. All
     /// sink calls are non-blocking and best-effort.
     pub event_sink: Option<OperationEventSink>,
+}
+
+impl ExecutionContext {
+    #[cfg(windows)]
+    fn requires_elevation(&self) -> bool {
+        self.elevation == Elevation::Elevated
+            || (self.token_elevation_check == TokenElevationCheck::Unchecked && self.scope == Some(Scope::Machine))
+    }
 }
 
 /// Marker error reported by executors when an operation was terminated because its

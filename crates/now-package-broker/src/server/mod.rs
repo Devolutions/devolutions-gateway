@@ -32,21 +32,103 @@ use win_api_wrappers::identity::sid::Sid;
 use crate::auth::PipeClient;
 use crate::command_builder::build_command;
 use crate::evaluator;
-use crate::executor::{CommandExecutor, ExecutionContext};
+use crate::executor::{CommandExecutor, ExecutionContext, TokenElevationCheck};
 use crate::operation_tracker::OperationTracker;
 use crate::policy_store::PolicyStore;
+use crate::remote_grant::RemoteGrantStore;
 
 mod connection;
 mod execution;
+mod grant;
+mod pipe_identity;
 mod responses;
 
 pub use connection::serve_connection;
 #[cfg(test)]
 pub(crate) use connection::serve_connection_with_header_timeout;
+pub(crate) use pipe_identity::PipeIdentity;
 use responses::{
     api_version, diagnostics, error_response, filter_manager_capabilities, new_operation_id, parse_rule_id,
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
 };
+
+/// A live Windows process identity captured from its process token.
+///
+/// See the "Instance discovery and targeting" section of the [package-management contract][contract].
+///
+/// [contract]: https://github.com/Devolutions/devolutions-gateway/blob/68baca143ca85c34141a6464dae190998d1aedb2/crates/agent-channel-proto/CONTRACT.package-management.md#instances
+#[derive(Clone, Debug)]
+pub struct ProcessIdentity {
+    client: PipeClient,
+    signature_verified: bool,
+}
+
+impl ProcessIdentity {
+    /// Captures a process identity and records whether its executable signature is valid.
+    pub fn capture(process_id: u32) -> anyhow::Result<Self> {
+        let client = PipeClient::from_process_id_for_identity(process_id)?;
+        let signature_verified = client.validate_identity_signature().is_ok();
+        client.ensure_process_instance()?;
+        Ok(Self {
+            client,
+            signature_verified,
+        })
+    }
+
+    /// Returns the process ID captured during identity verification.
+    pub fn process_id(&self) -> u32 {
+        self.client.process_id()
+    }
+
+    /// Returns whether the process executable passed signature verification.
+    pub fn signature_verified(&self) -> bool {
+        self.signature_verified
+    }
+
+    /// Returns the executable path captured from the process image.
+    pub fn executable_path(&self) -> &std::path::Path {
+        self.client.executable_path()
+    }
+
+    /// Returns the user SID captured from the process token.
+    pub fn user_sid(&self) -> &Sid {
+        self.client.user_sid()
+    }
+
+    /// Returns whether the process token was elevated when captured.
+    pub fn is_elevated(&self) -> bool {
+        self.client.is_elevated()
+    }
+
+    /// Returns the session ID captured from the process token.
+    pub fn session_id(&self) -> anyhow::Result<u32> {
+        self.client.session_id()
+    }
+
+    /// Checks that the process belongs to the user logged on to its session.
+    pub fn ensure_logged_on_session(&self) -> anyhow::Result<()> {
+        crate::executor::ensure_session_user(self.session_id()?, self.user_sid())?;
+        self.client.ensure_process_instance()
+    }
+
+    /// Resolves the account name under the captured process token.
+    pub fn display_name(&self) -> anyhow::Result<String> {
+        self.client.display_name()
+    }
+
+    /// Checks that the process instance remains live.
+    pub fn ensure_process_instance(&self) -> anyhow::Result<()> {
+        self.client.ensure_process_instance()
+    }
+
+    /// Checks that the process remains live and its executable signature is valid.
+    pub fn ensure_valid(&self) -> anyhow::Result<()> {
+        if !self.signature_verified {
+            anyhow::bail!("process executable signature is not verified");
+        }
+        self.client.validate_identity_signature()
+    }
+}
 
 // The unit value marks the scope in which an authenticated policy management request is dispatched.
 tokio::task_local! {
@@ -102,6 +184,8 @@ pub struct BrokerState {
     pub tracker: OperationTracker,
     pub skip_signature_validation: bool,
     pub manager_probe_cache: ManagerProbeCache,
+    /// Grants the Agent issues and the grant route consumes; the Agent also reads each grant's outcome here.
+    pub remote_grants: RemoteGrantStore,
 }
 
 struct EvaluatedRequest {
@@ -114,14 +198,35 @@ struct EvaluatedRequest {
 }
 
 /// Build the axum router for a single authenticated pipe client.
+///
+/// Without a pipe identity the grant route rejects every request because it cannot confirm the client's security context.
+#[cfg(test)]
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
+    build_router(state, client, None)
+}
+
+/// Build the router for a connected pipe, whose identity the grant route confirms per request.
+pub(crate) fn build_router_for_pipe(
+    state: Arc<BrokerState>,
+    client: PipeClient,
+    identity: PipeIdentity,
+) -> axum::Router {
+    build_router(state, client, Some(identity))
+}
+
+fn build_router(state: Arc<BrokerState>, client: PipeClient, identity: Option<PipeIdentity>) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection {
         state: Arc::clone(&state),
         client: client.clone(),
+        identity,
     });
     axum::Router::from(now_policy_server_template::api_router_from_shared(server))
+        .layer(middleware::from_fn(grant::normalize_grant_request))
         .layer(middleware::from_fn(reject_duplicate_policy_json_members))
-        .layer(middleware::from_fn_with_state(state, authenticate_policy_management))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authenticate_policy_management,
+        ))
         .layer(Extension(client))
 }
 
@@ -399,6 +504,7 @@ fn require_policy_management_authentication() -> Result<(), ErrorResponse> {
 struct BrokerConnection {
     state: Arc<BrokerState>,
     client: PipeClient,
+    identity: Option<PipeIdentity>,
 }
 
 #[async_trait]
@@ -492,6 +598,14 @@ impl PackageBrokerServer for BrokerConnection {
             })?;
 
         self.state.execute(request, self.client.user_sid()).await
+    }
+
+    async fn execute_grant(
+        &self,
+        request: PackageRequest,
+        grant: now_policy_api::PackageGrant,
+    ) -> Result<now_policy_api::GrantExecutionResponse, ErrorResponse> {
+        grant::execute_grant(&self.state, &self.client, self.identity.as_ref(), request, grant).await
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
@@ -611,7 +725,11 @@ impl BrokerState {
         })
     }
 
-    async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
+    /// Evaluates `request` against the policy and, when it allows it, starts the operation for the user `user_sid`.
+    ///
+    /// The pipe server calls it after authenticating the client; an in-process caller supplies the user itself.
+    /// Follow the operation with `tracker`.
+    pub async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
@@ -631,6 +749,7 @@ impl BrokerState {
                 user_sid: user_sid.clone(),
                 elevation: evaluator::effective_execution_elevation(&request),
                 scope: request.options.scope,
+                token_elevation_check: TokenElevationCheck::Unchecked,
                 capture_output: request.capture_output,
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 event_sink: None,
@@ -685,6 +804,7 @@ impl BrokerState {
                     self.tracker.clone(),
                     operation_id.clone(),
                     context,
+                    None,
                 );
             }
             // Query the status after spawning so fast executions are reflected in the response.
@@ -1014,6 +1134,7 @@ mod tests {
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
             manager_probe_cache: Default::default(),
+            remote_grants: RemoteGrantStore::new(),
         }
     }
 
@@ -1244,6 +1365,7 @@ mod tests {
         let server = BrokerConnection {
             state: shared_state(None),
             client: PipeClient::from_current_process().expect("capture current test process"),
+            identity: None,
         };
         let error = server
             .policy_management()
@@ -1566,6 +1688,39 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn legacy_update_cannot_bypass_a_source_deny_with_an_empty_source() {
+        use std::collections::BTreeSet;
+
+        let mut policy = permissive_policy();
+        policy.enforcement.audit_mode = Some(false);
+        policy.rules.push(now_policy::PolicyRule {
+            id: ResourceId::from("deny-winget"),
+            enabled: true,
+            priority: 100,
+            decision: now_policy::Decision::Deny,
+            reason: None,
+            match_criteria: now_policy::PolicyMatch {
+                managers: BTreeSet::from([now_policy::ManagerName::Winget]),
+                source_names: BTreeSet::from([now_policy::SourceName::parse("winget").unwrap()]),
+                ..Default::default()
+            },
+            constraints: None,
+        });
+        let state = shared_state(Some(policy));
+        let mut request = request();
+        request.operation = api::Operation::Update;
+        assert!(!state.evaluate_request(&request).unwrap().would_execute);
+
+        request.source.name.clear();
+        assert!(
+            state
+                .evaluate_request(&request)
+                .map_or(true, |evaluated| !evaluated.would_execute)
+        );
+    }
+
     #[test]
     fn elevated_pre_operation_command_is_rejected_even_under_permissive_policy() {
         let mut request = request();
@@ -1702,6 +1857,7 @@ mod tests {
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
             manager_probe_cache,
+            remote_grants: RemoteGrantStore::new(),
         });
         (state, executor)
     }
@@ -1837,6 +1993,7 @@ mod tests {
             tracker: OperationTracker::new(),
             skip_signature_validation: true,
             manager_probe_cache: Default::default(),
+            remote_grants: RemoteGrantStore::new(),
         }
     }
 

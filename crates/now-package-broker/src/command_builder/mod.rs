@@ -15,13 +15,26 @@ pub mod vcpkg;
 pub mod winget;
 
 use anyhow::bail;
-use now_policy_api::{ManagerName, PackageRequest};
+use now_policy_api::{ManagerName, Operation, PackageRequest};
 
 /// Build a command line from a validated request, dispatching to the appropriate
 /// package manager builder.
 ///
 /// Returns the command as a list of arguments (first element is the executable).
 pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
+    if request.source.name.is_empty()
+        && !matches!(
+            (request.manager, request.operation),
+            (ManagerName::Chocolatey | ManagerName::Dotnet, Operation::Uninstall)
+        )
+    {
+        bail!("package source name is required for local policy execution");
+    }
+
+    build_manager_command(request)
+}
+
+fn build_manager_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     match request.manager {
         ManagerName::Bun => bun::build_bun_command(request),
         ManagerName::Cargo => cargo::build_cargo_command(request),
@@ -35,6 +48,16 @@ pub fn build_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
         ManagerName::Scoop => scoop::build_scoop_command(request),
         ManagerName::Vcpkg => vcpkg::build_vcpkg_command(request),
         unsupported => bail!("package manager is not supported by the broker: {unsupported}"),
+    }
+}
+
+/// Build a command line for a remote grant.
+///
+/// Unlike [`build_command`], this allows a PowerShell 7 update with an empty source and scopes its uninstalls.
+pub(crate) fn build_remote_grant_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
+    match request.manager {
+        ManagerName::PowerShell7 => powershell::build_powershell7_remote_grant_command(request),
+        _ => build_manager_command(request),
     }
 }
 
@@ -101,6 +124,24 @@ pub(crate) fn validate_source_name(manager: &str, name: &str) -> anyhow::Result<
     }
 
     Ok(())
+}
+
+/// Report whether the request leaves the source to the manager's ordinary default.
+///
+/// Only update and uninstall may carry an empty source name, and never with a URL.
+/// An install must always name its source.
+pub(crate) fn uses_default_source(manager: &str, request: &PackageRequest) -> anyhow::Result<bool> {
+    if !request.source.name.is_empty() {
+        return Ok(false);
+    }
+    if request.operation == Operation::Install {
+        bail!("{manager} install requires a named package source");
+    }
+    if request.source.url.is_some() {
+        bail!("{manager} package source URLs require a named source");
+    }
+
+    Ok(true)
 }
 
 /// Reject command arguments that would be written into a generated batch script unsafely.

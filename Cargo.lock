@@ -1932,6 +1932,7 @@ name = "devolutions-agent"
 version = "2026.3.3"
 dependencies = [
  "agent-channel-client",
+ "agent-channel-proto",
  "agent-identity",
  "agent-sysevent-codes",
  "agent-tunnel-proto",
@@ -1960,7 +1961,9 @@ dependencies = [
  "libc",
  "notify-debouncer-mini",
  "now-package-broker",
+ "now-policy-api",
  "parking_lot",
+ "private-fs",
  "prost 0.13.5",
  "prost-types",
  "protoc-bin-vendored",
@@ -5243,9 +5246,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-api"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcd733577077eb870204207836f596ec3fc8fe4876d3652be7f0dee4a52e0dc8"
+checksum = "1d72b70c897187df0bb789335d51b709113eb9f0784e0f69f05fc501d8919b05"
 dependencies = [
  "chrono",
  "derive_more",
@@ -5260,9 +5263,9 @@ dependencies = [
 
 [[package]]
 name = "now-policy-server-template"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "567491bfc7bf5615d1854cc951172987fe638084b86c6c153ad6d860f0096ae8"
+checksum = "4cb17df500bcc9d9a5909eee68e5bfd66c6b15dae56ca7b1473f2c6d6fd537a9"
 dependencies = [
  "aide 0.15.1",
  "async-trait",

@@ -19,11 +19,12 @@ use now_policy_api::{CancelRequest, ClientContext, PackageRequest, StatusRequest
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use tracing::{debug, warn};
 use widestring::U16CString;
-use win_api_wrappers::identity::account::lookup_account_by_name;
+use win_api_wrappers::identity::account::{get_username, lookup_account_by_name};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{GENERIC_READ, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Security::Authentication::Identity::NameSamCompatible;
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY, WinBuiltinAdministratorsSid};
 use windows::Win32::Storage::FileSystem::{FILE_EXECUTE, FILE_READ_ATTRIBUTES, FILE_SHARE_READ};
 use windows::Win32::System::Threading::{
@@ -46,6 +47,7 @@ struct ProcessInstanceIdentity {
 #[derive(Clone, Copy)]
 enum ExecutableSecurityMode {
     Enforce,
+    IdentityOnly,
     #[cfg(test)]
     Skip,
 }
@@ -70,6 +72,18 @@ pub(crate) struct PipeClient {
 }
 
 impl PipeClient {
+    pub(crate) fn from_process_id_for_identity(process_id: u32) -> anyhow::Result<Self> {
+        let process = Arc::new(
+            Process::get_by_pid(process_id, PROCESS_IDENTITY_ACCESS)
+                .with_context(|| format!("failed to open UniGetUI endpoint owner process {process_id}"))?,
+        );
+        Self::from_process(
+            process_instance_identity(process_id, &process)?,
+            process,
+            ExecutableSecurityMode::IdentityOnly,
+        )
+    }
+
     /// Captures the identity of the process on the other end of a connected pipe instance.
     ///
     /// Retains the process and main-image file handles, then rechecks the reported process ID,
@@ -176,6 +190,7 @@ impl PipeClient {
                     )
                 })?,
             )),
+            ExecutableSecurityMode::IdentityOnly => None,
             #[cfg(test)]
             ExecutableSecurityMode::Skip => None,
         };
@@ -231,12 +246,60 @@ impl PipeClient {
         &self.user_sid
     }
 
+    pub(crate) fn process_id(&self) -> u32 {
+        self.process_id
+    }
+
     pub(crate) fn executable_path(&self) -> &Path {
         &self.executable_path
     }
 
+    /// Creation time of the retained process, which tells a process instance from a recycled process ID.
+    pub(crate) fn process_creation_time(&self) -> SystemTime {
+        self.process_creation_time
+    }
+
+    pub(crate) fn session_id(&self) -> anyhow::Result<u32> {
+        self.impersonation_token
+            .as_ref()
+            .context("pipe client impersonation token is not retained")?
+            .session_id()
+    }
+
+    pub(crate) fn display_name(&self) -> anyhow::Result<String> {
+        let token = self
+            .impersonation_token
+            .as_ref()
+            .context("pipe client impersonation token is not retained")?;
+        let _impersonation = token.impersonate().context("failed to impersonate process token")?;
+        Ok(get_username(NameSamCompatible)
+            .context("failed to resolve process account name")?
+            .to_string_lossy())
+    }
+
+    pub(crate) fn ensure_process_instance(&self) -> anyhow::Result<()> {
+        self.validate_process_instance()
+    }
+
+    pub(crate) fn validate_identity_signature(&self) -> anyhow::Result<()> {
+        self.validate_process_instance()?;
+        let process = self.process.as_ref().context("process handle is not retained")?;
+        let executable_file = self
+            .executable_file
+            .as_deref()
+            .context("process executable handle is not retained")?;
+        process.verify_image_file_mapping(executable_file)?;
+        validate_devolutions_authenticode_signature_for_file(&self.executable_path, executable_file)?;
+        process.verify_image_file_mapping(executable_file)?;
+        self.validate_process_instance()
+    }
+
     pub(crate) fn is_elevated_administrator(&self) -> bool {
         self.is_elevated && self.is_administrator
+    }
+
+    pub(crate) fn is_elevated(&self) -> bool {
+        self.is_elevated
     }
 
     pub(crate) fn validate_request(

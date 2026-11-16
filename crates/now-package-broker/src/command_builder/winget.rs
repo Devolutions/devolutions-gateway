@@ -2,13 +2,21 @@
 
 use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
 
-use super::{set_if_specified, set_if_true, validate_batch_arguments, validate_package_version, validate_source_name};
+use super::{
+    set_if_specified, set_if_true, uses_default_source, validate_batch_arguments, validate_package_version,
+    validate_source_name,
+};
 
 /// Build the WinGet command line from a validated request.
 ///
 /// Returns the command as a list of arguments (first element is the executable).
 pub fn build_winget_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
-    validate_source_name("WinGet", &request.source.name)?;
+    let source = if uses_default_source("WinGet", request)? {
+        None
+    } else {
+        validate_source_name("WinGet", &request.source.name)?;
+        Some(request.source.name.as_str())
+    };
     if !matches!(request.operation, Operation::Uninstall)
         && let Some(version) = request.package.version.as_deref()
     {
@@ -26,11 +34,14 @@ pub fn build_winget_command(request: &PackageRequest) -> anyhow::Result<Vec<Stri
         operation.to_owned(),
         "--id".to_owned(),
         request.package.id.0.clone(),
-        "--source".to_owned(),
-        request.source.name.clone(),
         "--exact".to_owned(),
         "--accept-source-agreements".to_owned(),
     ];
+
+    // Without `--source`, WinGet searches its configured sources, or the installed package for uninstall.
+    if let Some(source) = source {
+        command.splice(4..4, ["--source".to_owned(), source.to_owned()]);
+    }
 
     // Version pinning applies to install/update; uninstall removes whatever version is
     // installed (pinning a possibly-mismatched version would fail the uninstall).
@@ -150,6 +161,37 @@ mod tests {
         }
     }
 
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn empty_source_omits_source_flag_for_update_and_uninstall() {
+        for (operation, verb) in [(Operation::Update, "upgrade"), (Operation::Uninstall, "uninstall")] {
+            let mut request = make_request();
+            request.operation = operation;
+            request.source.name = String::new();
+            let cmd = build_winget_command(&request).expect("build command");
+            assert_eq!(cmd[1], verb);
+            assert!(!cmd.contains(&"--source".to_owned()));
+            // oracle: mutant dropping the exact package-id selector, which would let an empty-source command match other packages
+            assert_eq!(&cmd[2..5], ["--id", "Mozilla.Firefox", "--exact"]);
+        }
+
+        let mut request = make_request();
+        request.operation = Operation::Update;
+        let cmd = build_winget_command(&request).expect("build command");
+        assert_eq!(&cmd[4..6], ["--source", "winget"]);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn empty_source_is_rejected_for_install_and_with_url() {
+        let mut request = make_request();
+        request.source.name = String::new();
+        build_winget_command(&request).expect_err("install requires a source");
+
+        request.operation = Operation::Uninstall;
+        request.source.url = Some("https://example.test/".to_owned());
+        build_winget_command(&request).expect_err("empty source cannot carry a URL");
+    }
     #[test]
     fn test_basic_install_command() {
         let request = make_request();
@@ -187,6 +229,21 @@ mod tests {
         request.operation = Operation::Update;
         let cmd = build_winget_command(&request).expect("build command");
         assert!(!cmd.contains(&"--no-upgrade".to_owned()));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn versioned_remote_install_does_not_force_or_skip_hash_checks() {
+        let mut request = make_request();
+        request.package.version = Some(VersionString("1.2.3".to_owned()));
+        request.options.no_upgrade = true;
+
+        let command = super::super::build_remote_grant_command(&request).expect("build remote command");
+
+        assert!(command.contains(&"--no-upgrade".to_owned()));
+        assert!(command.contains(&"--version".to_owned()));
+        assert!(!command.contains(&"--force".to_owned()));
+        assert!(!command.contains(&"--ignore-security-hash".to_owned()));
     }
 
     #[test]

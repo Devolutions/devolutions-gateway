@@ -73,6 +73,42 @@ struct IndexedRequest {
     fingerprint: String,
 }
 
+impl TrackerState {
+    fn insert(
+        &mut self,
+        request_key: RequestIndexKey,
+        fingerprint: String,
+        request: &PackageRequest,
+        operation_id: &ResourceId,
+    ) {
+        let operation_key = operation_id.to_string();
+        let owner_key = request_key.owner_key.clone();
+        self.request_index.insert(
+            request_key,
+            IndexedRequest {
+                operation_id: operation_key.clone(),
+                fingerprint,
+            },
+        );
+        self.operations.insert(
+            operation_key,
+            TrackedOperation {
+                request_id: request.request_id.clone(),
+                status: OperationStatus::Starting,
+                started_at: None,
+                completed_at: None,
+                exit_code: None,
+                note: None,
+                owner_key,
+                expires_at: None,
+                cancel_token: CancellationToken::new(),
+                event_sink: None,
+                event_channel: None,
+            },
+        );
+    }
+}
+
 impl Default for OperationTracker {
     fn default() -> Self {
         Self::new()
@@ -111,31 +147,35 @@ impl OperationTracker {
             return Ok((ResourceId::from(existing.operation_id.as_str()), false));
         }
 
-        let operation_key = operation_id.to_string();
-        state.request_index.insert(
-            request_key,
-            IndexedRequest {
-                operation_id: operation_key.clone(),
-                fingerprint,
-            },
-        );
-        state.operations.insert(
-            operation_key,
-            TrackedOperation {
-                request_id: request.request_id.clone(),
-                status: OperationStatus::Starting,
-                started_at: None,
-                completed_at: None,
-                exit_code: None,
-                note: None,
-                owner_key: owner_key.to_owned(),
-                expires_at: None,
-                cancel_token: CancellationToken::new(),
-                event_sink: None,
-                event_channel: None,
-            },
-        );
+        state.insert(request_key, fingerprint, request, &operation_id);
         Ok((operation_id, true))
+    }
+
+    /// Registers only a new request, after `authorize` succeeds while the tracker is locked.
+    ///
+    /// A conflict or authorization failure leaves the tracker and the authorization unchanged.
+    pub(crate) fn register_authorized<T, E>(
+        &self,
+        owner_key: &str,
+        request: &PackageRequest,
+        operation_id: &ResourceId,
+        authorize: impl FnOnce() -> Result<T, E>,
+    ) -> anyhow::Result<Result<T, E>> {
+        let mut state = self.state.lock().expect("tracker lock poisoned");
+        let request_key = RequestIndexKey {
+            owner_key: owner_key.to_owned(),
+            request_id: request.request_id.to_string(),
+        };
+        if state.request_index.contains_key(&request_key) || state.operations.contains_key(operation_id.as_ref()) {
+            bail!("request or operation identity is already in use");
+        }
+        let fingerprint = request_fingerprint(request)?;
+        let authorized = match authorize() {
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(Err(error)),
+        };
+        state.insert(request_key, fingerprint, request, operation_id);
+        Ok(Ok(authorized))
     }
 
     /// Attach the per-operation event channel (sink + client-facing descriptor).

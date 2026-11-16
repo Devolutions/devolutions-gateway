@@ -7,24 +7,36 @@ use tracing::{error, info};
 
 use crate::executor::{CommandExecutor, ExecutionContext, ProcessStartedCallback, is_canceled_error};
 use crate::operation_tracker::OperationTracker;
+use crate::remote_grant::ExecutionRecord;
 
 pub(super) fn spawn_execution(
     executor: Arc<dyn CommandExecutor>,
     tracker: OperationTracker,
     operation_id: ResourceId,
     context: ExecutionContext,
+    outcome: Option<ExecutionRecord>,
 ) {
     let exe_name = context.command.first().cloned().unwrap_or_else(|| "process".to_owned());
     let operation_id_string = operation_id.to_string();
+    let outcome = outcome.map(Arc::new);
 
     tokio::spawn(async move {
         let started_tracker = tracker.clone();
         let started_operation_id = operation_id_string.clone();
+        let started_outcome = outcome.clone();
+        // The executor calls this only once the operation's process exists, which is the evidence the record needs.
         let process_started: ProcessStartedCallback = Arc::new(move |started_at| {
+            if let Some(outcome) = &started_outcome {
+                outcome.mark_started();
+            }
             started_tracker.mark_running(&started_operation_id, started_at);
         });
         match executor.execute(&context, Some(process_started)).await {
             Ok(output) => {
+                // Dropped unless the start was recorded, so an executor that never started a process proves nothing.
+                if let Some(outcome) = &outcome {
+                    outcome.mark_exited(output.exit_code);
+                }
                 let note = if output.exit_code == 0 {
                     "process exited successfully".to_owned()
                 } else {

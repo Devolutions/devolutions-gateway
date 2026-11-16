@@ -10,6 +10,7 @@ use std::sync::{Arc, LazyLock};
 use sysevent::SystemEventSink;
 
 pub mod config;
+pub mod device_management;
 pub mod domain_detect;
 pub mod enrollment;
 pub mod identity;

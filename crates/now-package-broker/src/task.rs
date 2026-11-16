@@ -6,12 +6,14 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::executor::{self, CommandExecutor};
 use crate::pipe::DEFAULT_PIPE_NAME;
 use crate::policy_store::PolicyStore;
 use crate::policy_watcher::{PolicyWatcher, WatcherFailure, fail_closed, monitor_watcher_task};
+use crate::registration::{DEFAULT_REGISTRATION_PIPE_NAME, RegistrationHandle, run_registration_server};
+use crate::remote_grant::RemoteGrantStore;
 use crate::server::BrokerState;
 
 /// Configuration for the broker task.
@@ -37,12 +39,38 @@ impl Default for BrokerTaskConfig {
 }
 
 pub struct BrokerTask {
-    config: BrokerTaskConfig,
+    state: Arc<BrokerState>,
+    registration: RegistrationHandle,
 }
 
 impl BrokerTask {
     pub fn new(config: BrokerTaskConfig) -> Self {
-        Self { config }
+        let policy_store = PolicyStore::load(config.policy_path.map(std::path::PathBuf::from));
+        let executor: Arc<dyn CommandExecutor> = executor::create_platform_executor().into();
+        let state = Arc::new(BrokerState {
+            policy_store,
+            executor,
+            pipe_name: config.pipe_name,
+            tracker: crate::operation_tracker::OperationTracker::new(),
+            skip_signature_validation: config.skip_signature_validation,
+            manager_probe_cache: Default::default(),
+            remote_grants: RemoteGrantStore::new(),
+        });
+        Self {
+            state,
+            registration: RegistrationHandle::new(),
+        }
+    }
+
+    /// Returns the handle that snapshots the live UniGetUI registrations while the task runs.
+    pub fn registration(&self) -> RegistrationHandle {
+        self.registration.clone()
+    }
+
+    /// Returns the broker state, through which an in-process caller submits requests with
+    /// [`BrokerState::execute`] while the task runs.
+    pub fn state(&self) -> Arc<BrokerState> {
+        Arc::clone(&self.state)
     }
 }
 
@@ -53,19 +81,8 @@ impl Task for BrokerTask {
     const NAME: &'static str = "package-broker";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
-        let policy_store = PolicyStore::load(self.config.policy_path.clone().map(std::path::PathBuf::from));
-        let watcher = PolicyWatcher::new(Arc::clone(&policy_store));
-
-        let executor: Arc<dyn CommandExecutor> = executor::create_platform_executor().into();
-
-        let state = Arc::new(BrokerState {
-            policy_store,
-            executor,
-            pipe_name: self.config.pipe_name.clone(),
-            tracker: crate::operation_tracker::OperationTracker::new(),
-            skip_signature_validation: self.config.skip_signature_validation,
-            manager_probe_cache: Default::default(),
-        });
+        let state = self.state;
+        let watcher = PolicyWatcher::new(Arc::clone(&state.policy_store));
 
         // Bridge the agent's ShutdownSignal to the cancellation token used by subsystems.
         let shutdown = CancellationToken::new();
@@ -98,6 +115,19 @@ impl Task for BrokerTask {
             async move { crate::pipe::run_pipe_server(state, server_shutdown).await }
         });
 
+        // Registration stays unavailable, and the broker keeps running, if its pipe cannot be served.
+        let registration_handle = tokio::spawn({
+            let registration = self.registration;
+            let shutdown = shutdown.clone();
+            async move {
+                if let Err(error) =
+                    run_registration_server(&registration, DEFAULT_REGISTRATION_PIPE_NAME, shutdown).await
+                {
+                    error!(%error, "UniGetUI registration server failed");
+                }
+            }
+        });
+
         // Wait for agent shutdown signal.
         shutdown_signal.wait().await;
         info!("package broker received shutdown signal");
@@ -111,6 +141,7 @@ impl Task for BrokerTask {
             Ok(Err(error)) => Err(error).context("broker pipe server error"),
             Err(error) => Err(error).context("broker server task panicked"),
         };
+        let _ = registration_handle.await;
         let _ = monitor_handle.await;
         let _ = denial_summary_handle.await;
         crate::audit::drain();

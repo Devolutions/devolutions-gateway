@@ -211,9 +211,14 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
 
     tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
 
-    if conf.identity.enabled {
-        tasks.register(IdentityTask::new(conf_handle.clone()));
-    }
+    let identity = conf.identity.enabled.then(|| {
+        IdentityTask::new(conf_handle.clone()).with_remote_device_management(
+            conf.device_management.remote_inventory_enabled,
+            conf.device_management.remote_writes_enabled,
+        )
+    });
+    #[cfg(windows)]
+    let mut identity = identity;
 
     #[cfg(windows)]
     let service_event_tx = {
@@ -235,7 +240,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
                 policy_path: conf.package_broker.policy_path.clone(),
                 skip_signature_validation: conf.debug.skip_broker_signature_validation,
             };
-            tasks.register(BrokerTask::new(broker_config));
+            let broker = BrokerTask::new(broker_config);
+            identity = identity.map(|task| task.with_package_broker(broker.registration(), broker.state()));
+            tasks.register(broker);
         }
 
         if conf.session.enabled {
@@ -250,6 +257,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
 
     #[cfg(not(windows))]
     let service_event_tx = None;
+
+    if let Some(identity) = identity {
+        tasks.register(identity);
+    }
 
     if conf.debug.enable_unstable && conf.remote_desktop.enabled {
         tasks.register(RemoteDesktopTask::new(conf_handle.clone()));
