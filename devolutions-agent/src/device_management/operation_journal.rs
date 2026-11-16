@@ -34,6 +34,8 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read as _, Write as _};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use agent_channel_proto::PackageOperationRequest;
 use anyhow::{Context as _, bail, ensure};
@@ -140,6 +142,10 @@ pub(super) struct OperationJournal {
     directory: Dir,
     state: Mutex<State>,
     recorded: Condvar,
+    #[cfg(test)]
+    failed_start_writes: AtomicUsize,
+    #[cfg(test)]
+    failed_completion_writes: AtomicUsize,
     // UNTESTED: The exclusive lock must outlive the records handle to prevent overlapping owners during drop.
     // Check declaration and drop order when changing this struct.
     _lock: JournalLock,
@@ -284,6 +290,10 @@ impl OperationJournal {
                 in_flight: HashSet::new(),
             }),
             recorded: Condvar::new(),
+            #[cfg(test)]
+            failed_start_writes: AtomicUsize::new(0),
+            #[cfg(test)]
+            failed_completion_writes: AtomicUsize::new(0),
         };
         let admitted = journal.load_index(was_missing)?;
         journal.state.get_mut().admitted = admitted;
@@ -364,6 +374,14 @@ impl OperationJournal {
     /// Call it after the grant is delivered and before [`complete`](Self::complete) when the evidence exists.
     /// The evidence is never withdrawn, so recording it again succeeds.
     pub(super) fn mark_started(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<()> {
+        #[cfg(test)]
+        if self
+            .failed_start_writes
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+            .is_ok()
+        {
+            bail!("injected start evidence write failure");
+        }
         let (name, encoded) = locate(authority_id, request)?;
         let state = self.state.lock();
 
@@ -382,6 +400,16 @@ impl OperationJournal {
             .context("persist package operation start evidence")
     }
 
+    #[cfg(test)]
+    pub(super) fn fail_start_writes(&self, count: usize) {
+        self.failed_start_writes.store(count, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_completion_writes(&self, count: usize) {
+        self.failed_completion_writes.store(count, Ordering::SeqCst);
+    }
+
     /// Durably records the end of an operation [`admitted`](Self::admit) for `request`, and wakes its waiters.
     ///
     /// Recording the outcome already recorded succeeds; recording a different outcome over a recorded one is an error.
@@ -391,6 +419,17 @@ impl OperationJournal {
         authority_id: &str,
         request: &PackageOperationRequest,
         outcome: Outcome,
+    ) -> anyhow::Result<()> {
+        self.complete_with_started(authority_id, request, outcome, false)
+    }
+
+    /// Records an outcome together with any observed start evidence in the same durable write.
+    pub(super) fn complete_with_started(
+        &self,
+        authority_id: &str,
+        request: &PackageOperationRequest,
+        outcome: Outcome,
+        started: bool,
     ) -> anyhow::Result<()> {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
@@ -405,11 +444,20 @@ impl OperationJournal {
 
         let completed = record.and_then(|record| {
             let mut record = record.context("no package operation record to complete")?;
-            match record.outcome {
-                Some(recorded) if recorded == outcome => Ok(()),
+            match &record.outcome {
+                Some(recorded) if *recorded == outcome && (!started || record.execution_started) => Ok(()),
                 Some(_) => bail!("package operation already has a different recorded outcome"),
                 None => {
+                    record.execution_started |= started;
                     record.outcome = Some(outcome);
+                    #[cfg(test)]
+                    if self
+                        .failed_completion_writes
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+                        .is_ok()
+                    {
+                        bail!("injected completion write failure");
+                    }
                     self.write_record(&name, &record, Replace::Allow)
                         .context("persist package operation outcome")
                 }

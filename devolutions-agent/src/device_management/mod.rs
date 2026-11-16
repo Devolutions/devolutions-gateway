@@ -43,11 +43,10 @@ struct Snapshot {
     update_scan_completed_at: Option<prost_types::Timestamp>,
 }
 
-/// Maximum number of concurrent package operation workers.
-const MAX_CONCURRENT_OPERATION_REQUESTS: usize = 8;
-
-/// Maximum number of concurrent workers for other device-management requests.
-const MAX_CONCURRENT_OTHER_REQUESTS: usize = 8;
+/// Maximum number of concurrent device-management request workers.
+const MAX_CONCURRENT_REQUESTS: usize = 8;
+// UNTESTED: This cap prevents request floods from spawning unbounded tasks.
+// Check that permits stay held for the worker lifetime when changing dispatch.
 
 /// Serves one device management request, answering the request message `id` through `reporter`.
 pub(crate) fn handle(
@@ -64,14 +63,21 @@ pub(crate) fn handle(
         return;
     };
 
-    let worker_id = id.clone();
-    let worker_reporter = reporter.clone();
-    let _ = spawn_request(
-        request,
-        shutdown,
-        move |request| async move {
-            let id = worker_id;
-            let reporter = worker_reporter;
+    let Some(permit) = request_permit() else {
+        warn!(%id, "Device-management request limit reached");
+        reject_busy_request(&id, request, |correlation_id, report| {
+            reporter.send(correlation_id, report);
+        });
+        return;
+    };
+
+    tokio::spawn(async move {
+        let _permit = permit;
+        if *shutdown.borrow() {
+            return;
+        }
+        let is_operation = matches!(&request, Request::PackageOperation(_));
+        let processing = async move {
             match request {
                 Request::SyncInventory(request) => {
                     send_inventory(&context, &id, &request, |correlation_id, report| {
@@ -88,38 +94,9 @@ pub(crate) fn handle(
                     reporter.send(Some(id), catalog_unavailable_report(request.revision));
                 }
             }
-        },
-        |request| {
-            warn!(%id, "Device-management request limit reached");
-            reject_busy_request(&id, request, |correlation_id, report| {
-                reporter.send(correlation_id, report);
-            });
-        },
-    );
-}
-
-fn spawn_request<F>(
-    request: Request,
-    shutdown: watch::Receiver<bool>,
-    process: impl FnOnce(Request) -> F + Send + 'static,
-    reject: impl FnOnce(Request),
-) -> Option<tokio::task::JoinHandle<()>>
-where
-    F: Future<Output = ()> + Send + 'static,
-{
-    let Some(permit) = request_permit(&request) else {
-        reject(request);
-        return None;
-    };
-    let is_operation = matches!(&request, Request::PackageOperation(_));
-
-    Some(tokio::spawn(async move {
-        let _permit = permit;
-        if *shutdown.borrow() {
-            return;
-        }
-        finish_request(is_operation, process(request), shutdown).await;
-    }))
+        };
+        finish_request(is_operation, processing, shutdown).await;
+    });
 }
 
 async fn finish_request(is_operation: bool, processing: impl Future<Output = ()>, mut shutdown: watch::Receiver<bool>) {
@@ -170,14 +147,9 @@ fn reject_busy_request(id: &str, request: Request, mut send: impl FnMut(Option<S
     }
 }
 
-fn request_permit(request: &Request) -> Option<SemaphorePermit<'static>> {
-    static OPERATION_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_OPERATION_REQUESTS);
-    static OTHER_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_OTHER_REQUESTS);
-    let permits = match request {
-        Request::PackageOperation(_) => &OPERATION_PERMITS,
-        Request::SyncInventory(_) | Request::DiscoverUnigetuiInstances(_) | Request::CatalogSync(_) => &OTHER_PERMITS,
-    };
-    permits.try_acquire().ok()
+fn request_permit() -> Option<SemaphorePermit<'static>> {
+    static REQUEST_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_REQUESTS);
+    REQUEST_PERMITS.try_acquire().ok()
 }
 
 fn report(report: Report) -> DeviceManagementReport {
@@ -515,9 +487,6 @@ async fn run_package_operation(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::time::Duration;
-
     use super::*;
 
     fn inventory(
@@ -537,153 +506,6 @@ mod tests {
                 seconds: 1_704_067_210,
                 nanos: 0,
             }),
-        }
-    }
-
-    fn blocked_request(
-        request: Request,
-        shutdown: watch::Receiver<bool>,
-        started: tokio::sync::mpsc::UnboundedSender<()>,
-        release: Arc<Semaphore>,
-        reject: impl FnOnce(Request),
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        spawn_request(
-            request,
-            shutdown,
-            move |_| async move {
-                started.send(()).expect("start receiver is alive");
-                release.acquire().await.expect("release semaphore is open").forget();
-            },
-            reject,
-        )
-    }
-
-    async fn wait_for_workers(started: &mut tokio::sync::mpsc::UnboundedReceiver<()>, count: usize) {
-        for _ in 0..count {
-            tokio::time::timeout(Duration::from_secs(5), started.recv())
-                .await
-                .expect("workers start without waiting for capacity")
-                .expect("start sender is alive");
-        }
-    }
-
-    #[tokio::test]
-    async fn operations_and_other_requests_have_independent_worker_capacity() {
-        // oracle: mutant waiting package operations consume inventory and discovery worker capacity
-        let (_shutdown, shutdown) = watch::channel(false);
-        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
-        let operation_release = Arc::new(Semaphore::new(0));
-        let other_release = Arc::new(Semaphore::new(0));
-        let operation = |id: &str| {
-            Request::PackageOperation(PackageOperationRequest {
-                operation_id: id.to_owned(),
-                ..Default::default()
-            })
-        };
-        let inventory = || Request::SyncInventory(agent_channel_proto::SyncInventory::default());
-        let mut operations = Vec::new();
-        for _ in 0..8 {
-            operations.push(
-                blocked_request(
-                    operation("active"),
-                    shutdown.clone(),
-                    started_tx.clone(),
-                    Arc::clone(&operation_release),
-                    |_| panic!("unexpected operation rejection"),
-                )
-                .expect("eight operations fit"),
-            );
-        }
-        wait_for_workers(&mut started_rx, 8).await;
-
-        let mut reports = Vec::new();
-        let busy = blocked_request(
-            operation("busy"),
-            shutdown.clone(),
-            started_tx.clone(),
-            Arc::clone(&operation_release),
-            |request| reject_busy_request("busy-operation", request, |id, report| reports.push((id, report))),
-        );
-        assert!(busy.is_none(), "the ninth operation is rejected");
-        let [
-            (
-                Some(correlation),
-                DeviceManagementReport {
-                    report: Some(Report::PackageOperationUnknown(result)),
-                },
-            ),
-        ] = reports.as_slice()
-        else {
-            panic!("expected an unknown operation report");
-        };
-        assert_eq!(correlation, "busy-operation");
-        assert_eq!(result.operation_id, "busy");
-        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
-        assert!(!result.success);
-        assert_eq!(result.execution_started, None);
-
-        let mut other_workers = Vec::new();
-        for index in 0..8 {
-            let request = match index {
-                0..=3 => inventory(),
-                4..=6 => Request::DiscoverUnigetuiInstances(agent_channel_proto::DiscoverUniGetUiInstances {}),
-                _ => Request::CatalogSync(agent_channel_proto::CatalogSync::default()),
-            };
-            other_workers.push(
-                blocked_request(
-                    request,
-                    shutdown.clone(),
-                    started_tx.clone(),
-                    Arc::clone(&other_release),
-                    |_| panic!("unexpected non-operation rejection"),
-                )
-                .expect("eight other requests fit beside eight operations"),
-            );
-        }
-        wait_for_workers(&mut started_rx, 8).await;
-
-        let mut reports = Vec::new();
-        let busy = blocked_request(
-            inventory(),
-            shutdown.clone(),
-            started_tx.clone(),
-            Arc::clone(&other_release),
-            |request| reject_busy_request("busy-inventory", request, |id, report| reports.push((id, report))),
-        );
-        assert!(busy.is_none(), "the ninth non-operation request is rejected");
-        let [
-            (
-                Some(correlation),
-                DeviceManagementReport {
-                    report: Some(Report::InventoryUnavailable(result)),
-                },
-            ),
-        ] = reports.as_slice()
-        else {
-            panic!("expected an unavailable inventory report");
-        };
-        assert_eq!(correlation, "busy-inventory");
-        assert_eq!(result.reason, i32::from(InventoryUnavailableReason::Busy));
-
-        operation_release.add_permits(8);
-        for worker in operations {
-            worker.await.expect("operation worker completes");
-        }
-        let replacement = blocked_request(
-            operation("replacement"),
-            shutdown,
-            started_tx,
-            Arc::clone(&operation_release),
-            |_| panic!("unexpected replacement rejection"),
-        )
-        .expect("a completed operation frees its slot even while other workers are busy");
-        wait_for_workers(&mut started_rx, 1).await;
-
-        operation_release.add_permits(1);
-        other_release.add_permits(8);
-        replacement.await.expect("replacement worker completes");
-        for worker in other_workers {
-            worker.await.expect("other worker completes");
         }
     }
 

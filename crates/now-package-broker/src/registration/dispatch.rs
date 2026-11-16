@@ -20,9 +20,6 @@ use super::protocol::{self, RemoteError};
 /// Requests awaiting a response on one connection.
 pub(super) const MAX_OUTSTANDING_REQUESTS: usize = 8;
 
-/// Outstanding operations per connection, leaving room for reads.
-const MAX_OUTSTANDING_OPERATIONS: usize = 4;
-
 const MAX_COMMAND_CHARS: usize = 128;
 
 /// Time UniGetUI has to answer a request that does not change the system.
@@ -71,9 +68,8 @@ pub(super) struct Command {
     id: Uuid,
     frame: Vec<u8>,
     timeout: Duration,
-    /// Held until the request is answered, times out or the connection closes, even if the caller gave up.
+    /// Held until the response arrives, so the 8 outstanding requests bound holds even when the caller gave up.
     permit: OwnedSemaphorePermit,
-    operation_permit: Option<OwnedSemaphorePermit>,
     reply: oneshot::Sender<Reply>,
 }
 
@@ -82,7 +78,6 @@ pub(super) struct Command {
 pub(super) struct ConnectionHandle {
     commands: mpsc::Sender<Command>,
     slots: Arc<Semaphore>,
-    operation_slots: Arc<Semaphore>,
 }
 
 impl ConnectionHandle {
@@ -92,7 +87,6 @@ impl ConnectionHandle {
         let handle = Self {
             commands,
             slots: Arc::new(Semaphore::new(MAX_OUTSTANDING_REQUESTS)),
-            operation_slots: Arc::new(Semaphore::new(MAX_OUTSTANDING_OPERATIONS)),
         };
         (Arc::new(handle), receiver)
     }
@@ -117,18 +111,12 @@ impl ConnectionHandle {
         let id = Uuid::new_v4();
         let frame = protocol::encode_request(id, command, arguments)
             .ok_or(RequestError::NotSent("request exceeds the frame limit"))?;
-        let is_operation = command == "ExecutePackageOperation";
-        let timeout = if is_operation { OPERATION_TIMEOUT } else { READ_TIMEOUT };
-
-        let operation_permit = if is_operation {
-            Some(
-                Arc::clone(&self.operation_slots)
-                    .try_acquire_owned()
-                    .map_err(|_| RequestError::NotSent("too many outstanding requests"))?,
-            )
+        let timeout = if command == "ExecutePackageOperation" {
+            OPERATION_TIMEOUT
         } else {
-            None
+            READ_TIMEOUT
         };
+
         let permit = Arc::clone(&self.slots)
             .try_acquire_owned()
             .map_err(|_| RequestError::NotSent("too many outstanding requests"))?;
@@ -139,7 +127,6 @@ impl ConnectionHandle {
                 frame,
                 timeout,
                 permit,
-                operation_permit,
                 reply,
             })
             .map_err(|_| RequestError::NotSent("connection is closed"))?;
@@ -159,7 +146,6 @@ struct Pending {
     reply: oneshot::Sender<Reply>,
     deadline: Instant,
     _permit: OwnedSemaphorePermit,
-    _operation_permit: Option<OwnedSemaphorePermit>,
 }
 
 /// The connection loop's side of its requests.
@@ -207,7 +193,6 @@ impl Dispatcher {
             frame,
             timeout,
             permit,
-            operation_permit,
             reply,
         } = command;
 
@@ -222,7 +207,6 @@ impl Dispatcher {
                 reply,
                 deadline: Instant::now() + timeout,
                 _permit: permit,
-                _operation_permit: operation_permit,
             },
         );
         Some(frame)

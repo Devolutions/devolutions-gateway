@@ -198,7 +198,9 @@ When UniGetUI cannot produce the installed snapshot required by `CONTRACT.packag
 `sourceName` is empty for uninstall and may be empty for update, as specified in `CONTRACT.package-management.md §operations`.
 For update and uninstall, `reportedScope` is the selected inventory row's `reported_scope`, including an empty string when no scope was reported.
 For install, `reportedScope` is omitted.
-UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
+UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations`.
+When the Broker accepts or rejects the request, or its response is lost or times out after the request may have been sent, UniGetUI answers `Unknown` without waiting for the package process to exit.
+UniGetUI answers `Failed` only when it can prove that the request was not sent.
 `Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
 A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless trusted Broker evidence establishes the outcome.
 While its operation journal retains the operation ID, the Agent never resends it on this or another connection.
@@ -403,6 +405,11 @@ A missing, evicted or restart-lost record, a mismatch, or an outcome that cannot
 A Broker rejection establishes only that the rejected request started no work; it does not prove that another request did not or cannot consume the same grant.
 After a grant has been made available to UniGetUI, the Agent reports an unverified outcome as `UNKNOWN`, not a definite failure.
 The in-memory Broker record need not survive a restart.
+The Agent waits up to 60 seconds from dispatch to observe a Broker record.
+When the first record observed within that wait is `Consumed`, the Agent waits up to 60 seconds from that observation for `Started` or `Exited`, without exceeding 30 minutes from dispatch.
+Once the Broker proves the process started, the Agent waits for it to exit while its record remains available, until the Agent stops or 30 minutes have elapsed since dispatch began.
+The Agent durably records observed start evidence before continuing to wait for termination.
+A wait that ends without evidence of exit reports `UNKNOWN`.
 
 The .NET broker passes `--source` for install and for updates with an explicit source, which overrides NuGet configuration including Package Source Mapping.
 The source override is documented in [dotnet tool install].
@@ -422,6 +429,7 @@ Agent and Authority versions must both understand `UNKNOWN` when they exchange o
 Mixed versions that do not satisfy this requirement are unsupported.
 The Agent durably records an operation before making a grant for it available and does not submit another operation for the same operation ID.
 Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
+When journal writes cannot preserve observed start evidence, a later redelivery may omit evidence reported by the original delivery.
 A repeated operation ID with a different payload is rejected without submission and reports `UNKNOWN`.
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
 When an existing journal's deduplication state cannot be recovered, the Agent does not treat an operation ID as new and reports `UNKNOWN`.

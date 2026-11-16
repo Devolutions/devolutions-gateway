@@ -9,6 +9,8 @@ use std::sync::Arc;
 #[cfg(windows)]
 use camino::Utf8Path;
 #[cfg(windows)]
+use devolutions_gateway_task::ShutdownSignal;
+#[cfg(windows)]
 use now_package_broker::registration::RegistrationHandle;
 #[cfg(windows)]
 use now_package_broker::server::BrokerState;
@@ -34,6 +36,8 @@ pub(crate) struct DeviceManagementContext {
     users: Option<Arc<UserRegistry>>,
     #[cfg(windows)]
     journal: Option<Arc<OperationJournal>>,
+    #[cfg(windows)]
+    shutdown: Option<ShutdownSignal>,
 }
 
 /// A context with no services, and both remote features enabled, as the configuration defaults them.
@@ -50,6 +54,8 @@ impl Default for DeviceManagementContext {
             users: None,
             #[cfg(windows)]
             journal: None,
+            #[cfg(windows)]
+            shutdown: None,
         }
     }
 }
@@ -76,6 +82,15 @@ impl DeviceManagementContext {
 
 #[cfg(windows)]
 impl DeviceManagementContext {
+    pub(crate) fn with_shutdown(mut self, shutdown: ShutdownSignal) -> Self {
+        self.shutdown = Some(shutdown);
+        self
+    }
+
+    pub(super) fn shutdown(&self) -> Option<ShutdownSignal> {
+        self.shutdown.clone()
+    }
+
     /// Adds a running package broker, with the user registry opened below `data_dir`.
     ///
     /// When the registry cannot be opened, the services stay unavailable: a handler must not discover or target users
