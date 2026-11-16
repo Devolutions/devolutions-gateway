@@ -43,17 +43,20 @@ When its operation journal cannot be trusted, the Agent refuses new remote packa
 Previously recorded operations with intact records retain their recorded results.
 It logs `Cannot open the device-management operation journal; package writes are unavailable` or `Package operation journal is unrecoverable; package writes are unavailable` when it detects damage.
 The refusal remains until the journal is recovered and the Agent is restarted.
+A crash during admission can leave the journal incomplete and cause refusal after restart.
 Discovery and inventory remain available when their own dependencies are healthy.
 An `UNKNOWN` result does not prove that an earlier operation with the same ID did not run.
 
 To recover the journal, use an elevated administrator session:
 
 1. Stop submitting package operations, wait for active operations to finish, and inspect any operations whose outcomes are unknown.
-2. Stop the `DevolutionsAgent` service and any other Agent instance using that data directory.
-3. Restore a trusted, complete and current backup of `%ProgramData%\Devolutions\Agent\package-operations`, including its original permissions.
+2. Restart the `DevolutionsAgent` service and check new Agent log entries for journal errors.
+   If no journal errors appear, resume operations; otherwise continue.
+3. Stop the service and any other Agent instance using that data directory.
+4. Restore a trusted, complete and current backup of `%ProgramData%\Devolutions\Agent\package-operations`, including its original permissions.
    If the Agent uses `DAGENT_CONFIG_PATH`, the journal is under that directory instead.
    If no complete backup is available, move or delete the entire `package-operations` directory to create a new journal.
-4. Start the service and check the Agent log for journal errors.
+5. Start the service and check the Agent log for journal errors.
 
 Resetting the journal, or restoring a backup that lacks recent records, allows previously recorded operation IDs to execute again.
 Accept that risk before resetting or restoring the journal; do not remove only individual journal files.
