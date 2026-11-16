@@ -727,6 +727,12 @@ impl OperationJournal {
         (entered_rx, resume_tx)
     }
 
+    /// Leaves the membership index room for exactly `additional_names` more record names.
+    pub(crate) fn limit_index_room_for_test(&mut self, additional_names: u64) {
+        let entry_size = record_name("entry").len() as u64 + 3;
+        self.index_size_limit = self.membership.load().index_size + additional_names * entry_size;
+    }
+
     #[cfg(windows)]
     pub(crate) fn exhaust_index_for_test(&mut self) {
         self.index_size_limit = self.membership.load().index_size;

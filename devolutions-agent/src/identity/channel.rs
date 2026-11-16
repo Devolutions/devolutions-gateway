@@ -1304,6 +1304,26 @@ mod tests {
         })
         .await??;
 
+        // The stalled operation holds one worker; seven more queued behind it exhaust the eight.
+        for _ in 0..7 {
+            events
+                .send(Event::DeviceManagement {
+                    id: Uuid::new_v4().to_string(),
+                    request: DeviceManagementRequest {
+                        request: Some(Request::PackageOperation(PackageOperationRequest {
+                            operation_id: Uuid::new_v4().to_string(),
+                            ..Default::default()
+                        })),
+                    },
+                })
+                .await?;
+        }
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while context.available_operation_workers_for_test() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
         let busy = tokio::time::timeout(Duration::from_secs(10), context.submit_operation_for_test(new)).await?;
         assert_eq!(busy.error, "agent busy: nothing was started");
 
