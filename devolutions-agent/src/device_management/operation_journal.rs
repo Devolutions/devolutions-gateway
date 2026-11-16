@@ -962,6 +962,11 @@ mod tests {
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
         );
+        // oracle: mutant conflicting terminal completion incorrectly disables a healthy journal
+        assert_eq!(
+            journal.admit("authority", &self::request("another", "pkg"))?,
+            Admission::Admitted
+        );
         Ok(())
     }
 
