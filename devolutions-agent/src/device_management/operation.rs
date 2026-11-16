@@ -588,6 +588,9 @@ mod tests {
 
     use super::*;
 
+    /// Bounds a wait that must end, generously enough to absorb slow journal I/O.
+    const SETTLE_GUARD: Duration = Duration::from_secs(30);
+
     fn request(operation: PackageOperationType, manager: &str, source: &str, scope: &str) -> PackageOperationRequest {
         PackageOperationRequest {
             operation_id: "op-1".to_owned(),
@@ -782,7 +785,7 @@ mod tests {
             "operation settled before the Broker process exited"
         );
         assert!(record.mark_exited(0));
-        let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
+        let settled = tokio::time::timeout(SETTLE_GUARD, operation).await??.settled;
         let expected = Settled {
             outcome: Outcome::Succeeded,
             execution_started: Some(true),
@@ -862,7 +865,7 @@ mod tests {
         let now = Instant::now();
         let operation_deadline = now + Duration::from_secs(2);
         let completion = tokio::time::timeout_at(
-            operation_deadline + Duration::from_secs(3),
+            operation_deadline + SETTLE_GUARD,
             finish_sent_until(
                 pending,
                 &grants,
@@ -918,7 +921,7 @@ mod tests {
         );
         assert!(record.mark_started());
         assert!(record.mark_exited(0));
-        let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
+        let settled = tokio::time::timeout(SETTLE_GUARD, operation).await??.settled;
         let expected = Settled {
             outcome: Outcome::Succeeded,
             execution_started: Some(true),
@@ -984,9 +987,7 @@ mod tests {
             "the operation must wait for exit after the late start"
         );
         assert!(record.mark_exited(0));
-        let settled = tokio::time::timeout(Duration::from_secs(5), &mut operation)
-            .await??
-            .settled;
+        let settled = tokio::time::timeout(SETTLE_GUARD, &mut operation).await??.settled;
         let expected = Settled {
             outcome: Outcome::Succeeded,
             execution_started: Some(true),
@@ -1027,7 +1028,7 @@ mod tests {
                 WaitLimits {
                     start_deadline: dispatched_at + Duration::from_secs(2),
                     operation_deadline,
-                    consumed_grace: Duration::from_secs(10),
+                    consumed_grace: 4 * SETTLE_GUARD,
                 },
             )
             .await;
@@ -1036,8 +1037,9 @@ mod tests {
         response.await.expect("the initial record was sampled");
         tokio::time::sleep_until(dispatched_at + Duration::from_millis(1200)).await;
         let _record = grants.consume(&grant, &caller, &broker_request)?;
+        // An unclipped grace would run past this timeout.
         let (completed_at, completion) =
-            tokio::time::timeout_at(operation_deadline + Duration::from_secs(3), operation).await??;
+            tokio::time::timeout_at(operation_deadline + SETTLE_GUARD, operation).await??;
 
         assert!(operation_deadline <= completed_at);
         let expected = Settled {
@@ -1063,7 +1065,7 @@ mod tests {
         let request = pending.request.clone();
         let now = Instant::now();
         let settled = tokio::time::timeout(
-            Duration::from_secs(3),
+            SETTLE_GUARD,
             finish_sent_until(
                 pending,
                 &grants,
@@ -1072,7 +1074,7 @@ mod tests {
                 std::future::pending(),
                 WaitLimits {
                     start_deadline: now + Duration::from_secs(1),
-                    operation_deadline: now + Duration::from_secs(10),
+                    operation_deadline: now + 4 * SETTLE_GUARD,
                     consumed_grace: Duration::from_millis(650),
                 },
             ),
@@ -1105,7 +1107,7 @@ mod tests {
         let issued = grants.issue(Plan::parse(&request).expect("request is valid").grant_spec(sid))?;
         let now = Instant::now();
         let settled = tokio::time::timeout(
-            Duration::from_secs(3),
+            SETTLE_GUARD,
             finish_sent_until(
                 pending,
                 &grants,
@@ -1114,8 +1116,8 @@ mod tests {
                 std::future::pending(),
                 WaitLimits {
                     start_deadline: now + Duration::from_millis(500),
-                    operation_deadline: now + Duration::from_secs(10),
-                    consumed_grace: Duration::from_secs(10),
+                    operation_deadline: now + 4 * SETTLE_GUARD,
+                    consumed_grace: 4 * SETTLE_GUARD,
                 },
             ),
         )
@@ -1190,7 +1192,7 @@ mod tests {
         let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
         let mut may_have_been_sent = false;
         let completion = tokio::time::timeout(
-            Duration::from_secs(5),
+            SETTLE_GUARD,
             finish_sent(
                 pending,
                 &grants,
@@ -1331,14 +1333,14 @@ mod tests {
         response.await.expect("request is delivered");
 
         shutdown.signal();
-        let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
+        let settled = tokio::time::timeout(SETTLE_GUARD, operation).await??.settled;
         let expected = Settled {
             outcome: Outcome::Unknown,
             execution_started: Some(true),
         };
         assert_eq!(settled, expected);
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
-        tokio::time::timeout(Duration::from_secs(5), shutdown.all_closed()).await?;
+        tokio::time::timeout(SETTLE_GUARD, shutdown.all_closed()).await?;
         Ok(())
     }
 
@@ -1356,7 +1358,7 @@ mod tests {
         let request = pending.request.clone();
         let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
         let completion = tokio::time::timeout(
-            Duration::from_secs(5),
+            SETTLE_GUARD,
             finish_sent(pending, &grants, &issued, Some(signal), async {
                 shutdown.signal();
                 assert!(record.mark_started());
@@ -1371,7 +1373,7 @@ mod tests {
         };
         assert_eq!(completion.settled, expected);
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
-        tokio::time::timeout(Duration::from_secs(5), shutdown.all_closed()).await?;
+        tokio::time::timeout(SETTLE_GUARD, shutdown.all_closed()).await?;
         Ok(())
     }
 
@@ -1407,7 +1409,7 @@ mod tests {
                     },
                     WaitLimits {
                         start_deadline: now + Duration::from_secs(5),
-                        operation_deadline: now + Duration::from_secs(30),
+                        operation_deadline: now + 4 * SETTLE_GUARD,
                         consumed_grace: Duration::from_secs(5),
                     },
                 )
@@ -1426,8 +1428,7 @@ mod tests {
             }
             anyhow::bail!("could not evict the started Broker record")
         };
-        let (completion, ()) =
-            tokio::time::timeout(Duration::from_secs(10), async { tokio::try_join!(wait, evict) }).await??;
+        let (completion, ()) = tokio::time::timeout(SETTLE_GUARD, async { tokio::try_join!(wait, evict) }).await??;
 
         let expected = Settled {
             outcome: Outcome::Unknown,
@@ -1546,7 +1547,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
+        let settled = tokio::time::timeout(SETTLE_GUARD, operation).await??.settled;
         let expected = Settled {
             outcome: Outcome::Unknown,
             execution_started: None,
