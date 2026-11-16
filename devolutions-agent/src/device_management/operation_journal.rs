@@ -7,7 +7,6 @@
 //! A pending record is durable before the caller may submit an operation.
 //! A pending record found without a live submission in this journal means the outcome cannot be recovered, so it reads
 //! as [`Outcome::Unknown`] and the operation is never submitted again.
-//! Every failure to open, read, validate or write the journal is an error, never an absent record.
 //!
 //! The journal keeps `<data-dir>/package-operations/`, owned by the Agent's account, created and never repaired.
 //! One opener at a time owns it, across processes, until its [`OperationJournal`] is dropped: an unshared directory
