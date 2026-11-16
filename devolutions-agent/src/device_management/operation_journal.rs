@@ -874,6 +874,7 @@ mod tests {
                 .complete("authority", &request("op", "other"), Outcome::Succeeded)
                 .is_err()
         );
+        // oracle: mutant a payload conflict incorrectly disables a healthy journal
         assert_eq!(
             journal.admit("authority", &request("another", "pkg"))?,
             Admission::Admitted
