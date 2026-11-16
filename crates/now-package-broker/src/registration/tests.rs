@@ -806,6 +806,31 @@ mod connection {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn caller_arriving_after_the_held_rescan_was_sent_waits_for_the_next_one() {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+        let registry = Arc::new(Registry::default());
+        let (mut client, task) = serve(&registry, 1);
+        let endpoint = endpoint(&registry);
+        let _first = rescan(&endpoint);
+        let first_request = read_json(&mut client).await;
+        let second = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+        respond(&mut client, rescan_done(&id_of(&first_request))).await;
+        let second_request = read_json(&mut client).await;
+
+        let third = rescan(&endpoint);
+        assert_nothing_written(&mut client).await;
+        respond(&mut client, rescan_done(&id_of(&second_request))).await;
+
+        assert_eq!(second.await.expect("call task"), Ok(()));
+        let third_request = read_json(&mut client).await;
+        assert_eq!(third_request["command"], "RescanInventory");
+        respond(&mut client, rescan_done(&id_of(&third_request))).await;
+        assert_eq!(third.await.expect("call task"), Ok(()));
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn rescan_unanswered_for_thirty_minutes_closes_the_connection() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
         let registry = Arc::new(Registry::default());

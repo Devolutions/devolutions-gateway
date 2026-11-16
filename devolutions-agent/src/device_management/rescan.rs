@@ -145,10 +145,13 @@ mod tests {
         start.elapsed()
     }
 
+    #[rstest]
+    #[case::completed(Ok(()))]
+    #[case::rejected(Err("rejected with code UnsupportedCommand"))]
     #[tokio::test]
-    async fn wait_ends_when_the_rescan_is_answered() {
+    async fn response_ends_the_wait_without_another_request(#[case] answer: Result<(), &'static str>) {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
-        let endpoint = FakeEndpoint::answering(Duration::from_millis(50), Ok(()));
+        let endpoint = FakeEndpoint::answering(Duration::from_millis(50), answer);
         let deadline = Instant::now() + THIRTY_MINUTES;
 
         let waited = wait_time(&Semaphore::new(1), &endpoint, deadline, pending()).await;
@@ -193,17 +196,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejected_rescan_ends_the_wait_without_another_request() {
-        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
-        let endpoint = FakeEndpoint::answering(Duration::ZERO, Err("rejected with code UnsupportedCommand"));
-        let deadline = Instant::now() + THIRTY_MINUTES;
-
-        wait_time(&Semaphore::new(1), &endpoint, deadline, pending()).await;
-
-        assert_eq!(endpoint.asked.get(), 1);
-    }
-
-    #[tokio::test]
     async fn shutdown_ends_the_wait() {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
         let endpoint = FakeEndpoint::silent();
@@ -217,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_without_a_free_permit_requests_no_rescan() {
-        // oracle: mutant a call that finds no free permit still requests or awaits a rescan
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
         let waiting = Semaphore::new(1);
         let _held = waiting.try_acquire().expect("the permit is free");
         let endpoint = FakeEndpoint::silent();
@@ -230,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_holds_one_permit_and_returns_it() {
-        // oracle: mutant the wait takes no permit, takes several, or keeps one after it ended
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
         let waiting = Semaphore::new(2);
         let endpoint = FakeEndpoint::silent();
         let deadline = Instant::now() + THIRTY_MINUTES;
