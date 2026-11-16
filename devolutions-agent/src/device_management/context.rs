@@ -381,7 +381,7 @@ mod tests {
         }
         .with_remote_features(true, false);
         let request = PackageOperationRequest {
-            operation_id: "new-operation".to_owned(),
+            operation_id: "11111111-2222-4333-8444-555555555555".to_owned(),
             ..Default::default()
         };
         let mut permits = Vec::new();
@@ -391,7 +391,7 @@ mod tests {
         assert!(!permits.is_empty());
 
         let busy = operation::run(&context, Uuid::nil(), request.clone()).await;
-        assert_eq!(busy.operation_id, "new-operation");
+        assert_eq!(busy.operation_id, request.operation_id);
         assert!(!busy.success);
         assert_eq!(busy.error, "agent busy: nothing was started");
         assert_eq!(busy.status, i32::from(PackageOperationStatus::Unspecified));

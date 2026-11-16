@@ -1141,6 +1141,7 @@ mod tests {
         let mut journal = Arc::new(journal);
         let coordinator = Arc::new(Coordinator::default());
         let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let admission = Arc::clone(&coordinator.admission).try_acquire_owned()?;
         let mut permits = Vec::new();
         while let Some(permit) = coordinator.try_worker() {
             permits.push(permit);
@@ -1162,6 +1163,7 @@ mod tests {
         assert_eq!(result.execution_started, None);
         assert!(!journal.may_contain(&request.operation_id));
 
+        drop(admission);
         drop(permits);
         Arc::get_mut(&mut journal)
             .expect("the refused operation did not retain the journal")
