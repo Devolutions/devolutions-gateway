@@ -777,8 +777,12 @@ mod tests {
         );
         assert!(record.mark_exited(0));
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
-        assert_eq!(settled.execution_started, Some(true));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -855,8 +859,12 @@ mod tests {
         assert!(record.mark_started());
         assert!(record.mark_exited(0));
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
-        assert_eq!(settled.execution_started, Some(true));
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
