@@ -46,12 +46,15 @@ The refusal remains until the journal is recovered and the Agent is restarted.
 A crash during admission can leave the journal incomplete and cause refusal after restart.
 Discovery and inventory remain available when their own dependencies are healthy.
 An `UNKNOWN` result does not prove that an earlier operation with the same ID did not run.
+If an index entry and its record are both lost, the loss can go undetected after restart and that operation ID may execute again.
 
 To recover the journal, use an elevated administrator session:
 
 1. Stop submitting package operations, wait for active operations to finish, and inspect any operations whose outcomes are unknown.
-2. Restart the `DevolutionsAgent` service and check new Agent log entries for journal errors.
-   If no journal errors appear, resume operations; otherwise continue.
+2. Verify that the journal has a complete, current operation history, such as by comparing it with a trusted backup.
+   If you cannot verify it, continue to step 3 or accept the replay risk before restarting.
+   Restart the `DevolutionsAgent` service and check new Agent log entries for journal errors.
+   If no journal errors appear, resume operations; otherwise continue to step 3.
 3. Stop the service and any other Agent instance using that data directory.
 4. Restore a trusted, complete and current backup of `%ProgramData%\Devolutions\Agent\package-operations`, including its original permissions.
    If the Agent uses `DAGENT_CONFIG_PATH`, the journal is under that directory instead.
@@ -59,7 +62,6 @@ To recover the journal, use an elevated administrator session:
 5. Start the service and check the Agent log for journal errors.
 
 Resetting the journal, or restoring a backup that lacks recent records, allows previously recorded operation IDs to execute again.
-If an index entry and its record are both lost, the loss can go undetected after restart and that operation ID may execute again.
 Accept that risk before resetting or restoring the journal; do not remove only individual journal files.
 If the log names the initialization lock, remove `.package-operations-initialization.lock` beside the journal while all Agent instances are stopped.
 The lock file holds no operation records.
