@@ -596,29 +596,26 @@ mod tests {
     }
 
     struct SentOperation {
-        _root: tempfile::TempDir,
         journal: Arc<OperationJournal>,
         pending: Pending,
         grants: RemoteGrantStore,
         issued: IssuedGrant,
         record: ExecutionRecord,
+        _root: tempfile::TempDir,
     }
 
     struct IssuedOperation {
-        _root: tempfile::TempDir,
         journal: Arc<OperationJournal>,
         pending: Pending,
         grants: RemoteGrantStore,
         issued: IssuedGrant,
         caller: VerifiedCaller,
         broker_request: api::PackageRequest,
+        _root: tempfile::TempDir,
     }
 
     fn issued_operation() -> anyhow::Result<IssuedOperation> {
-        let parent = std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
-        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
+        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let journal = Arc::new(OperationJournal::open(data)?);
         let request = request(PackageOperationType::Install, "Winget", "winget", "user");
@@ -675,13 +672,13 @@ mod tests {
             capture_output: true,
         };
         Ok(IssuedOperation {
-            _root: root,
             journal,
             pending,
             grants,
             issued,
             caller: VerifiedCaller::new(sid),
             broker_request,
+            _root: root,
         })
     }
 
@@ -697,13 +694,28 @@ mod tests {
         } = issued_operation()?;
         let record = grants.consume(issued.grant.expose_secret(), &caller, &broker_request)?;
         Ok(SentOperation {
-            _root,
             journal,
             pending,
             grants,
             issued,
             record,
+            _root,
         })
+    }
+
+    // oracle: mutant fixture cleanup runs while the journal directory is still pinned
+    #[test]
+    fn operation_fixtures_remove_their_roots_on_drop() -> anyhow::Result<()> {
+        let issued = issued_operation()?;
+        let issued_root = issued._root.path().to_owned();
+        drop(issued);
+        assert!(!issued_root.exists(), "issued fixture retained {issued_root:?}");
+
+        let sent = sent_operation()?;
+        let sent_root = sent._root.path().to_owned();
+        drop(sent);
+        assert!(!sent_root.exists(), "sent fixture retained {sent_root:?}");
+        Ok(())
     }
 
     async fn tracked_delivery_result(
@@ -767,6 +779,48 @@ mod tests {
         let settled = tokio::time::timeout(Duration::from_secs(5), operation).await??.settled;
         assert_eq!(settled.execution_started, Some(true));
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn started_operation_stops_at_operation_deadline() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        let now = Instant::now();
+        let operation_deadline = now + Duration::from_secs(2);
+        let completion = tokio::time::timeout_at(
+            operation_deadline + Duration::from_secs(3),
+            finish_sent_until(
+                pending,
+                &grants,
+                &issued,
+                None,
+                std::future::pending(),
+                WaitLimits {
+                    start_deadline: now + Duration::from_millis(100),
+                    operation_deadline,
+                    consumed_grace: Duration::from_secs(1),
+                },
+            ),
+        )
+        .await?;
+
+        assert!(operation_deadline <= Instant::now());
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(completion.settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -867,6 +921,59 @@ mod tests {
             .settled;
         assert_eq!(settled, unknown(true));
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn operation_deadline_clips_late_consumed_grace() -> anyhow::Result<()> {
+        let IssuedOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            caller,
+            broker_request,
+        } = issued_operation()?;
+        let request = pending.request.clone();
+        let grant = issued.grant.expose_secret().to_owned();
+        let operation_grants = grants.clone();
+        let dispatched_at = Instant::now();
+        let operation_deadline = dispatched_at + Duration::from_secs(3);
+        let (sampled, response) = tokio::sync::oneshot::channel();
+        let operation = tokio::spawn(async move {
+            let completion = finish_sent_until(
+                pending,
+                &operation_grants,
+                &issued,
+                None,
+                async {
+                    sampled.send(()).expect("sample observer is alive");
+                    std::future::pending().await
+                },
+                WaitLimits {
+                    start_deadline: dispatched_at + Duration::from_secs(2),
+                    operation_deadline,
+                    consumed_grace: Duration::from_secs(10),
+                },
+            )
+            .await;
+            (Instant::now(), completion)
+        });
+        response.await.expect("the initial record was sampled");
+        tokio::time::sleep_until(dispatched_at + Duration::from_millis(1200)).await;
+        let _record = grants.consume(&grant, &caller, &broker_request)?;
+        let (completed_at, completion) =
+            tokio::time::timeout_at(operation_deadline + Duration::from_secs(3), operation).await??;
+
+        assert!(operation_deadline <= completed_at);
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: None,
+        };
+        assert_eq!(completion.settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
@@ -1119,6 +1226,102 @@ mod tests {
         assert_eq!(settled, unknown(true));
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
         tokio::time::timeout(Duration::from_secs(5), shutdown.all_closed()).await?;
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn shutdown_final_sample_records_first_start_evidence() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let completion = tokio::time::timeout(
+            Duration::from_secs(5),
+            finish_sent(pending, &grants, &issued, Some(signal), async {
+                shutdown.signal();
+                assert!(record.mark_started());
+                std::future::pending().await
+            }),
+        )
+        .await?;
+
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(completion.settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
+        tokio::time::timeout(Duration::from_secs(5), shutdown.all_closed()).await?;
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn evicted_started_record_retains_start_evidence() -> anyhow::Result<()> {
+        let IssuedOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            caller,
+            mut broker_request,
+        } = issued_operation()?;
+        let request = pending.request.clone();
+        let record = grants.consume(issued.grant.expose_secret(), &caller, &broker_request)?;
+        assert!(record.mark_started());
+        let sid = Sid::from_well_known(windows::Win32::Security::WinWorldSid, None).expect("well-known SID exists");
+        let spec = Plan::parse(&request).expect("request is valid").grant_spec(sid);
+        let (sampled, response) = tokio::sync::oneshot::channel();
+        let now = Instant::now();
+        let wait = async {
+            Ok::<_, anyhow::Error>(
+                finish_sent_until(
+                    pending,
+                    &grants,
+                    &issued,
+                    None,
+                    async {
+                        sampled.send(()).expect("sample observer is alive");
+                        std::future::pending().await
+                    },
+                    WaitLimits {
+                        start_deadline: now + Duration::from_secs(5),
+                        operation_deadline: now + Duration::from_secs(30),
+                        consumed_grace: Duration::from_secs(5),
+                    },
+                )
+                .await,
+            )
+        };
+        let evict = async {
+            response.await.expect("start evidence was sampled");
+            for _ in 0..10_000 {
+                let replacement = grants.issue(spec.clone())?;
+                broker_request.request_id = api::ResourceId::from(replacement.request_id.to_string().as_str());
+                grants.consume(replacement.grant.expose_secret(), &caller, &broker_request)?;
+                if grants.outcome(&issued.grant, &issued.request_id) == OutcomeSummary::Unknown {
+                    return Ok::<_, anyhow::Error>(());
+                }
+            }
+            anyhow::bail!("could not evict the started Broker record")
+        };
+        let (completion, ()) =
+            tokio::time::timeout(Duration::from_secs(10), async { tokio::try_join!(wait, evict) }).await??;
+
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(completion.settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 
