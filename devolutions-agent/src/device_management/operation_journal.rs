@@ -400,12 +400,12 @@ impl OperationJournal {
             .context("persist package operation start evidence")
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn fail_start_writes(&self, count: usize) {
         self.failed_start_writes.store(count, Ordering::SeqCst);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn fail_completion_writes(&self, count: usize) {
         self.failed_completion_writes.store(count, Ordering::SeqCst);
     }
