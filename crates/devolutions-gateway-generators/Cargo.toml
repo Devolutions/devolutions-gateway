@@ -5,6 +5,8 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[lints]
+
 [dependencies]
 devolutions-gateway = { path = "../../devolutions-gateway" }
 proptest = "1.7"

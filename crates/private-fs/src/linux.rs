@@ -264,7 +264,9 @@ fn parse_acl(bytes: &[u8]) -> io::Result<Vec<AclEntry>> {
         return Err(invalid());
     }
     entries
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|entry| {
             let entry = AclEntry {
                 tag: u16::from_le_bytes([entry[0], entry[1]]),

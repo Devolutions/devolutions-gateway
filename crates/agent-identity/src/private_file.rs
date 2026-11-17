@@ -802,7 +802,6 @@ mod tests {
 #[cfg(all(test, unix))]
 mod unix_tests {
     use std::fs;
-    use std::io::Write as _;
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     use super::*;

@@ -5,6 +5,8 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[lints]
+
 [dependencies]
 proxy-types = { path = "../proxy-types" }
 proptest = "1.7"
