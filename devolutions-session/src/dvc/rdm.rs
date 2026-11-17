@@ -15,7 +15,7 @@ use now_proto_pdu::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
-use tracing::{error, info, trace, warn};
+use tracing::{Level, debug, error, info, trace, warn};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::{Process, ProcessEntry32Iterator, get_current_session_id, process_id_to_session};
@@ -29,6 +29,7 @@ use windows::Win32::UI::WindowsAndMessaging::{SW_MAXIMIZE, SW_RESTORE};
 use windows::core::{PCWSTR, PWSTR};
 
 use crate::dvc::channel::WinapiSignaledSender;
+use crate::dvc::message_name::now_message_name;
 use crate::dvc::now_message_dissector::NowMessageDissector;
 
 const PIPE_READ_BUFFER_SIZE: usize = 4096;
@@ -197,7 +198,7 @@ fn validate_capset_response(message: NowMessage<'_>) -> anyhow::Result<NowChanne
             Ok(caps)
         }
         _ => {
-            bail!("Expected capset message, got: {:?}", message);
+            bail!("Expected capset message, got: {}", now_message_name(&message));
         }
     }
 }
@@ -268,7 +269,11 @@ async fn run_rdm_to_dvc_passthrough(
                 };
                 // Process all messages from this read
                 for message in messages {
-                    info!(pipe_name, "Received message from RDM: {:?}", message);
+                    if tracing::enabled!(Level::DEBUG) {
+                        debug!(pipe_name, msg = ?message, "Received message from RDM");
+                    } else {
+                        info!(pipe_name, message_name = now_message_name(&message), "Received message from RDM");
+                    }
 
                     // Intercept AppNotify to track state
                     if let NowMessage::Rdm(NowRdmMessage::AppNotify(ref notify)) = message {
@@ -300,7 +305,11 @@ async fn run_rdm_to_dvc_passthrough(
             message_opt = dvc_rx.recv() => {
                 match message_opt {
                     Some(message) => {
-                        info!(pipe_name, "Forwarding message to RDM: {:?}", message);
+                        if tracing::enabled!(Level::DEBUG) {
+                            debug!(pipe_name, msg = ?message, "Forwarding message to RDM");
+                        } else {
+                            info!(pipe_name, message_name = now_message_name(&message), "Forwarding message to RDM");
+                        }
                         if let Err(error) = pipe.send_message(&message).await {
                             error!(%error, pipe_name, "Failed to send message to RDM pipe");
                             connection_state.store(RdmConnectionState::Disconnected.as_u8(), Ordering::Release);
