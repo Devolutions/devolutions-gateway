@@ -21,6 +21,7 @@ use windows::Win32::System::Threading::{INFINITE, WaitForMultipleObjects, WaitFo
 use windows::core::Owned;
 
 use crate::dvc::channel::WinapiSignaledReceiver;
+use crate::dvc::message_name::now_message_name;
 use crate::dvc::now_message_dissector::NowMessageDissector;
 
 const DVC_CHANNEL_NAME: &str = "Devolutions::Now::Agent";
@@ -398,7 +399,7 @@ impl DvcIo {
         };
 
         for message in messages {
-            debug!(?message, "DVC message received");
+            debug!(message_name = now_message_name(&message), "DVC message received");
             self.inbound.push_back(message);
         }
 
