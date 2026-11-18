@@ -123,8 +123,8 @@ impl PacketsParser {
         let mut image_buff = Vec::new();
 
         // SAFETY: FFI call with no outstanding precondition.
-        let raw_image_buf = unsafe {
-            let ptr: *const u8 = (self.api.NowPacketParser_GetImage)(
+        let ptr: *const u8 = unsafe {
+            (self.api.NowPacketParser_GetImage)(
                 self.ctx,
                 (&mut update_x) as *mut u32,
                 (&mut update_y) as *mut u32,
@@ -132,10 +132,11 @@ impl PacketsParser {
                 (&mut update_height) as *mut u32,
                 (&mut surface_step) as *mut u32,
                 (&mut surface_size) as *mut u32,
-            );
-
-            from_raw_parts::<u8>(ptr, surface_size as usize)
+            )
         };
+
+        // SAFETY: The plugin returns a pointer valid for reads of `surface_size` bytes.
+        let raw_image_buf = unsafe { from_raw_parts::<u8>(ptr, surface_size as usize) };
 
         image_buff.extend_from_slice(raw_image_buf);
         ImageUpdate {

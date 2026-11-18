@@ -270,7 +270,7 @@ async fn show_progress(current: Arc<Mutex<Option<Progress>>>, started: Instant) 
     const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     const BAR: usize = 24;
 
-    for tick in 0usize.. {
+    for spinner in SPINNER.iter().cycle() {
         let text = match *current.lock().expect("not poisoned") {
             None => "starting".to_owned(),
             Some(progress @ Progress::Writing) => progress.to_string(),
@@ -283,7 +283,7 @@ async fn show_progress(current: Arc<Mutex<Option<Progress>>>, started: Instant) 
         clear_line();
         print!(
             "  {} {}  {text}",
-            style(CYAN, &SPINNER[tick % SPINNER.len()].to_string()),
+            style(CYAN, &spinner.to_string()),
             style(DIM, &format!("{:>6.1}s", started.elapsed().as_secs_f64()))
         );
         let _ = std::io::stdout().flush();

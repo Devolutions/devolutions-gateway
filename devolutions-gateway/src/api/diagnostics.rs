@@ -56,7 +56,7 @@ impl From<&Conf> for ConfigDiagnostic {
                         match Url::parse(&url) {
                             Ok(url) => listeners.push(ListenerUrls {
                                 internal_url: url.clone(),
-                                external_url: url.clone(),
+                                external_url: url,
                             }),
                             Err(error) => {
                                 warn!(?tcp_tunnel, %error, "invalid URL for Ngrok TCP tunnel");
@@ -69,7 +69,7 @@ impl From<&Conf> for ConfigDiagnostic {
                         match Url::parse(&url) {
                             Ok(url) => listeners.push(ListenerUrls {
                                 internal_url: url.clone(),
-                                external_url: url.clone(),
+                                external_url: url,
                             }),
                             Err(error) => {
                                 warn!(?http_tunnel, %error, "invalid URL for Ngrok HTTP tunnel");

@@ -2,7 +2,7 @@ use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::IntoRawHandle as _;
 use std::time::{Duration, SystemTime};
 
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::AsyncReadExt as _;
 use tokio::net::windows::named_pipe::{NamedPipeClient, ServerOptions};
 use win_api_wrappers::process::Process;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, GENERIC_READ, HLOCAL, LocalFree};

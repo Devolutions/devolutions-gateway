@@ -201,9 +201,9 @@ jobs:
       - name: Check clippy
         shell: pwsh
         run: |
-          cargo clippy --workspace --tests -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) {
-              Write-Output "::error::Clippy warnings detected, please run 'cargo clippy --workspace --tests' and fix all warnings"
+              Write-Output "::error::Clippy warnings detected, please run 'cargo clippy --workspace --all-targets' and fix all warnings"
               exit 1
           }
 

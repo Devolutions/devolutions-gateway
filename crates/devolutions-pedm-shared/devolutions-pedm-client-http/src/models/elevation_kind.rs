@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
 pub enum ElevationKind {
     #[serde(rename = "AutoApprove")]
+    #[default]
     AutoApprove,
     #[serde(rename = "Confirm")]
     Confirm,
@@ -32,11 +33,5 @@ impl std::fmt::Display for ElevationKind {
             Self::ReasonApproval => write!(f, "ReasonApproval"),
             Self::Deny => write!(f, "Deny"),
         }
-    }
-}
-
-impl Default for ElevationKind {
-    fn default() -> ElevationKind {
-        Self::AutoApprove
     }
 }

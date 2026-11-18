@@ -2,6 +2,7 @@
 fn main() {}
 
 #[cfg(unix)]
+#[expect(clippy::print_stdout, reason = "example prints its progress to the terminal")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use sysevent::{Entry, Facility, Severity, SystemEventSink};
     use sysevent_syslog::{Syslog, SyslogOptions};

@@ -1,4 +1,5 @@
 #![allow(unused_crate_dependencies)]
+#![expect(clippy::print_stdout, reason = "the example reports its results on the console")]
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -14,7 +15,7 @@ fn main() -> anyhow::Result<()> {
 
         let mut futures = vec![];
         for ip in 0..255 {
-            let ip: IpAddr = format!("10.10.0.{ip}").parse().unwrap();
+            let ip: IpAddr = format!("10.10.0.{ip}").parse().expect("valid IPv4 address");
             let runtime = Arc::clone(&runtime);
             let ports = vec![22, 23, 80, 443, 3389];
             for port in ports {

@@ -64,7 +64,7 @@ pub fn create(key: &dyn DeviceKey, base_url: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use der::asn1::{Any, Ia5StringRef};
-    use der::{Decode as _, Encode as _, Tag, Tagged as _};
+    use der::{Decode as _, Tag, Tagged as _};
     use p256::ecdsa::{DerSignature, Signature, SigningKey, VerifyingKey};
     use rstest::rstest;
     use signature::{Signer, Verifier as _};

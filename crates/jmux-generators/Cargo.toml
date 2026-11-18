@@ -5,6 +5,8 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[lints]
+
 [dependencies]
 jmux-proto = { path = "../jmux-proto" }
 proptest = "1.7"

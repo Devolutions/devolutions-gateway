@@ -2,6 +2,7 @@
 fn main() {}
 
 #[cfg(windows)]
+#[expect(clippy::print_stdout, reason = "the example reports its results on the console")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use sysevent::{Entry, Severity, SystemEventSink};
     use sysevent_winevent::WinEvent;

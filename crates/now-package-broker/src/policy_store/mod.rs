@@ -300,16 +300,16 @@ impl PolicyStore {
         &self,
         request: PolicyReplacementRequest,
         audit: crate::audit::WriteAudit,
-    ) -> Result<ReplaceSuccess, ErrorResponse> {
+    ) -> Result<ReplaceSuccess, Box<ErrorResponse>> {
         let operation = request.operation;
         let monitoring = self.writer.lock().await;
         if *monitoring != Monitoring::Available {
             audit.failed(operation, crate::audit::FailureReason::MonitoringUnavailable);
-            return Err(error_with_management(
+            return Err(Box::new(error_with_management(
                 ErrorCode::BrokerPaused,
                 "policy change monitoring is unavailable",
                 self.management_snapshot(),
-            ));
+            )));
         }
         let previous = self.snapshot();
         let (write_configured_path, mut observation) = self.observe_storage(true);
@@ -321,11 +321,11 @@ impl PolicyStore {
             let audit_path = observation.canonical_path.clone();
             let management = self.publish_external_observation(observation);
             audit.failed_at(operation, &audit_path, crate::audit::FailureReason::StaleStoreToken);
-            return Err(error_with_management(
+            return Err(Box::new(error_with_management(
                 ErrorCode::StalePolicyStoreToken,
                 "the configured policy changed after the supplied store token was observed",
                 management,
-            ));
+            )));
         }
 
         if observation.write_capability != PolicyWriteCapability::Writable {
@@ -339,7 +339,10 @@ impl PolicyStore {
                 Some(PolicyReadOnlyReason::UnsupportedFormat) => ErrorCode::UnsupportedPolicyFormat,
                 _ => ErrorCode::UnsafePolicyPath,
             };
-            return Err(error_response(code, "the configured policy path is not writable"));
+            return Err(Box::new(error_response(
+                code,
+                "the configured policy path is not writable",
+            )));
         }
 
         let validation = self.validate_draft(&request.draft);
@@ -349,11 +352,11 @@ impl PolicyStore {
                 &observation.canonical_path,
                 crate::audit::FailureReason::InvalidPolicy,
             );
-            return Err(error_with_validation(
+            return Err(Box::new(error_with_validation(
                 ErrorCode::InvalidPolicy,
                 "the submitted draft failed authoritative validation",
                 validation,
-            ));
+            )));
         }
         let draft = validation
             .canonical_draft
@@ -370,11 +373,11 @@ impl PolicyStore {
                 &observation.canonical_path,
                 crate::audit::FailureReason::InvalidReceipt,
             );
-            return Err(error_with_validation(
+            return Err(Box::new(error_with_validation(
                 ErrorCode::ValidationFailed,
                 "the validation receipt does not match this draft",
                 validation,
-            ));
+            )));
         }
         let revision = match plan_revision(
             request.operation,
@@ -389,7 +392,7 @@ impl PolicyStore {
                     &observation.canonical_path,
                     crate::audit::FailureReason::RevisionConflict,
                 );
-                return Err(error_response(ErrorCode::Conflict, message));
+                return Err(Box::new(error_response(ErrorCode::Conflict, message)));
             }
         };
         let policy = match draft.into_policy_document(revision, Utc::now()) {
@@ -400,10 +403,10 @@ impl PolicyStore {
                     &observation.canonical_path,
                     crate::audit::FailureReason::DraftCommitFailed,
                 );
-                return Err(error_response(
+                return Err(Box::new(error_response(
                     ErrorCode::ValidationFailed,
                     "failed to commit the validated policy draft",
-                ));
+                )));
             }
         };
         let bytes = match serde_json::to_vec_pretty(&policy) {
@@ -414,10 +417,10 @@ impl PolicyStore {
                     &observation.canonical_path,
                     crate::audit::FailureReason::SerializationFailed,
                 );
-                return Err(error_response(
+                return Err(Box::new(error_response(
                     ErrorCode::InternalError,
                     "failed to serialize the committed policy",
-                ));
+                )));
             }
         };
 
@@ -437,21 +440,21 @@ impl PolicyStore {
                     let audit_path = current.canonical_path.clone();
                     let management = self.publish_external_observation(current);
                     audit.failed_at(operation, &audit_path, crate::audit::FailureReason::StaleStoreToken);
-                    return Err(error_with_management(
+                    return Err(Box::new(error_with_management(
                         ErrorCode::StalePolicyStoreToken,
                         "the policy storage changed before publication; retry with the current store token",
                         management,
-                    ));
+                    )));
                 }
                 audit.failed_at(
                     operation,
                     &observation.canonical_path,
                     crate::audit::FailureReason::PersistenceFailed,
                 );
-                return Err(error_response(
+                return Err(Box::new(error_response(
                     ErrorCode::PolicyPersistenceFailed,
                     "failed to persist the policy",
-                ));
+                )));
             }
             Err(WriteFailure::ConcurrentChange(error)) => {
                 tracing::warn!(
@@ -465,19 +468,19 @@ impl PolicyStore {
                         &observation.canonical_path,
                         crate::audit::FailureReason::ConditionalPublicationFailed,
                     );
-                    return Err(error_response(
+                    return Err(Box::new(error_response(
                         ErrorCode::PolicyPersistenceFailed,
                         "failed to conditionally persist the policy",
-                    ));
+                    )));
                 }
                 let audit_path = current.canonical_path.clone();
                 let management = self.publish_external_observation(current);
                 audit.failed_at(operation, &audit_path, crate::audit::FailureReason::StaleStoreToken);
-                return Err(error_with_management(
+                return Err(Box::new(error_with_management(
                     ErrorCode::StalePolicyStoreToken,
                     "the policy storage changed during publication; retry with the current store token",
                     management,
-                ));
+                )));
             }
             Err(WriteFailure::PostPublication(error)) => {
                 tracing::warn!(
@@ -497,11 +500,11 @@ impl PolicyStore {
                     self.publish_external_observation(current)
                 };
                 audit.failed_at(operation, &audit_path, crate::audit::FailureReason::ActivationFailed);
-                return Err(error_with_management(
+                return Err(Box::new(error_with_management(
                     ErrorCode::PolicyActivationFailed,
                     "the policy was published but failed authoritative reload",
                     management,
-                ));
+                )));
             }
         };
 
@@ -577,7 +580,7 @@ impl PolicyStore {
     pub(crate) async fn replace_for_tests(
         &self,
         request: PolicyReplacementRequest,
-    ) -> Result<ReplaceSuccess, ErrorResponse> {
+    ) -> Result<ReplaceSuccess, Box<ErrorResponse>> {
         self.replace(request, crate::audit::tests::noop()).await
     }
 

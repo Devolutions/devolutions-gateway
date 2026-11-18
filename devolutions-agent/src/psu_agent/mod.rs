@@ -25,7 +25,13 @@ use crate::config::{ConfHandle, PsuConf, dto, redacted_url};
 use crate::psu_agent::powershell::{PowerShellWorker, app_token_secret_reference_name};
 use crate::psu_agent::process::ProcessRegistry;
 
-#[allow(unused_qualifications, clippy::clone_on_ref_ptr, clippy::similar_names)]
+#[allow(
+    unused_qualifications,
+    clippy::clone_on_ref_ptr,
+    clippy::similar_names,
+    clippy::result_large_err,
+    reason = "generated code"
+)]
 pub mod protocol {
     tonic::include_proto!("devolutions.psu.agent.poc.v1");
 }

@@ -188,14 +188,10 @@ pub(super) fn policy_info(policy: &PolicyDocument) -> ResponsePolicyInfo {
     }
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "the shared API contract requires ErrorResponse values"
-)]
 pub(super) fn diagnostics(
     command: &[String],
     include_command_preview: bool,
-) -> Result<Option<OperationDiagnostics>, ErrorResponse> {
+) -> Result<Option<OperationDiagnostics>, Box<ErrorResponse>> {
     if !include_command_preview {
         return Ok(None);
     }
@@ -214,30 +210,22 @@ pub(super) fn diagnostics(
     Ok(Some(OperationDiagnostics { command_preview }))
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "the shared API contract requires ErrorResponse values"
-)]
-pub(super) fn parse_rule_id(rule_id: &str) -> Result<RuleId, ErrorResponse> {
+pub(super) fn parse_rule_id(rule_id: &str) -> Result<RuleId, Box<ErrorResponse>> {
     RuleId::parse(rule_id).map_err(|error| {
-        error_response(
+        Box::new(error_response(
             ErrorCode::InternalError,
             format!("invalid policy rule id in evaluation result: {error}"),
-        )
+        ))
     })
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "the shared API contract requires ErrorResponse values"
-)]
-pub(super) fn new_operation_id() -> Result<ResourceId, ErrorResponse> {
+pub(super) fn new_operation_id() -> Result<ResourceId, Box<ErrorResponse>> {
     let raw = format!("op-{}", uuid::Uuid::new_v4());
     ResourceId::parse(&raw).map_err(|error| {
-        error_response(
+        Box::new(error_response(
             ErrorCode::InternalError,
             format!("failed to generate operation id: {error}"),
-        )
+        ))
     })
 }
 
