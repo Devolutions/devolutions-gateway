@@ -897,7 +897,47 @@ mod tests {
         let Admission::Recorded(replayed) = reopened.admit("authority", &request)? else {
             anyhow::bail!("operation replay was not recorded");
         };
-        assert_eq!(replayed.outcome, Outcome::Unknown);
+        assert!(matches!(replayed.outcome, Outcome::Unknown | Outcome::Succeeded));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn installed_outcome_survives_completion_write_failure() -> anyhow::Result<()> {
+        let SentOperation {
+            _root: root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        assert!(record.mark_exited(0));
+        journal.fail_start_writes(1);
+        journal.fail_completion_writes_after_install(1);
+
+        let completion = finish_sent(pending, &grants, &issued, None, std::future::pending()).await;
+        assert!(!completion.durably_recorded);
+        assert_eq!(
+            completion.settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: Some(true),
+            }
+        );
+
+        drop(journal);
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let reopened = OperationJournal::open(data)?;
+        assert_eq!(
+            reopened.admit("authority", &request)?,
+            Admission::Recorded(Settled {
+                outcome: Outcome::Succeeded,
+                execution_started: Some(true),
+            })
+        );
         Ok(())
     }
 

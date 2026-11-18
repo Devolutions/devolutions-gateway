@@ -146,6 +146,8 @@ pub(super) struct OperationJournal {
     failed_start_writes: AtomicUsize,
     #[cfg(test)]
     failed_completion_writes: AtomicUsize,
+    #[cfg(test)]
+    failed_completion_writes_after_install: AtomicUsize,
     // UNTESTED: The exclusive lock must outlive the records handle to prevent overlapping owners during drop.
     // Check declaration and drop order when changing this struct.
     _lock: JournalLock,
@@ -294,6 +296,8 @@ impl OperationJournal {
             failed_start_writes: AtomicUsize::new(0),
             #[cfg(test)]
             failed_completion_writes: AtomicUsize::new(0),
+            #[cfg(test)]
+            failed_completion_writes_after_install: AtomicUsize::new(0),
         };
         let admitted = journal.load_index(was_missing)?;
         journal.state.get_mut().admitted = admitted;
@@ -410,6 +414,12 @@ impl OperationJournal {
         self.failed_completion_writes.store(count, Ordering::SeqCst);
     }
 
+    #[cfg(all(test, windows))]
+    pub(super) fn fail_completion_writes_after_install(&self, count: usize) {
+        self.failed_completion_writes_after_install
+            .store(count, Ordering::SeqCst);
+    }
+
     /// Durably records the end of an operation [`admitted`](Self::admit) for `request`, and wakes its waiters.
     ///
     /// Recording the outcome already recorded succeeds; recording a different outcome over a recorded one is an error.
@@ -457,6 +467,16 @@ impl OperationJournal {
                         .is_ok()
                     {
                         bail!("injected completion write failure");
+                    }
+                    #[cfg(test)]
+                    if self
+                        .failed_completion_writes_after_install
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+                        .is_ok()
+                    {
+                        self.write_record(&name, &record, Replace::Allow)
+                            .context("persist package operation outcome")?;
+                        bail!("injected completion write failure after install");
                     }
                     self.write_record(&name, &record, Replace::Allow)
                         .context("persist package operation outcome")

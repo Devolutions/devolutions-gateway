@@ -435,6 +435,8 @@ Agent and Authority versions must both understand `UNKNOWN` when they exchange o
 Mixed versions that do not satisfy this requirement are unsupported.
 The Agent durably records an operation before making a grant for it available and does not submit another operation for the same operation ID.
 Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
+When the final journal write fails, the Agent reports `UNKNOWN` for that delivery.
+The write may nevertheless have installed the record, so a later delivery returns its valid recorded result or `UNKNOWN` if none can be recovered.
 When journal writes cannot preserve observed start evidence, a later redelivery may omit evidence reported by the original delivery.
 A repeated operation ID with a different payload is rejected without submission and reports `UNKNOWN`.
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
