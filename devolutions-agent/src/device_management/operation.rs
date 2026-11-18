@@ -648,13 +648,19 @@ impl Pending {
             (start_recorded, result)
         })
         .await;
-        // INVARIANT: An operation task without its worker permit holds a waiting-rescan permit or awaits nothing until it returns.
-        // The permit is given back only here, once the completion write returned, and the rescan wait, the only thing awaited afterwards, takes its permit first.
-        // UNTESTED: An operation task cancelled after this point, as when the runtime shuts down during the rescan wait, leaves its admission to clean up without a worker permit.
-        // The cleanup write then finds the recorded outcome, and the journal wait returns it.
-        // No permit bounds that journal I/O, which is acceptable only at shutdown, and the recorded result must not be replaced by an unknown one.
+        // INVARIANT: An operation task without its worker permit holds a waiting-rescan permit or awaits nothing
+        // until it returns.
+        // The permit is given back only here, once the completion write returned.
+        // The rescan wait, the only thing awaited afterwards, takes its permit first.
+        // UNTESTED: An operation task cancelled after this point, as when the runtime shuts down during the rescan
+        // wait, leaves its admission to clean up without a worker permit.
+        // The cleanup write is then refused, with an error log, because the record already has its outcome.
+        // The journal wait returns that outcome, or an unknown one when the runtime no longer runs blocking tasks.
+        // No permit bounds that journal I/O, which is acceptable only at shutdown.
+        // The recorded result must not be replaced by an unknown one.
         // The tests interrupt a recorded operation only with a panic.
-        // Check that a cancellation still reports the recorded result, and that nothing else cancels the task while the Agent keeps running, when changing this.
+        // Check that a cancellation still reports the recorded result, and that nothing else cancels the task while
+        // the Agent keeps running, when changing this.
         drop(worker.lock().take());
         match written {
             Ok((start_recorded, result)) => {
@@ -757,10 +763,13 @@ async fn execute(context: DeviceManagementContext, pending: Pending) -> Settled 
     );
     // UNTESTED: Each operation ID reaches at most one endpoint, even on duplicate requests or delivery errors.
     // This prevents duplicate side effects; count dispatches for duplicates and failed delivery when changing this path.
-    // UNTESTED: The rescan is asked of the endpoint that carried the request, only while remote inventory is enabled, with the limits of the one dispatch instant.
-    // Another endpoint would rescan another user's instance, a disabled inventory must cause no scan, and a second clock would hold the result past its deadline.
-    // The tests cannot build a registered endpoint, so none runs this function.
-    // Check that the request and the rescan name the same `endpoint`, that `enabled` is the context's remote-inventory setting, and that the instant is taken once, right before the request.
+    // UNTESTED: The rescan is asked of the endpoint that carried the request, only while remote inventory is
+    // enabled, with the limits of the one dispatch instant.
+    // Another endpoint would rescan another user's instance, a disabled inventory must cause no scan, and a second
+    // clock would hold the result past its deadline.
+    // The tests cannot build a registered endpoint, so none reaches this call.
+    // Check that the request and the rescan name the same `endpoint`, that `enabled` is the context's
+    // remote-inventory setting, and that the instant is taken once, right before the request.
     finish_dispatched(
         pending,
         &broker.remote_grants,
@@ -789,7 +798,8 @@ struct RescanAfter<'a, E> {
 
 /// Settles an operation whose request `delivery` dispatches, then waits for UniGetUI to rescan.
 ///
-/// The rescan is requested only once the journal holds the final result, and only when the request may have been written.
+/// The rescan is requested only once the journal holds the final result, and only when the request may have been
+/// written.
 /// Its outcome never changes the result, which is returned as recorded.
 /// The wait holds no operation worker, because `pending` gives its permit back once the result is recorded.
 async fn finish_dispatched<E: super::rescan::RescanEndpoint>(
@@ -823,7 +833,8 @@ async fn finish_dispatched<E: super::rescan::RescanEndpoint>(
         };
         let wait = super::rescan::after_operation(rescan.waiting, rescan.endpoint, rescan_deadline, stopping);
         // The result is recorded, so a panic in the wait must not interrupt the operation's task.
-        // Its admission would otherwise clean up after it, with journal I/O that no permit bounds, and log a recorded operation as interrupted.
+        // Its admission would otherwise clean up after it, with journal I/O that no permit bounds, and log a
+        // recorded operation as interrupted.
         if std::panic::AssertUnwindSafe(wait).catch_unwind().await.is_err() {
             error!("Waiting for the UniGetUI rescan panicked");
         }
@@ -3651,7 +3662,8 @@ mod tests {
 
     /// Settles a dispatched operation, giving up on a Broker record that does not advance after 300 milliseconds.
     ///
-    /// A rescan may hold the result for three minutes, six times the guard, so only an answer or a shutdown ends its wait in time.
+    /// A rescan may hold the result for three minutes, six times the guard, so only an answer or a shutdown ends
+    /// its wait in time.
     async fn dispatched_result<E: RescanEndpoint>(
         pending: Pending,
         grants: &RemoteGrantStore,
@@ -4071,6 +4083,7 @@ mod tests {
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn delivery_repeated_during_the_rescan_wait_receives_the_result_without_another_rescan() -> anyhow::Result<()>
     {
@@ -4165,7 +4178,7 @@ mod tests {
         })
     }
 
-    // oracle: mutant an operation interrupted before its completion write gives its worker permit back before its cleanup ended
+    // oracle: mutant an operation interrupted before its completion write frees its worker before its cleanup ended
     #[test]
     fn interrupted_operation_keeps_its_worker_until_its_cleanup_ended() -> anyhow::Result<()> {
         runtime_with_one_blocking_thread()?.block_on(async {
