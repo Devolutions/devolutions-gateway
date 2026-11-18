@@ -377,7 +377,7 @@ impl OperationJournal {
         #[cfg(test)]
         if self
             .failed_start_writes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
             .is_ok()
         {
             bail!("injected start evidence write failure");
@@ -453,7 +453,7 @@ impl OperationJournal {
                     #[cfg(test)]
                     if self
                         .failed_completion_writes
-                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
                         .is_ok()
                     {
                         bail!("injected completion write failure");
