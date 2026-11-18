@@ -43,6 +43,7 @@ use windows::core::PCWSTR;
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::encoding::DataEncoding;
 use crate::dvc::io::{DvcInitializationProgress, run_dvc_io};
+use crate::dvc::message_name::now_message_name;
 use crate::dvc::process::{ExecError, ProcessJob, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
 use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
@@ -294,7 +295,7 @@ async fn process_messages(
             match message {
                 Some(NowMessage::Channel(NowChannelMessage::Capset(caps))) => caps,
                 Some(message) => {
-                    return Err(anyhow::anyhow!("Unexpected negotiation message: {:?}", message));
+                    return Err(anyhow::anyhow!("Unexpected negotiation message: {}", now_message_name(&message)));
                 }
                 None => {
                     error!(
@@ -994,7 +995,7 @@ impl MessageProcessor {
                 }
             }
             _ => {
-                warn!("Unsupported message: {:?}", message);
+                warn!(message_name = now_message_name(&message), "Unsupported message");
             }
         }
 

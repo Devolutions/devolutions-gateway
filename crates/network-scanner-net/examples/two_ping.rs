@@ -26,10 +26,13 @@ pub async fn main() -> anyhow::Result<()> {
     let request = echo_request.clone();
     let handle1 = tokio::task::spawn(async move {
         for i in 0..5 {
-            socket.send_to(&request, &SockAddr::from(addr)).await.unwrap();
+            socket
+                .send_to(&request, &SockAddr::from(addr))
+                .await
+                .expect("send the echo request");
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
-            let (size, addr) = socket.recv_from(&mut buf).await.unwrap();
+            let (size, addr) = socket.recv_from(&mut buf).await.expect("receive the echo reply");
             tracing::info!(
                 "socket1 received packet back: counter = {i} size: {}, addr: {:?}",
                 size,
@@ -39,10 +42,13 @@ pub async fn main() -> anyhow::Result<()> {
     });
     let handle2 = tokio::task::spawn(async move {
         for i in 0..5 {
-            socket2.send_to(&echo_request, &SockAddr::from(addr)).await.unwrap();
+            socket2
+                .send_to(&echo_request, &SockAddr::from(addr))
+                .await
+                .expect("send the echo request");
 
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
-            let (size, addr) = socket2.recv_from(&mut buf).await.unwrap();
+            let (size, addr) = socket2.recv_from(&mut buf).await.expect("receive the echo reply");
             tracing::info!(
                 "socket2 received packet back: counter = {i} size: {}, addr: {:?}",
                 size,

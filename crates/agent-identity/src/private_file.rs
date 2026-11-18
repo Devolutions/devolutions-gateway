@@ -802,7 +802,6 @@ mod tests {
 #[cfg(all(test, unix))]
 mod unix_tests {
     use std::fs;
-    use std::io::Write as _;
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     use super::*;
@@ -991,7 +990,6 @@ mod unix_tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use std::fs;
-    use std::io::Write as _;
 
     use ::windows::Win32::Security::{
         CONTAINER_INHERIT_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE, WinBuiltinAdministratorsSid, WinBuiltinUsersSid,

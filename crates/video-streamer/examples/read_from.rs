@@ -1,5 +1,7 @@
 //! For debugging webm video iterators
 
+#![expect(clippy::print_stdout, reason = "the example reports its results on the console")]
+
 use std::env;
 use std::io::Seek;
 use std::path::Path;

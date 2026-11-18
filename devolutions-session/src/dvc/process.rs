@@ -216,9 +216,9 @@ impl WinApiProcessCtx {
                 session_id: self.session_id,
             },
             Err(error) => {
-                let error = match error.downcast::<windows::core::Error>() {
-                    Ok(error) => NowStatusError::new_winapi(error.code().0.cast_unsigned()),
-                    Err(error) => return Err(error.into()),
+                let error = {
+                    let error = error.downcast::<windows::core::Error>()?;
+                    NowStatusError::new_winapi(error.code().0.cast_unsigned())
                 };
                 ServerChannelEvent::SessionCancelFailed {
                     session_id: self.session_id,

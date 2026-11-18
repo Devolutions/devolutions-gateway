@@ -5,6 +5,8 @@ edition = "2024"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 publish = false
 
+[lints]
+
 [dependencies]
 tokio = { version = "1.52", features = ["io-util", "sync"] }
 loom = { version = "0.7", features = ["futures", "checkpoint"] }

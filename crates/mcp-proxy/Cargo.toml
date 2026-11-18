@@ -9,6 +9,8 @@ keywords = ["mcp", "proxy", "cli", "llm", "json-rpc"]
 categories = ["command-line-utilities", "network-programming"]
 publish = false
 
+[lints]
+
 [lib]
 doctest = false
 test = false

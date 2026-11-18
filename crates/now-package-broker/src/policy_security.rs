@@ -1094,7 +1094,9 @@ fn parse_app_exec_alias(buffer: &[u8]) -> Option<AppExecAlias> {
     // AppExecLink payload: Version (4 bytes), then NUL-separated UTF-16 strings.
     let strings = data.get(4..)?;
     let wide: Vec<u16> = strings
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
     let mut strings = wide.split(|&c| c == 0);

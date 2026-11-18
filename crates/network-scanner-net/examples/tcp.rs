@@ -43,6 +43,7 @@ pub async fn main() -> anyhow::Result<()> {
         socket.send(request.as_bytes()).await?;
         let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
         let (size, _) = socket.recv_from(&mut buf).await?;
+        // SAFETY: `recv_from` initialized the first `size` bytes of `buf`.
         let inited = unsafe { assume_init(&buf[..size]) };
         Ok::<Vec<_>, anyhow::Error>(inited.to_vec())
     });

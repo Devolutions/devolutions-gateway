@@ -1,4 +1,5 @@
 #![allow(unused_crate_dependencies)]
+#![expect(clippy::print_stdout, reason = "the example reports its results on the console")]
 
 use std::mem::MaybeUninit;
 use std::net::SocketAddr;

@@ -261,10 +261,10 @@ impl OutputBackpressure {
         &self,
         outgoing_tx: &mpsc::Sender<AgentMessage>,
         message: AgentMessage,
-    ) -> Result<(), SendError<AgentMessage>> {
+    ) -> Result<(), Box<SendError<AgentMessage>>> {
         let message = match outgoing_tx.try_send(message) {
             Ok(()) => return Ok(()),
-            Err(TrySendError::Closed(message)) => return Err(SendError(message)),
+            Err(TrySendError::Closed(message)) => return Err(Box::new(SendError(message))),
             Err(TrySendError::Full(message)) => message,
         };
 
@@ -272,7 +272,7 @@ impl OutputBackpressure {
         self.waiting_senders.fetch_add(1, Ordering::Relaxed);
         let _waiting = DecrementOnDrop(&self.waiting_senders);
 
-        outgoing_tx.send(message).await
+        outgoing_tx.send(message).await.map_err(Box::new)
     }
 
     /// Returns whether output was held back at any point since the previous call.

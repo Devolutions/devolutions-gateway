@@ -54,7 +54,10 @@ impl PluginInformation {
 
     pub(crate) fn get_name(&self) -> String {
         // SAFETY: FFI call with no outstanding precondition.
-        let cstr = unsafe { CStr::from_ptr((self.info.NowPlugin_GetName)()) };
+        let name_ptr = unsafe { (self.info.NowPlugin_GetName)() };
+
+        // SAFETY: The plugin returns a pointer to a valid nul-terminated string.
+        let cstr = unsafe { CStr::from_ptr(name_ptr) };
         cstr.to_str()
             .tap_err(|e| error!("bad plugin name: {}", e))
             .unwrap_or("")
@@ -65,10 +68,10 @@ impl PluginInformation {
         let mut size = 0;
 
         // SAFETY: FFI call with no outstanding precondition.
-        let capabilities_array = unsafe {
-            let ptr: *const u8 = (self.info.NowPlugin_GetCapabilities)((&mut size) as *mut usize);
-            from_raw_parts::<u8>(ptr, size)
-        };
+        let ptr: *const u8 = unsafe { (self.info.NowPlugin_GetCapabilities)((&mut size) as *mut usize) };
+
+        // SAFETY: The plugin returns a pointer valid for reads of `size` bytes.
+        let capabilities_array = unsafe { from_raw_parts::<u8>(ptr, size) };
 
         let mut capabilities = Vec::with_capacity(size);
         for raw_capability in capabilities_array {
