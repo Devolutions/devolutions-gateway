@@ -903,6 +903,44 @@ mod tests {
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
+    async fn start_evidence_survives_a_failed_completion_write() -> anyhow::Result<()> {
+        let SentOperation {
+            _root: root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        assert!(record.mark_exited(0));
+        journal.fail_completion_writes(1);
+
+        let completion = finish_sent(pending, &grants, &issued, None, std::future::pending()).await;
+        assert_eq!(
+            completion.settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: Some(true),
+            }
+        );
+
+        drop(journal);
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let reopened = OperationJournal::open(data)?;
+        assert_eq!(
+            reopened.admit("authority", &request)?,
+            Admission::Recorded(Settled {
+                outcome: Outcome::Unknown,
+                execution_started: Some(true),
+            })
+        );
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
     async fn installed_outcome_survives_completion_write_failure() -> anyhow::Result<()> {
         let SentOperation {
             _root: root,
