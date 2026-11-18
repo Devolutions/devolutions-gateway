@@ -506,7 +506,7 @@ async fn finish_sent_until(
                 }
             }
             OutcomeSummary::Consumed => {}
-            OutcomeSummary::Started | OutcomeSummary::Exited { .. } if !started => {
+            OutcomeSummary::Started if !started => {
                 saw_record = true;
                 started = true;
                 if !pending.mark_started().await {
@@ -516,6 +516,7 @@ async fn finish_sent_until(
             }
             OutcomeSummary::Started => {}
             OutcomeSummary::Exited { exit_code } => {
+                started = true;
                 outcome = outcome_for_exit(&pending.request.manager, exit_code);
                 break;
             }
@@ -833,6 +834,71 @@ mod tests {
         assert_eq!(reported.error, "Winget exited with code 2316632080");
         assert_eq!(reported.status, i32::from(PackageOperationStatus::Unspecified));
         Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn observed_exit_survives_eviction_during_journal_write() -> anyhow::Result<()> {
+        let IssuedOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            caller,
+            mut broker_request,
+        } = issued_operation()?;
+        let request = pending.request.clone();
+        let record = grants.consume(issued.grant.expose_secret(), &caller, &broker_request)?;
+        assert!(record.mark_started());
+        assert!(record.mark_exited(0x8A15_0010u32.cast_signed()));
+        let sid = Sid::from_well_known(windows::Win32::Security::WinWorldSid, None).expect("well-known SID exists");
+        let spec = Plan::parse(&request).expect("request is valid").grant_spec(sid);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()?;
+
+        runtime.block_on(async {
+            let (entered, waiting) = tokio::sync::oneshot::channel();
+            let (release, resume) = std::sync::mpsc::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                entered.send(()).expect("blocking-thread observer is alive");
+                resume.recv()
+            });
+            waiting.await?;
+
+            let completion = finish_sent(pending, &grants, &issued, None, std::future::pending());
+            tokio::pin!(completion);
+            assert!(futures::poll!(completion.as_mut()).is_pending());
+
+            // Hold the first journal write until the observed Broker record has been evicted.
+            for _ in 0..10_000 {
+                let replacement = grants.issue(spec.clone())?;
+                broker_request.request_id = api::ResourceId::from(replacement.request_id.to_string().as_str());
+                grants.consume(replacement.grant.expose_secret(), &caller, &broker_request)?;
+                if grants.outcome(&issued.grant, &issued.request_id) == OutcomeSummary::Unknown {
+                    break;
+                }
+            }
+            assert_eq!(
+                grants.outcome(&issued.grant, &issued.request_id),
+                OutcomeSummary::Unknown
+            );
+            release.send(())?;
+            blocker.await??;
+            let completion = tokio::time::timeout(SETTLE_GUARD, completion).await?;
+
+            let expected = Settled {
+                outcome: Outcome::Failed {
+                    error: "Winget exited with code 2316632080".to_owned(),
+                },
+                execution_started: Some(true),
+            };
+            assert_eq!(completion.settled, expected);
+            assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
+            Ok(())
+        })
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
