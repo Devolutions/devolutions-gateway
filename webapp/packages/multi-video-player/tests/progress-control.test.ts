@@ -36,10 +36,13 @@ describe('video.js progress controls', () => {
     }
     control = progress;
     time = 0;
-    jest.spyOn(player, 'readyState').mockReturnValue(1);
+    jest.spyOn(player, 'readyState').mockReturnValue(2);
+    jest.spyOn(player, 'seeking').mockReturnValue(false);
     jest.spyOn(player, 'currentTime').mockImplementation((value) => {
       if (value !== undefined) {
         time = Number(value);
+        player.trigger('seeking');
+        queueMicrotask(() => player.trigger('seeked'));
       }
       return time;
     });
@@ -118,7 +121,7 @@ describe('video.js progress controls', () => {
     const installed = new Promise<void>((resolve) => player.one('sourceset', () => resolve()));
     const seeking = clickClip(1, 25);
     expect(time).toBe(0);
-    expect(element.currentClipIndex).toBe(1);
+    expect(element.currentClipIndex).toBe(0);
     await installed;
     player.trigger('loadedmetadata');
     await seeking;

@@ -9,6 +9,11 @@ interface PlayerSource {
 
 interface PlayerObserver {
   playbackCommand: (playing: boolean) => void;
+  isInternalPause: (nativeEnded: boolean) => boolean;
+  shouldHoldPlay: () => boolean;
+  interceptPlay?: () => Promise<void> | undefined;
+  paused?: () => boolean | undefined;
+  ended?: () => boolean | undefined;
   sourceChange: (source: PlayerSource) => void;
 }
 
@@ -27,6 +32,13 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
   states.set(player, state);
   const originalPlay = player.play;
   const originalPause = player.pause;
+  let commandId = 0;
+  let endedEvent: Event | undefined;
+  const captureEnded = (event: Event) => {
+    endedEvent = event;
+  };
+  const root = player.el();
+  root.addEventListener('ended', captureEnded, true);
   const pendingPlay = new Set<(error: Error) => void>();
   function cancelPlay() {
     for (const reject of pendingPlay) {
@@ -35,10 +47,18 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
     pendingPlay.clear();
   }
   function play(this: Player) {
+    if (observer.shouldHoldPlay()) {
+      return Promise.resolve();
+    }
+    commandId++;
     state.playing = true;
     state.hasPlaybackCommand = true;
     state.playback = undefined;
     observer.playbackCommand(true);
+    const intercepted = observer.interceptPlay?.();
+    if (intercepted) {
+      return intercepted;
+    }
     const playing = originalPlay.call(this);
     if (!playing) {
       return playing;
@@ -53,12 +73,20 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
     return playback;
   }
   function pause(this: Player) {
+    // Video.js pauses inside its native ended handler; that is not a recording Pause command.
+    if (observer.isInternalPause(!!endedEvent?.eventPhase)) {
+      originalPause.call(this);
+      return;
+    }
+    const command = ++commandId;
     state.playing = false;
     state.hasPlaybackCommand = true;
     state.playback = undefined;
-    observer.playbackCommand(false);
     cancelPlay();
-    originalPause.call(this);
+    observer.playbackCommand(false);
+    if (command === commandId) {
+      originalPause.call(this);
+    }
   }
   const guardNativePlay = () => {
     if (state.observer === observer && state.hasPlaybackCommand && !state.playing && !player.paused()) {
@@ -70,6 +98,7 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
   player.pause = pause;
   player.on('play', guardNativePlay);
   return () => {
+    root.removeEventListener('ended', captureEnded, true);
     player.off('play', guardNativePlay);
     cancelPlay();
     if (state.observer === observer) {
@@ -88,6 +117,16 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
 export function playbackIntent(player: Player) {
   const state = states.get(player);
   return state?.hasPlaybackCommand ? state.playing : !player.paused();
+}
+
+export function finishPlayback(player: Player) {
+  const state = states.get(player);
+  if (!state) {
+    throw new Error('player is not observed');
+  }
+  state.playing = false;
+  state.hasPlaybackCommand = true;
+  state.playback = undefined;
 }
 
 export async function settlePlayback(player: Player, initial?: Promise<unknown>) {
@@ -116,5 +155,11 @@ videojs.use('*', (player: Player) => ({
   callPlay() {
     const state = states.get(player);
     return state?.observer && !state.playing ? videojs.middleware.TERMINATOR : null;
+  },
+  paused(paused: boolean) {
+    return states.get(player)?.observer?.paused?.() ?? paused;
+  },
+  ended(ended: boolean) {
+    return states.get(player)?.observer?.ended?.() ?? ended;
   },
 }));

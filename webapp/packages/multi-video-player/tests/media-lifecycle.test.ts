@@ -14,6 +14,7 @@ describe('video.js media lifecycle', () => {
   let media: HTMLVideoElement;
   let metadataReady: boolean;
   let paused: boolean;
+  let ended: boolean;
   let css: PropertyDescriptor | undefined;
 
   beforeEach(async () => {
@@ -21,10 +22,30 @@ describe('video.js media lifecycle', () => {
     Object.defineProperty(window, 'CSS', { configurable: true, value: { supports: () => false } });
     metadataReady = false;
     paused = true;
+    ended = false;
     jest.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably');
     jest.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
-    jest.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockImplementation(() => (metadataReady ? 1 : 0));
+    jest.spyOn(HTMLMediaElement.prototype, 'readyState', 'get').mockImplementation(() => (metadataReady ? 2 : 0));
+    const currentTime = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+    if (!currentTime?.get || !currentTime.set) {
+      throw new Error('media currentTime is unavailable');
+    }
+    const getCurrentTime = currentTime.get;
+    const setCurrentTime = currentTime.set;
+    jest.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set').mockImplementation(function (
+      this: HTMLMediaElement,
+      time: number,
+    ) {
+      const previous = getCurrentTime.call(this);
+      setCurrentTime.call(this, time);
+      if (metadataReady && time !== previous) {
+        ended = false;
+        this.dispatchEvent(new Event('seeking'));
+        queueMicrotask(() => this.dispatchEvent(new Event('seeked')));
+      }
+    });
     jest.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(() => paused);
+    jest.spyOn(HTMLMediaElement.prototype, 'ended', 'get').mockImplementation(() => ended);
     jest.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
       paused = true;
       this.dispatchEvent(new Event('pause'));
@@ -43,6 +64,7 @@ describe('video.js media lifecycle', () => {
     player = created;
     player.on('sourceset', () => {
       metadataReady = false;
+      ended = false;
       player.el().querySelector('video')?.pause();
     });
     await new Promise<void>((resolve) => player.ready(resolve));
@@ -51,6 +73,13 @@ describe('video.js media lifecycle', () => {
       throw new Error('video.js media element was not created');
     }
     media = video;
+    media.addEventListener(
+      'ended',
+      () => {
+        ended = true;
+      },
+      true,
+    );
   });
 
   afterEach(async () => {
@@ -93,6 +122,7 @@ describe('video.js media lifecycle', () => {
         }
       });
       const installed = sourceSet();
+      media.currentTime = sources[0].duration;
       media.dispatchEvent(new Event('ended'));
       await installed;
       media.dispatchEvent(new Event('loadstart'));
@@ -109,6 +139,7 @@ describe('video.js media lifecycle', () => {
     await element.resume();
     jest.mocked(HTMLMediaElement.prototype.play).mockClear();
     const installed = sourceSet();
+    media.currentTime = sources[0].duration;
     media.dispatchEvent(new Event('ended'));
     await installed;
     media.dispatchEvent(new Event('loadstart'));
@@ -117,6 +148,193 @@ describe('video.js media lifecycle', () => {
     expect(paused).toBe(false);
     expect(element.currentClipIndex).toBe(1);
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+  });
+
+  // oracle: regression DVLS-15833
+  it('pauses and resumes a held frame through the built-in Play control', async () => {
+    await start(sources.slice(0, 1));
+    jest.spyOn(HTMLMediaElement.prototype, 'duration', 'get').mockReturnValue(2);
+    player.duration(2);
+    await element.seek(5);
+    jest.mocked(HTMLMediaElement.prototype.pause).mockImplementation(function (this: HTMLMediaElement) {
+      if (!paused) {
+        paused = true;
+        this.dispatchEvent(new Event('pause'));
+      }
+    });
+    jest.mocked(HTMLMediaElement.prototype.play).mockClear();
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    try {
+      await element.resume();
+      expect(player.paused()).toBe(false);
+      expect(paused).toBe(true);
+
+      const toggle = player.getChild('controlBar')?.getChild('playToggle');
+      if (!toggle) {
+        throw new Error('play toggle was not created');
+      }
+      const PlayToggleComponent = videojs.getComponent('PlayToggle') as typeof PlayToggle;
+      PlayToggleComponent.prototype.handleClick.call(toggle);
+      expect(player.paused()).toBe(true);
+      expect(toggle.el().getAttribute('title')).toBe('Play');
+      media.dispatchEvent(new Event('ended'));
+      expect(toggle.el().getAttribute('title')).toBe('Play');
+      await jest.advanceTimersByTimeAsync(500);
+      expect(element.currentTime).toBe(5);
+
+      PlayToggleComponent.prototype.handleClick.call(toggle);
+      expect(player.paused()).toBe(false);
+      await jest.advanceTimersByTimeAsync(500);
+      expect(element.currentTime).toBeCloseTo(5.5);
+      expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // oracle: regression DVLS-15833
+  it('keeps native EOF refresh events from pausing the held clock and exposes Replay at the declared end', async () => {
+    await start(sources.slice(0, 1));
+    player.duration(2);
+    await element.resume();
+    media.currentTime = 2;
+    await Promise.resolve();
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    try {
+      paused = true;
+      media.dispatchEvent(new Event('ended'));
+      await jest.advanceTimersByTimeAsync(500);
+      expect(element.currentTime).toBeCloseTo(2.5);
+      media.dispatchEvent(new Event('ended'));
+      await jest.advanceTimersByTimeAsync(500);
+      expect(element.currentTime).toBeCloseTo(3);
+      expect(player.ended()).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(7000);
+      expect(element.currentTime).toBe(10);
+      expect(player.paused()).toBe(true);
+      expect(player.ended()).toBe(true);
+      const toggle = player.getChild('controlBar')?.getChild('playToggle');
+      expect(toggle?.el().getAttribute('title')).toBe('Replay');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('restarts the playlist when the Replay control is clicked after completion', async () => {
+    await start();
+    await element.resume();
+
+    for (const source of sources.slice(0, -1)) {
+      const installed = sourceSet();
+      media.currentTime = source.duration;
+      media.dispatchEvent(new Event('ended'));
+      await installed;
+      loadedMetadata();
+    }
+
+    media.currentTime = sources[sources.length - 1].duration;
+    paused = true;
+    media.dispatchEvent(new Event('ended'));
+    expect(element.currentClipIndex).toBe(sources.length - 1);
+
+    const toggle = player.getChild('controlBar')?.getChild('playToggle');
+    if (!toggle) {
+      throw new Error('play toggle was not created');
+    }
+    const PlayToggleComponent = videojs.getComponent('PlayToggle') as typeof PlayToggle;
+    const installed = sourceSet();
+    PlayToggleComponent.prototype.handleClick.call(toggle);
+    await installed;
+
+    expect(player.currentSrc()).toBe(sources[0].src);
+    loadedMetadata();
+    await Promise.resolve();
+
+    expect(element.currentClipIndex).toBe(0);
+    expect(media.src).toBe(new URL(sources[0].src, document.baseURI).href);
+    expect(paused).toBe(false);
+  });
+
+  // oracle: regression DVLS-15833
+  it('publishes natural completion before a pause listener can request replay', async () => {
+    await start(sources.slice(0, 1));
+    await element.resume();
+    const observations: string[] = [];
+    element.addEventListener('timeupdate', (event) => observations.push(event.detail.readiness));
+    media.addEventListener(
+      'pause',
+      () => {
+        void element.resume().catch(() => {});
+      },
+      { once: true },
+    );
+    media.currentTime = sources[0].duration;
+    paused = true;
+
+    media.dispatchEvent(new Event('ended'));
+
+    expect(observations).toContain('ended');
+  });
+
+  // oracle: regression DVLS-15833
+  it('holds a paused seek at the clip endpoint when the Play control is clicked', async () => {
+    await start();
+    const installed = sourceSet();
+    const seek = element.seek(element.duration);
+    await installed;
+    loadedMetadata();
+    await seek;
+    expect(media.currentTime).toBe(30);
+
+    jest.mocked(HTMLMediaElement.prototype.play).mockImplementation(function (this: HTMLMediaElement) {
+      if (this.currentTime === 30) {
+        this.currentTime = 0;
+      }
+      paused = false;
+      this.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+    const toggle = player.getChild('controlBar')?.getChild('playToggle');
+    if (!toggle) {
+      throw new Error('play toggle was not created');
+    }
+    const PlayToggleComponent = videojs.getComponent('PlayToggle') as typeof PlayToggle;
+    PlayToggleComponent.prototype.handleClick.call(toggle);
+
+    expect(paused).toBe(true);
+    expect(element.currentClipIndex).toBe(2);
+    expect(media.currentTime).toBe(30);
+
+    await element.seek(35);
+    expect(paused).toBe(true);
+    expect(media.currentTime).toBeCloseTo(5);
+    await element.resume();
+    expect(paused).toBe(false);
+    expect(media.currentTime).toBeCloseTo(5);
+  });
+
+  it('honors Play from the ending clip event when scheduling its successor', async () => {
+    await start();
+    const installed = sourceSet();
+    let ending = false;
+    let requested = false;
+    element.addEventListener('timeupdate', (event) => {
+      if (ending && !requested && event.detail.clipIndex === 0) {
+        requested = true;
+        void player.play();
+      }
+    });
+    media.currentTime = sources[0].duration;
+    ending = true;
+    media.dispatchEvent(new Event('ended'));
+    await installed;
+    media.dispatchEvent(new Event('loadstart'));
+    loadedMetadata();
+    await Promise.resolve();
+    expect(element.currentClipIndex).toBe(1);
+    expect(paused).toBe(false);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2);
   });
 
   async function nativeAutoplay() {
@@ -152,6 +370,7 @@ describe('video.js media lifecycle', () => {
       };
       element.addEventListener(eventName, pauseOnTransition);
       const installed = sourceSet();
+      media.currentTime = sources[0].duration;
       media.dispatchEvent(new Event('ended'));
       await installed;
       media.dispatchEvent(new Event('loadstart'));
@@ -282,6 +501,7 @@ describe('video.js media lifecycle', () => {
   it('ignores old-source metadata before asynchronous source installation and before new metadata is available', async () => {
     await start();
     media.currentTime = 3;
+    media.dispatchEvent(new Event('timeupdate'));
     const installed = sourceSet();
     const seeking = element.seek(15);
     let settled = false;
@@ -293,7 +513,7 @@ describe('video.js media lifecycle', () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     expect(media.currentTime).toBe(3);
-    expect(element.currentTime).toBe(15);
+    expect(element.currentTime).toBe(3);
     await installed;
     expect(media.src).toBe(new URL(sources[1].src, document.baseURI).href);
     media.dispatchEvent(new Event('loadedmetadata'));
@@ -652,6 +872,7 @@ describe('video.js media lifecycle', () => {
     });
     await start([sources[0], { ...sources[1], type: 'application/unsupported' }, sources[2]]);
     const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    media.currentTime = sources[0].duration;
     media.dispatchEvent(new Event('ended'));
     expect(log).toHaveBeenCalledWith('Playback failed:', expect.any(Error));
     expect(element.currentClipIndex).toBe(0);
@@ -678,7 +899,7 @@ describe('video.js media lifecycle', () => {
         // @ts-expect-error Capturing listeners can receive a native Event without detail.
         const detail = event.detail;
         if (event instanceof CustomEvent) {
-          expect(detail).toEqual({ currentTime: 3, clipIndex: 0 });
+          expect(detail).toEqual(expect.objectContaining({ currentTime: 3, clipIndex: 0, localTime: 3 }));
         } else {
           expect(detail).toBeUndefined();
         }
@@ -687,9 +908,9 @@ describe('video.js media lifecycle', () => {
     );
     media.currentTime = 3;
     media.dispatchEvent(new Event('timeupdate'));
-    expect(captured).toHaveLength(2);
+    expect(captured).toHaveLength(3);
     expect(captured.filter((event) => !(event instanceof CustomEvent))).toHaveLength(1);
-    expect(custom).toHaveLength(1);
+    expect(custom).toHaveLength(2);
   });
 
   it('keeps native event typing for boolean and runtime-selected capture options', () => {
