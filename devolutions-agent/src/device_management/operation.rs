@@ -1,7 +1,7 @@
 //! Remote package operations: journaling, grant issuing and delivery to one UniGetUI instance.
 //!
 //! The Broker's in-process record of the issued grant is the only source of start evidence.
-//! Once the grant may have reached UniGetUI, the verdict is unknown whatever UniGetUI answers or fails to answer.
+//! Once the grant may have reached UniGetUI, its response alone cannot establish the outcome.
 
 use std::future::Future;
 use std::sync::Arc;
