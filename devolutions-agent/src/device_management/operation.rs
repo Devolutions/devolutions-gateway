@@ -610,7 +610,8 @@ impl Pending {
         }
     }
 
-    /// Records the end of the operation; a record that cannot be written leaves the unknown outcome to later deliveries.
+    /// Records the end of the operation.
+    /// A failed write reports an unknown outcome for this delivery.
     async fn finish(self, outcome: Outcome, started: bool) -> Settled {
         self.finish_with_durability(outcome, started).await.settled
     }
@@ -944,6 +945,7 @@ mod tests {
     use now_package_broker::remote_grant::{ExecutionRecord, VerifiedCaller};
     use now_policy_api as api;
 
+    use super::super::test_tempdir;
     use super::*;
 
     /// Bounds a wait that must end, generously enough to absorb slow journal I/O.
@@ -982,7 +984,7 @@ mod tests {
     }
 
     fn issued_operation() -> anyhow::Result<IssuedOperation> {
-        let root = tempfile::Builder::new().prefix("operation-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let journal = Arc::new(OperationJournal::open(data)?);
         let request = request(PackageOperationType::Install, "Winget", "winget", "user");
@@ -2162,15 +2164,6 @@ mod tests {
         Ok(())
     }
 
-    /// The system temporary directory can be writable by other accounts, which fails the journal's check of the
-    /// directories above, so tests use the user's local application data directory where there is one.
-    fn test_tempdir() -> std::io::Result<tempfile::TempDir> {
-        let base = std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
-        tempfile::Builder::new().prefix("operation-").tempdir_in(base)
-    }
-
     fn test_journal() -> anyhow::Result<(tempfile::TempDir, Arc<OperationJournal>)> {
         let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
@@ -2189,6 +2182,7 @@ mod tests {
     }
 
     // oracle: mutant a Broker wait releases its operation worker before settlement
+    // oracle: mutant a settled operation retains its worker
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn waiting_for_the_broker_retains_an_operation_worker() -> anyhow::Result<()> {
@@ -2240,8 +2234,11 @@ mod tests {
         shutdown.signal();
         let result = tokio::time::timeout(SETTLE_GUARD, result).await??;
         assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
-        drop(other_workers);
-        assert!(coordinator.try_worker().is_some());
+        other_workers.clear();
+        while let Some(permit) = coordinator.try_worker() {
+            other_workers.push(permit);
+        }
+        assert_eq!(other_workers.len(), super::super::MAX_CONCURRENT_REQUESTS);
         Ok(())
     }
 

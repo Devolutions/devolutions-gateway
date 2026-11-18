@@ -564,7 +564,7 @@ impl OperationJournal {
     /// Durably records the end of an operation [`admitted`](Self::admit) for `request`, and wakes its waiters.
     ///
     /// Recording the outcome already recorded succeeds; recording a different outcome over a recorded one is an error.
-    /// When the outcome cannot be written, the operation stops being in flight, so waiters read it as unknown.
+    /// A failed outcome write ends the in-flight operation; waiters read the record as it exists.
     pub(super) fn complete(
         &self,
         authority_id: &str,
@@ -630,10 +630,9 @@ impl OperationJournal {
         completed
     }
 
-    /// Blocks until the operation in flight for `request` has its outcome recorded, and returns it.
+    /// Blocks until the operation for `delivery` is no longer in flight, then reads its outcome.
     ///
-    /// An operation that is not in flight returns its recorded outcome at once, or [`Outcome::Unknown`] when it is
-    /// still pending, with the start evidence recorded.
+    /// Returns the recorded outcome, or [`Outcome::Unknown`] for a record without one, with the recorded start evidence.
     /// Call it off the async runtime.
     pub(super) fn wait(&self, authority_id: &str, delivery: &DeliveryKey) -> anyhow::Result<Settled> {
         let name = delivery.locate(authority_id)?;

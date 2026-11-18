@@ -560,6 +560,16 @@ async fn run_package_operation(
     }
 }
 
+/// The system temporary directory can be writable by other accounts, which fails the journal's check.
+/// Use the user's local application data directory when available.
+#[cfg(all(test, windows))]
+fn test_tempdir() -> std::io::Result<tempfile::TempDir> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    tempfile::Builder::new().prefix("operation-").tempdir_in(base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,7 +581,7 @@ mod tests {
     async fn package_dispatch_does_not_take_a_shared_request_permit() -> anyhow::Result<()> {
         use agent_channel_client::{ChannelClient, HelloFields, Settings, Target};
 
-        let root = tempfile::Builder::new().prefix("package-dispatch-").tempdir()?;
+        let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let recorded = PackageOperationRequest {
             operation_id: Uuid::new_v4().to_string(),
