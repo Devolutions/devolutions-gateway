@@ -126,7 +126,9 @@ The read-only `playing` getter reports logical playback, including held-frame in
 Playlist metadata is fixed for each `play()` initialization; call `play()` again to apply changes.
 Durations must be finite and nonnegative.
 Source URLs must be nonempty strings, not whitespace.
-Before a playlist is initialized, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, `playing` is `false`, and `seek()` and `resume()` resolve without loading a source.
+Before `play()` initializes a playlist, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, `playing` is `false`, and `seek()` and `resume()` resolve without loading a source.
+While the first source loads after `play()`, `currentClipIndex` remains `-1` until metadata arrives.
+Later source changes keep the previous index until new metadata arrives.
 After disposal, the getters return those same empty values and `seek()` and `resume()` reject with `InvalidStateError`.
 
 `seek(seconds): Promise<void>` clamps finite times to `[0, duration]` and rejects non-finite input with `RangeError`.

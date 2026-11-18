@@ -34,8 +34,10 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
   const originalPause = player.pause;
   let commandId = 0;
   let endedEvent: Event | undefined;
+  let endedPausePending = false;
   const captureEnded = (event: Event) => {
     endedEvent = event;
+    endedPausePending = !player.paused();
   };
   const root = player.el();
   root.addEventListener('ended', captureEnded, true);
@@ -74,7 +76,11 @@ export function observePlayer(player: Player, observer: PlayerObserver) {
   }
   function pause(this: Player) {
     // Video.js pauses inside its native ended handler; that is not a recording Pause command.
-    if (observer.isInternalPause(!!endedEvent?.eventPhase)) {
+    const nativeEnded = !!endedEvent?.eventPhase && endedPausePending;
+    if (nativeEnded) {
+      endedPausePending = false;
+    }
+    if (observer.isInternalPause(nativeEnded)) {
       originalPause.call(this);
       return;
     }

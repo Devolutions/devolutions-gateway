@@ -186,13 +186,13 @@ export class MultiVideoPlayer extends HTMLElement {
       (observation) =>
         this.dispatchEvent(
           new CustomEvent('timeupdate', {
-            detail: observation,
+            detail: { ...observation },
           }),
         ),
       (observation) =>
         this.dispatchEvent(
           new CustomEvent('clipchange', {
-            detail: observation,
+            detail: { ...observation },
           }),
         ),
     );

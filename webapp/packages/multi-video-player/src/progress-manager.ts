@@ -71,13 +71,18 @@ export class ProgressManager {
     this.player.on('error', this.handleError);
     this.player.on('ratechange', this.handleRateChange);
     this.removePlayerObserver = observePlayer(this.player, {
-      isInternalPause: (nativeEnded) => !this.pauseRequested && (nativeEnded || (!this.tail && this.player.ended())),
+      isInternalPause: (nativeEnded) => !this.pauseRequested && nativeEnded,
       playbackCommand: (playing) => {
         this.playbackCommandId++;
         this.autoplayLoadId = undefined;
         const wasTailing = this.tail?.startedAt !== undefined;
         if (playing) {
-          this.pauseRequested = false;
+          if (this.loadError) {
+            this.pauseRequested = true;
+            finishPlayback(this.player);
+          } else {
+            this.pauseRequested = false;
+          }
         } else {
           this.pauseRequested = true;
           this.stopTail();
@@ -106,6 +111,9 @@ export class ProgressManager {
       },
       shouldHoldPlay: () => this.holdEndpoint,
       interceptPlay: () => {
+        if (this.loadError) {
+          return Promise.reject(this.loadError);
+        }
         if (this.completed) {
           return this.resume();
         }
@@ -134,11 +142,11 @@ export class ProgressManager {
   }
 
   get playing() {
+    if (this.tail) {
+      return this.tail.startedAt !== undefined;
+    }
     return (
-      this.observation?.readiness === 'ready' &&
-      (this.tail
-        ? this.tail.startedAt !== undefined
-        : !this.player.paused() && !this.player.ended() && !this.player.seeking())
+      this.observation?.readiness === 'ready' && !this.player.paused() && !this.player.ended() && !this.player.seeking()
     );
   }
 
@@ -184,6 +192,7 @@ export class ProgressManager {
     this.pendingSeek?.cancel(new DOMException('seek superseded', 'AbortError'));
     const offset = seekHandle.souce.duration * percentage.toDecimal();
     const previousLoadId = this.sourceLoadId;
+    const previousObservation = this.observation;
     const wasCompleted = this.completed;
     const heldEndpoint = this.holdEndpoint;
     const tailWasPlaying = this.tail?.startedAt !== undefined;
@@ -275,15 +284,22 @@ export class ProgressManager {
           apply();
         }
       } catch (error) {
-        if (this.sourceLoadId === previousLoadId) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (this.sourceLoadId === previousLoadId && this.pendingSeek?.cancel === finish) {
           this.completed = wasCompleted;
           this.holdEndpoint = heldEndpoint;
           this.tail = previousTail;
-          if (tailWasPlaying && !this.pauseRequested) {
+          finish(failure);
+          if (previousObservation) {
+            this.observation = previousObservation;
+            this.onTimeUpdate?.(previousObservation);
+          }
+          if (tailWasPlaying && !this.pauseRequested && !this.pendingSeek && !this.disposed) {
             this.startTail();
           }
+        } else {
+          finish(failure);
         }
-        finish(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }

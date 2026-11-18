@@ -58,6 +58,8 @@ const createMiddleware = jest.mocked(videojs.use).mock.calls[0][1];
 function createPlayer() {
   const player = jest.mocked(new Player(document.createElement('video')));
   const listeners = new Map<string, Set<Parameters<Player['on']>[1]>>();
+  const root = document.createElement('div');
+  player.el.mockReturnValue(root);
   const state = {
     time: 0,
     duration: Number.POSITIVE_INFINITY,
@@ -146,7 +148,7 @@ function createPlayer() {
     }
   }
 
-  return { player, play: player.play, state, progress, emit, listeners };
+  return { player, play: player.play, state, progress, emit, listeners, root };
 }
 
 describe('recording playback API', () => {
@@ -581,6 +583,40 @@ describe('recording playback API', () => {
     expect(element.currentTime).toBe(40);
   });
 
+  // oracle: A rejected source selection must leave the still-loaded observation ready.
+  it('restores readiness after seeking to an unsupported source', async () => {
+    const observations: PlaybackObservation[] = [];
+    element.addEventListener('timeupdate', (event) => observations.push(event.detail));
+    await start();
+    fixture.player.selectSource.mockReturnValueOnce(false);
+
+    await expect(element.seek(12)).rejects.toThrow('no compatible source was found for this media');
+
+    expect(observations[observations.length - 1]).toEqual({
+      clipIndex: 0,
+      localTime: 0,
+      currentTime: 0,
+      readiness: 'ready',
+    });
+  });
+
+  it('preserves a newer seek issued by the restored observation listener', async () => {
+    await start();
+    fixture.player.selectSource.mockReturnValueOnce(false);
+    let recovery: Promise<void> | undefined;
+    element.addEventListener('timeupdate', (event) => {
+      if (event.detail.readiness === 'ready' && event.detail.clipIndex === 0 && !recovery) {
+        recovery = element.seek(5);
+      }
+    });
+
+    await expect(element.seek(12)).rejects.toThrow('no compatible source was found for this media');
+    await recovery;
+
+    expect(element.currentClipIndex).toBe(0);
+    expect(element.currentTime).toBeCloseTo(5);
+  });
+
   it('dispatches typed DOM clock and clip events, without stale cross-clip offsets', async () => {
     const times: { currentTime: number; clipIndex: number }[] = [];
     const clips: number[] = [];
@@ -607,6 +643,54 @@ describe('recording playback API', () => {
       localTime: 9.5,
       readiness: 'ready',
     });
+  });
+
+  // oracle: Mutating a public event detail must not mutate player state.
+  it('isolates event details from the player observation', async () => {
+    await start();
+    await element.resume();
+    fixture.state.time = 2;
+    const mutateObservation = (observation: PlaybackObservation) => {
+      observation.currentTime = 42;
+      observation.clipIndex = 2;
+      observation.readiness = 'ended';
+    };
+    const onTimeUpdate = (event: CustomEvent<PlaybackObservation>) => {
+      mutateObservation(event.detail);
+    };
+    element.addEventListener('timeupdate', onTimeUpdate);
+
+    fixture.emit('timeupdate');
+
+    expect(element.currentTime).toBe(2);
+    expect(element.currentClipIndex).toBe(0);
+    expect(element.playing).toBe(true);
+
+    element.removeEventListener('timeupdate', onTimeUpdate);
+    element.addEventListener('clipchange', (event) => {
+      mutateObservation(event.detail);
+    });
+    const seek = element.seek(12);
+    fixture.emit('loadedmetadata');
+    await seek;
+
+    expect(element.currentTime).toBe(12);
+    expect(element.currentClipIndex).toBe(1);
+    expect(element.playing).toBe(true);
+  });
+
+  // oracle: The public playing state follows the held recording clock, not a native frame refresh.
+  it('keeps logical playback active during a held-frame endpoint refresh seek', async () => {
+    await start(playlist.slice(0, 1));
+    await element.resume();
+    fixture.state.duration = 9;
+    fixture.state.time = 9;
+    fixture.state.ended = true;
+    fixture.emit('ended');
+    fixture.state.seeking = true;
+    fixture.emit('seeking');
+
+    expect(element.playing).toBe(true);
   });
 
   it('keeps observations on the old source until the replacement metadata is available', async () => {
@@ -738,8 +822,15 @@ describe('recording playback API', () => {
     fixture.emit('timeupdate');
     fixture.emit('seeked');
     fixture.state.ended = true;
-    fixture.player.pause();
-    fixture.emit('ended');
+    fixture.root.addEventListener(
+      'ended',
+      () => {
+        fixture.player.pause();
+        fixture.emit('ended');
+      },
+      { once: true },
+    );
+    fixture.root.dispatchEvent(new Event('ended', { bubbles: true }));
 
     await seeking;
 
@@ -1077,6 +1168,27 @@ describe('recording playback API', () => {
     }
   });
 
+  // oracle: A failed media source must not resume through the player Play command.
+  it('rejects Play after a held-frame media failure without restarting the clock', async () => {
+    await start([{ ...playlist[0], duration: 14 }]);
+    fixture.state.duration = 10.937;
+    await element.seek(12);
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    try {
+      await element.resume();
+      fixture.emit('error');
+      const stopped = element.currentTime;
+
+      await expect(fixture.player.play()).rejects.toThrow('video source failed to load');
+      await jest.advanceTimersByTimeAsync(2000);
+
+      expect(element.currentTime).toBe(stopped);
+      expect(element.playing).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   // oracle: regression DVLS-15833
   it('preserves a newer Play issued by a paused held-frame observation', async () => {
     await start([{ ...playlist[0], duration: 14 }]);
@@ -1261,6 +1373,28 @@ describe('recording playback API', () => {
     fixture.state.time = 8;
     fixture.emit('ended');
     fixture.emit('loadedmetadata');
+    expect(fixture.play).not.toHaveBeenCalled();
+    expect(fixture.state.paused).toBe(true);
+  });
+
+  // oracle: An explicit Pause command at a clip boundary must override automatic advance.
+  it('honors direct Pause at a terminal observation during native ended dispatch', async () => {
+    await start();
+    await element.resume();
+    fixture.play.mockClear();
+    element.addEventListener('timeupdate', (event) => {
+      if (event.detail.clipIndex === 0 && event.detail.currentTime === playlist[0].duration) {
+        fixture.player.pause();
+      }
+    });
+    fixture.state.time = playlist[0].duration;
+    fixture.state.ended = true;
+    fixture.root.addEventListener('ended', () => fixture.player.pause(), { once: true });
+    fixture.root.addEventListener('ended', () => fixture.emit('ended'), { once: true });
+
+    fixture.root.dispatchEvent(new Event('ended', { bubbles: true }));
+    fixture.emit('loadedmetadata');
+
     expect(fixture.play).not.toHaveBeenCalled();
     expect(fixture.state.paused).toBe(true);
   });
