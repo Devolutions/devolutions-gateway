@@ -307,11 +307,6 @@ impl Pending {
             } else {
                 Ok(())
             };
-            let recorded = if start_recorded.is_ok() {
-                recorded
-            } else {
-                Outcome::Unknown
-            };
             let result = self
                 .journal
                 .complete_with_started(&self.authority_id, &self.request, recorded, started);
@@ -328,7 +323,7 @@ impl Pending {
                 if let Err(error) = &result {
                     error!(error = format!("{error:#}"), "Cannot record package operation outcome");
                 }
-                let settled = if start_recorded.is_ok() && durably_recorded {
+                let settled = if durably_recorded {
                     Settled {
                         outcome,
                         execution_started: started.then_some(true),
@@ -833,6 +828,77 @@ mod tests {
         assert!(!reported.success);
         assert_eq!(reported.error, "Winget exited with code 2316632080");
         assert_eq!(reported.status, i32::from(PackageOperationStatus::Unspecified));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn first_observed_exit_survives_start_write_failure() -> anyhow::Result<()> {
+        let SentOperation {
+            _root: root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        assert!(record.mark_exited(0));
+        journal.fail_start_writes(1);
+
+        let completion = finish_sent(pending, &grants, &issued, None, std::future::pending()).await;
+        assert!(completion.durably_recorded);
+        let expected = Settled {
+            outcome: Outcome::Succeeded,
+            execution_started: Some(true),
+        };
+        assert_eq!(completion.settled, expected);
+
+        drop(journal);
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let reopened = OperationJournal::open(data)?;
+        assert_eq!(reopened.admit("authority", &request)?, Admission::Recorded(expected));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn first_observed_exit_is_unknown_when_completion_write_fails() -> anyhow::Result<()> {
+        let SentOperation {
+            _root: root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        assert!(record.mark_exited(0));
+        journal.fail_start_writes(1);
+        journal.fail_completion_writes(1);
+
+        let completion = finish_sent(pending, &grants, &issued, None, std::future::pending()).await;
+        assert!(!completion.durably_recorded);
+        assert_eq!(
+            completion.settled,
+            Settled {
+                outcome: Outcome::Unknown,
+                execution_started: Some(true),
+            }
+        );
+
+        drop(journal);
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let reopened = OperationJournal::open(data)?;
+        assert_eq!(
+            reopened.admit("authority", &request)?,
+            Admission::Recorded(Settled {
+                outcome: Outcome::Unknown,
+                execution_started: None,
+            })
+        );
         Ok(())
     }
 
