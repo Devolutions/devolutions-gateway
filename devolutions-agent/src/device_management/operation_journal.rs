@@ -28,17 +28,22 @@
 //! The journal repairs neither, and every other operation ID keeps working.
 //! The list is rewritten whole at each admission and is limited to [`MAX_INDEX_SIZE`] bytes, beyond which admission
 //! fails closed.
+//! The membership snapshot includes unlisted record names and is bounded by the same serialized size.
+//! The journal refuses to open or admit another ID if the snapshot cannot fit.
 //!
 //! A wholly missing journal is created, so operations recorded in a journal that was deleted whole may execute again.
 //! A journal directory that exists but lacks its records directory or journal.json is unrecoverable and is refused.
 
 use std::collections::{BTreeSet, HashSet};
+use std::ffi::OsStr;
 use std::io::{Read as _, Write as _};
+use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use agent_channel_proto::PackageOperationRequest;
 use anyhow::{Context as _, bail, ensure};
+use arc_swap::ArcSwap;
 use camino::Utf8Path;
 use parking_lot::{Condvar, Mutex};
 use private_fs::{Access, Account, Dir, Existing, Fallback, FileOptions, Replace, Rule, Share};
@@ -55,6 +60,8 @@ const INDEX_NAME: &str = "journal.json";
 const VERSION: u32 = 1;
 const MAX_RECORD_SIZE: u64 = 1024 * 1024;
 const MAX_INDEX_SIZE: u64 = 64 * 1024 * 1024;
+const HASH_HEX_LEN: usize = 64;
+const RECORD_SUFFIX: &str = ".json";
 
 /// The confirmed end of an operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +117,12 @@ struct Index {
     operations: BTreeSet<String>,
 }
 
+#[derive(Serialize)]
+struct IndexRef<'a> {
+    version: u32,
+    operations: &'a BTreeSet<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -133,6 +146,37 @@ struct State {
     in_flight: HashSet<String>,
 }
 
+#[derive(Clone, Debug)]
+struct Membership {
+    names: BTreeSet<String>,
+    /// INVARIANT: The compact JSON index containing exactly `names` has this size in bytes.
+    index_size: u64,
+}
+
+impl Membership {
+    fn new(names: BTreeSet<String>, limit: u64) -> anyhow::Result<Self> {
+        let index_size = index_bytes(&names, limit)?.len() as u64;
+        Ok(Self { names, index_size })
+    }
+
+    fn insert(&mut self, name: String, limit: u64) -> anyhow::Result<()> {
+        debug_assert!(is_canonical_record_name(&name));
+        if self.names.contains(&name) {
+            return Ok(());
+        }
+        let index_size = self.size_with(&name);
+        ensure!(index_size <= limit, "package operation journal index is too large");
+        self.names.insert(name);
+        self.index_size = index_size;
+        Ok(())
+    }
+
+    fn size_with(&self, name: &str) -> u64 {
+        // Each added name is ASCII, so JSON adds only quotes and, after the first name, a comma.
+        self.index_size + (name.len() + 2 + usize::from(!self.names.is_empty())) as u64
+    }
+}
+
 /// The journal of every authority of this Agent.
 ///
 /// Hold one journal at a time: the directory handle can keep another open of it from sharing.
@@ -141,6 +185,14 @@ pub(super) struct OperationJournal {
     /// The directory holding `journal.json` and the records.
     directory: Dir,
     state: Mutex<State>,
+    // UNTESTED: Only the Agent writes the journal while it is open; the snapshot cannot see out-of-band writes.
+    // When changing ownership, account for those writes before treating absence as proof.
+    // Out-of-band records still present are discovered at the next open.
+    membership: ArcSwap<Membership>,
+    #[cfg(test)]
+    index_write_hook: Mutex<Option<tests::IndexWriteHook>>,
+    // Tests lower this limit to exercise its boundary with small files.
+    index_size_limit: u64,
     recorded: Condvar,
     #[cfg(test)]
     failed_start_writes: AtomicUsize,
@@ -244,17 +296,93 @@ fn hashed(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 
-fn record_name(operation_id: &str) -> String {
-    format!("{}.json", hashed(operation_id))
+pub(super) fn record_name(operation_id: &str) -> String {
+    format!("{}{RECORD_SUFFIX}", hashed(operation_id))
+}
+
+fn is_record_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() == HASH_HEX_LEN + RECORD_SUFFIX.len()
+        && bytes[..HASH_HEX_LEN].iter().all(u8::is_ascii_hexdigit)
+        && bytes[HASH_HEX_LEN..].eq_ignore_ascii_case(RECORD_SUFFIX.as_bytes())
+}
+
+fn is_canonical_record_name(name: &str) -> bool {
+    is_record_name(name) && !name.bytes().any(|byte| byte.is_ascii_uppercase())
+}
+
+fn normalized_record_name(name: &OsStr) -> anyhow::Result<Option<String>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt as _;
+
+        // A non-ASCII name of the same UTF-16 length may compare equal to a generated name on Windows.
+        let mut non_ascii = false;
+        let length = name.encode_wide().inspect(|unit| non_ascii |= *unit > 0x7f).count();
+        ensure!(
+            length != HASH_HEX_LEN + RECORD_SUFFIX.len() || !non_ascii,
+            "package operation record name cannot be normalized"
+        );
+    }
+    Ok(name
+        .to_str()
+        .filter(|name| is_record_name(name))
+        .map(str::to_ascii_lowercase))
+}
+
+fn index_bytes(admitted: &BTreeSet<String>, limit: u64) -> anyhow::Result<Vec<u8>> {
+    let bytes = serde_json::to_vec(&IndexRef {
+        version: VERSION,
+        operations: admitted,
+    })
+    .context("serialize package operation journal index")?;
+    ensure!(
+        bytes.len() as u64 <= limit,
+        "package operation journal index is too large"
+    );
+    Ok(bytes)
 }
 
 impl OperationJournal {
+    /// Returns false only when the nonempty ID has no journal record under ["Package operations"].
+    ///
+    /// This reads a lock-free snapshot without waiting for journal I/O.
+    /// The caller tracks admissions until this journal publishes them.
+    ///
+    /// ["Package operations"]: https://github.com/Devolutions/devolutions-gateway/blob/master/crates/agent-channel-proto/CONTRACT.package-management.md#operations
+    pub(super) fn may_contain(&self, operation_id: &str) -> bool {
+        operation_id.is_empty() || self.membership.load().names.contains(&record_name(operation_id))
+    }
+
+    /// Returns whether the membership index has room for a record named `name`.
+    #[cfg(any(windows, test))]
+    pub(super) fn has_index_capacity(&self, name: &str) -> bool {
+        let membership = self.membership.load();
+        membership.names.contains(name) || membership.size_with(name) <= self.index_size_limit
+    }
+
+    /// Reads an existing operation under ["Package operations"] without admitting a new one.
+    ///
+    /// Returns `None` only when the journal establishes absence.
+    /// This can block on journal I/O and must run off the async runtime.
+    ///
+    /// ["Package operations"]: https://github.com/Devolutions/devolutions-gateway/blob/master/crates/agent-channel-proto/CONTRACT.package-management.md#operations
+    pub(super) fn lookup(&self, authority_id: &str, delivery: &DeliveryKey) -> anyhow::Result<Option<Admission>> {
+        let name = delivery.locate(authority_id)?;
+        let state = self.state.lock();
+        self.read_admission(&state, &name, delivery)
+    }
+
     /// Opens the journal, creating it when the data directory or the journal directory is missing.
     ///
     /// A journal deleted whole cannot be told from a first run, so operations recorded in it may execute again.
     /// An existing journal missing its records directory or `journal.json` is refused, as is one that is not private
     /// to the Agent's account.
     pub(super) fn open(data_dir: &Utf8Path) -> anyhow::Result<Self> {
+        Self::open_with_index_size_limit(data_dir, MAX_INDEX_SIZE)
+    }
+
+    fn open_with_index_size_limit(data_dir: &Utf8Path, limit: u64) -> anyhow::Result<Self> {
         let rule = directory_rule();
         let data = Dir::create_base(data_dir, &rule).context("open data directory")?;
         // UNTESTED: The initialization lock prevents another process from treating an existing journal as new.
@@ -291,6 +419,10 @@ impl OperationJournal {
                 admitted: BTreeSet::new(),
                 in_flight: HashSet::new(),
             }),
+            membership: ArcSwap::from_pointee(Membership::new(BTreeSet::new(), limit)?),
+            #[cfg(test)]
+            index_write_hook: Mutex::new(None),
+            index_size_limit: limit,
             recorded: Condvar::new(),
             #[cfg(test)]
             failed_start_writes: AtomicUsize::new(0),
@@ -300,6 +432,13 @@ impl OperationJournal {
             failed_completion_writes_after_install: AtomicUsize::new(0),
         };
         let admitted = journal.load_index(was_missing)?;
+        let mut membership = Membership::new(admitted.clone(), limit)?;
+        for entry in journal.directory.entries().context("list package operation records")? {
+            if let Some(name) = normalized_record_name(&entry.name)? {
+                membership.insert(name, limit)?;
+            }
+        }
+        journal.membership.store(Arc::new(membership));
         journal.state.get_mut().admitted = admitted;
         Ok(journal)
     }
@@ -319,7 +458,8 @@ impl OperationJournal {
                 "package operation journal has content but no index"
             );
             let admitted = BTreeSet::new();
-            self.write_index(&admitted)
+            let bytes = index_bytes(&admitted, self.index_size_limit)?;
+            self.write_index(&bytes)
                 .context("persist package operation journal index")?;
             return Ok(admitted);
         };
@@ -329,6 +469,10 @@ impl OperationJournal {
         ensure!(
             index.version == VERSION,
             "unsupported package operation journal version"
+        );
+        ensure!(
+            index.operations.iter().all(|name| is_canonical_record_name(name)),
+            "invalid package operation journal index record name"
         );
         Ok(index.operations)
     }
@@ -341,36 +485,33 @@ impl OperationJournal {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
 
-        let Some(record) = self.read(&state, &name, request)? else {
-            let mut admitted = state.admitted.clone();
-            admitted.insert(name.clone());
-            self.write_index(&admitted)
-                .context("persist package operation journal index")?;
-            state.admitted = admitted;
-
-            let record = Record {
-                version: VERSION,
-                authority_id: authority_id.to_owned(),
-                operation_id: request.operation_id.clone(),
-                request: encoded,
-                outcome: None,
-                execution_started: false,
-            };
-            self.write_record(&name, &record, Replace::Refuse)
-                .context("persist pending package operation record")?;
-            state.in_flight.insert(name);
-            return Ok(Admission::Admitted);
-        };
-
-        if record.request != encoded {
-            return Ok(Admission::PayloadMismatch);
+        let delivery = DeliveryKey::from_encoded(&request.operation_id, &encoded);
+        if let Some(admission) = self.read_admission(&state, &name, &delivery)? {
+            return Ok(admission);
         }
-        let started = record.execution_started;
-        Ok(match record.outcome {
-            Some(outcome) => Admission::Recorded(Settled::new(outcome, started)),
-            None if state.in_flight.contains(&name) => Admission::InFlight,
-            None => Admission::Recorded(Settled::new(Outcome::Unknown, started)),
-        })
+
+        let mut admitted = state.admitted.clone();
+        admitted.insert(name.clone());
+        let mut membership = self.membership.load_full().as_ref().clone();
+        membership.insert(name.clone(), self.index_size_limit)?;
+        let bytes = index_bytes(&admitted, self.index_size_limit)?;
+        self.membership.store(Arc::new(membership));
+        state.admitted = admitted;
+        self.write_index(&bytes)
+            .context("persist package operation journal index")?;
+
+        let record = Record {
+            version: VERSION,
+            authority_id: authority_id.to_owned(),
+            operation_id: request.operation_id.clone(),
+            request: encoded,
+            outcome: None,
+            execution_started: false,
+        };
+        self.write_record(&name, &record, Replace::Refuse)
+            .context("persist pending package operation record")?;
+        state.in_flight.insert(name);
+        Ok(Admission::Admitted)
     }
 
     /// Durably records that the Broker proved the process of an operation [`admitted`](Self::admit) for `request` started.
@@ -390,7 +531,7 @@ impl OperationJournal {
         let state = self.state.lock();
 
         let mut record = self
-            .read(&state, &name, request)?
+            .read(&state, &name, &request.operation_id)?
             .context("no package operation record to mark as started")?;
         ensure!(
             record.authority_id == authority_id && record.request == encoded,
@@ -444,7 +585,7 @@ impl OperationJournal {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
 
-        let record = self.read(&state, &name, request);
+        let record = self.read(&state, &name, &request.operation_id);
         if let Ok(Some(record)) = &record {
             ensure!(
                 record.authority_id == authority_id && record.request == encoded,
@@ -494,18 +635,18 @@ impl OperationJournal {
     /// An operation that is not in flight returns its recorded outcome at once, or [`Outcome::Unknown`] when it is
     /// still pending, with the start evidence recorded.
     /// Call it off the async runtime.
-    pub(super) fn wait(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<Settled> {
-        let (name, encoded) = locate(authority_id, request)?;
+    pub(super) fn wait(&self, authority_id: &str, delivery: &DeliveryKey) -> anyhow::Result<Settled> {
+        let name = delivery.locate(authority_id)?;
         let mut state = self.state.lock();
         while state.in_flight.contains(&name) {
             self.recorded.wait(&mut state);
         }
 
         let record = self
-            .read(&state, &name, request)?
+            .read(&state, &name, &delivery.operation_id)?
             .context("no package operation record to wait for")?;
         ensure!(
-            record.request == encoded,
+            delivery.matches(&record.request),
             "package operation record belongs to a different request"
         );
         Ok(Settled::new(
@@ -514,8 +655,23 @@ impl OperationJournal {
         ))
     }
 
+    fn read_admission(&self, state: &State, name: &str, delivery: &DeliveryKey) -> anyhow::Result<Option<Admission>> {
+        let Some(record) = self.read(state, name, &delivery.operation_id)? else {
+            return Ok(None);
+        };
+        if !delivery.matches(&record.request) {
+            return Ok(Some(Admission::PayloadMismatch));
+        }
+        let started = record.execution_started;
+        Ok(Some(match record.outcome {
+            Some(outcome) => Admission::Recorded(Settled::new(outcome, started)),
+            None if state.in_flight.contains(name) => Admission::InFlight,
+            None => Admission::Recorded(Settled::new(Outcome::Unknown, started)),
+        }))
+    }
+
     /// Reads and validates the record `name`, and returns `None` only when it neither exists nor is listed.
-    fn read(&self, state: &State, name: &str, request: &PackageOperationRequest) -> anyhow::Result<Option<Record>> {
+    fn read(&self, state: &State, name: &str, operation_id: &str) -> anyhow::Result<Option<Record>> {
         let listed = state.admitted.contains(name);
         let Some(file) = self
             .directory
@@ -523,7 +679,7 @@ impl OperationJournal {
             .context("open package operation record")?
         else {
             ensure!(
-                !listed,
+                !listed && !self.membership.load().names.contains(name),
                 "package operation record is missing, so its history may be lost"
             );
             return Ok(None);
@@ -544,7 +700,7 @@ impl OperationJournal {
             "package operation failure has no error"
         );
         ensure!(
-            record.operation_id == request.operation_id,
+            record.operation_id == operation_id,
             "package operation record belongs to another operation ID"
         );
         let stored = hex::decode(&record.request).context("decode stored package operation request")?;
@@ -557,17 +713,19 @@ impl OperationJournal {
         Ok(Some(record))
     }
 
-    fn write_index(&self, admitted: &BTreeSet<String>) -> anyhow::Result<()> {
-        let bytes = serde_json::to_vec(&Index {
-            version: VERSION,
-            operations: admitted.clone(),
-        })
-        .context("serialize package operation journal index")?;
-        ensure!(
-            bytes.len() as u64 <= MAX_INDEX_SIZE,
-            "package operation journal index is too large"
-        );
-        self.write(INDEX_NAME, &bytes, Replace::Allow)
+    fn write_index(&self, bytes: &[u8]) -> anyhow::Result<()> {
+        #[cfg(test)]
+        let hook = self.index_write_hook.lock().take();
+        #[cfg(test)]
+        if let Some(hook) = &hook {
+            hook.before()?;
+        }
+        self.write(INDEX_NAME, bytes, Replace::Allow)?;
+        #[cfg(test)]
+        if let Some(hook) = &hook {
+            hook.after()?;
+        }
+        Ok(())
     }
 
     fn write_record(&self, name: &str, record: &Record, replace: Replace) -> anyhow::Result<()> {
@@ -607,6 +765,43 @@ fn read_limited(file: std::fs::File, limit: u64) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// A delivery as lookups compare it: its operation ID and a SHA-256 digest of its channel encoding.
+///
+/// A delivery waiting for journal I/O keeps this instead of its request, so its size does not grow with the payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DeliveryKey {
+    operation_id: String,
+    payload: [u8; 32],
+}
+
+impl DeliveryKey {
+    pub(super) fn new(request: &PackageOperationRequest) -> Self {
+        Self::from_encoded(&request.operation_id, &hex::encode(request.encode_to_vec()))
+    }
+
+    fn from_encoded(operation_id: &str, encoded: &str) -> Self {
+        Self {
+            operation_id: operation_id.to_owned(),
+            payload: Sha256::digest(encoded.as_bytes()).into(),
+        }
+    }
+
+    #[cfg(windows)]
+    pub(super) fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+
+    fn matches(&self, encoded: &str) -> bool {
+        <[u8; 32]>::from(Sha256::digest(encoded.as_bytes())) == self.payload
+    }
+
+    fn locate(&self, authority_id: &str) -> anyhow::Result<String> {
+        ensure!(!authority_id.is_empty(), "authority ID is empty");
+        ensure!(!self.operation_id.is_empty(), "operation ID is empty");
+        Ok(record_name(&self.operation_id))
+    }
+}
+
 fn locate(authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<(String, String)> {
     ensure!(!authority_id.is_empty(), "authority ID is empty");
     ensure!(!request.operation_id.is_empty(), "operation ID is empty");
@@ -614,13 +809,72 @@ fn locate(authority_id: &str, request: &PackageOperationRequest) -> anyhow::Resu
 }
 
 #[cfg(test)]
+impl OperationJournal {
+    pub(crate) fn pause_index_write_for_test(
+        &mut self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let hook = tests::IndexWriteHook::Pause {
+            entered: entered_tx,
+            resume: resume_rx,
+        };
+        assert!(self.index_write_hook.get_mut().replace(hook).is_none());
+        (entered_rx, resume_tx)
+    }
+
+    /// Leaves the membership index room for exactly `additional_names` more record names.
+    #[cfg(windows)]
+    pub(crate) fn limit_index_room_for_test(&mut self, additional_names: u64) {
+        let entry_size = record_name("entry").len() as u64 + 3;
+        self.index_size_limit = self.membership.load().index_size + additional_names * entry_size;
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn exhaust_index_for_test(&mut self) {
+        self.index_size_limit = self.membership.load().index_size;
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn restore_index_limit_for_test(&mut self) {
+        self.index_size_limit = MAX_INDEX_SIZE;
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
     use camino::Utf8PathBuf;
 
     use super::*;
+
+    #[derive(Debug)]
+    pub(super) enum IndexWriteHook {
+        Pause {
+            entered: mpsc::Sender<()>,
+            resume: mpsc::Receiver<()>,
+        },
+        FailAfterPersist,
+    }
+
+    impl IndexWriteHook {
+        pub(super) fn before(&self) -> anyhow::Result<()> {
+            if let Self::Pause { entered, resume } = self {
+                entered.send(())?;
+                resume.recv()?;
+            }
+            Ok(())
+        }
+
+        pub(super) fn after(&self) -> anyhow::Result<()> {
+            if let Self::FailAfterPersist = self {
+                bail!("injected index persistence failure");
+            }
+            Ok(())
+        }
+    }
 
     /// A data directory removed on drop.
     struct TestDir(Utf8PathBuf);
@@ -668,6 +922,355 @@ mod tests {
         journal_path(data).join(record_name(operation_id))
     }
 
+    fn assert_membership_matches_records(journal: &OperationJournal, data: &Utf8Path) -> anyhow::Result<()> {
+        let index: Index = serde_json::from_slice(&std::fs::read(journal_path(data).join(INDEX_NAME))?)?;
+        let mut records = BTreeSet::new();
+        for entry in std::fs::read_dir(journal_path(data))? {
+            let name = entry?.file_name().into_string().expect("record name is UTF-8");
+            if name != INDEX_NAME {
+                records.insert(name);
+            }
+        }
+        assert_eq!(&journal.membership.load().names, &index.operations);
+        assert_eq!(records, index.operations);
+        Ok(())
+    }
+
+    #[test]
+    fn membership_tracks_the_agents_own_writes_after_reopen() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let request = request("recorded", "pkg");
+
+        // oracle: mutant a new ID cannot be distinguished from recorded operations
+        assert!(!journal.may_contain("new"));
+        assert_membership_matches_records(&journal, &data)?;
+        journal.admit("authority", &request)?;
+        journal.complete("authority", &request, Outcome::Succeeded)?;
+        assert_membership_matches_records(&journal, &data)?;
+        journal.admit("authority", &self::request("pending", "pkg"))?;
+        assert!(journal.may_contain("recorded"));
+        assert!(journal.may_contain("pending"));
+        assert_membership_matches_records(&journal, &data)?;
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.may_contain("recorded"));
+        assert!(journal.may_contain("pending"));
+        assert!(!journal.may_contain("new"));
+        assert_membership_matches_records(&journal, &data)?;
+        Ok(())
+    }
+
+    #[test]
+    fn membership_keeps_orphaned_records_after_another_admission() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let orphan = request("orphan", "pkg");
+        let recorded = request("recorded", "pkg");
+        journal.admit("authority", &orphan)?;
+        journal.admit("authority", &recorded)?;
+        journal.complete("authority", &recorded, Outcome::Succeeded)?;
+        drop(journal);
+        std::fs::write(
+            journal_path(&data).join(INDEX_NAME),
+            serde_json::to_vec(&Index {
+                version: VERSION,
+                operations: BTreeSet::from([record_name("recorded")]),
+            })?,
+        )?;
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.may_contain("orphan"));
+        assert!(journal.lookup("authority", &DeliveryKey::new(&orphan)).is_err());
+        assert!(journal.admit("authority", &orphan).is_err());
+        assert!(journal.may_contain("recorded"));
+        assert_eq!(
+            journal.admit("authority", &recorded)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        // oracle: mutant an orphan prevents unrelated operations from being admitted
+        assert!(!journal.may_contain("new"));
+        assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
+        assert!(journal.may_contain("orphan"));
+        Ok(())
+    }
+
+    #[test]
+    fn membership_refuses_open_when_orphans_exceed_the_budget() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &request("first", "pkg"))?;
+        let limit = std::fs::metadata(journal_path(&data).join(INDEX_NAME))?.len();
+        journal.admit("authority", &request("second", "pkg"))?;
+        drop(journal);
+        std::fs::write(
+            journal_path(&data).join(INDEX_NAME),
+            serde_json::to_vec(&Index {
+                version: VERSION,
+                operations: BTreeSet::new(),
+            })?,
+        )?;
+
+        let error = OperationJournal::open_with_index_size_limit(&data, limit)
+            .expect_err("two orphan records exceed the index limit");
+        assert!(
+            error
+                .to_string()
+                .contains("package operation journal index is too large")
+        );
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.may_contain("first"));
+        assert!(journal.may_contain("second"));
+        Ok(())
+    }
+
+    #[test]
+    fn membership_recognizes_an_orphan_with_different_filename_case() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let orphan = request("orphan", "pkg");
+        journal.admit("authority", &orphan)?;
+        drop(journal);
+        std::fs::write(
+            journal_path(&data).join(INDEX_NAME),
+            serde_json::to_vec(&Index {
+                version: VERSION,
+                operations: BTreeSet::new(),
+            })?,
+        )?;
+        let intermediate = journal_path(&data).join("renaming");
+        let uppercase = journal_path(&data).join(record_name("orphan").to_ascii_uppercase());
+        std::fs::rename(record_path(&data, "orphan"), &intermediate)?;
+        std::fs::rename(intermediate, uppercase)?;
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.may_contain("orphan"));
+        assert!(journal.lookup("authority", &DeliveryKey::new(&orphan)).is_err());
+        assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
+        assert!(journal.may_contain("orphan"));
+        Ok(())
+    }
+
+    #[rstest::rstest]
+    #[case::uppercase(record_name("recorded").to_ascii_uppercase())]
+    #[case::malformed(format!("g{}", &record_name("recorded")[1..]))]
+    #[case::invalid_length("not-a-record.json".to_owned())]
+    fn noncanonical_index_entry_refuses_open(#[case] indexed_name: String) -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let recorded = request("recorded", "pkg");
+        journal.admit("authority", &recorded)?;
+        drop(journal);
+        std::fs::remove_file(record_path(&data, "recorded"))?;
+        std::fs::write(
+            journal_path(&data).join(INDEX_NAME),
+            serde_json::to_vec(&Index {
+                version: VERSION,
+                operations: BTreeSet::from([indexed_name]),
+            })?,
+        )?;
+
+        assert!(OperationJournal::open(&data).is_err());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ambiguous_windows_record_name_refuses_open() -> anyhow::Result<()> {
+        // oracle: mutant a possible Windows case alias is ignored as evidence of a record
+        let (_dir, data) = data_dir()?;
+        drop(OperationJournal::open(&data)?);
+        let name = format!("{}.jſon", hashed("orphan"));
+        std::fs::write(journal_path(&data).join(name), b"orphan")?;
+
+        assert!(OperationJournal::open(&data).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn lookup_does_not_admit_and_reports_existing_outcomes() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let request = request("lookup", "pkg");
+
+        assert_eq!(journal.lookup("authority", &DeliveryKey::new(&request))?, None);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Admitted);
+        assert_eq!(
+            journal.lookup("another", &DeliveryKey::new(&request))?,
+            Some(Admission::InFlight)
+        );
+        assert_eq!(
+            journal.lookup("another", &DeliveryKey::new(&self::request("lookup", "other")))?,
+            Some(Admission::PayloadMismatch)
+        );
+        journal.complete("authority", &request, Outcome::Succeeded)?;
+        assert_eq!(
+            journal.lookup("another", &DeliveryKey::new(&request))?,
+            Some(Admission::Recorded(settled(Outcome::Succeeded)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn membership_retains_an_index_write_that_failed_after_rename() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        *journal.index_write_hook.lock() = Some(IndexWriteHook::FailAfterPersist);
+        let failed = request("failed", "pkg");
+
+        assert!(journal.admit("authority", &failed).is_err());
+        assert!(journal.may_contain("failed"));
+        assert!(journal.lookup("authority", &DeliveryKey::new(&failed)).is_err());
+        assert!(!record_path(&data, "failed").exists());
+        assert_eq!(
+            journal.admit("authority", &request("other", "pkg"))?,
+            Admission::Admitted
+        );
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.may_contain("failed"));
+        assert!(journal.lookup("authority", &DeliveryKey::new(&failed)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn membership_stays_live_while_index_write_is_blocked() -> anyhow::Result<()> {
+        // oracle: mutant membership waits for an admission's journal I/O lock
+        let (_dir, data) = data_dir()?;
+        let mut journal = OperationJournal::open(&data)?;
+        let (entered_rx, resume_tx) = journal.pause_index_write_for_test();
+        let journal = Arc::new(journal);
+        let writer = {
+            let journal = Arc::clone(&journal);
+            std::thread::spawn(move || journal.admit("authority", &request("blocked", "pkg")))
+        };
+        if let Err(error) = entered_rx.recv_timeout(Duration::from_secs(10)) {
+            drop(resume_tx);
+            let _ = writer.join();
+            return Err(error.into());
+        }
+
+        let (observed_tx, observed_rx) = mpsc::channel();
+        let reader = {
+            let journal = Arc::clone(&journal);
+            std::thread::spawn(move || {
+                let _ = observed_tx.send((journal.may_contain("blocked"), journal.may_contain("new")));
+            })
+        };
+        let observed = observed_rx.recv_timeout(Duration::from_secs(3));
+        let released = resume_tx.send(());
+        let admission = writer.join().expect("writer thread panicked");
+        reader.join().expect("reader thread panicked");
+
+        released?;
+        assert_eq!(observed?, (true, false));
+        assert_eq!(admission?, Admission::Admitted);
+        Ok(())
+    }
+
+    #[test]
+    fn membership_does_not_publish_past_the_index_budget() -> anyhow::Result<()> {
+        // oracle: mutant failed index writes grow the snapshot beyond the index's size limit
+        let (_dir, data) = data_dir()?;
+        let mut journal = OperationJournal::open(&data)?;
+        *journal.index_write_hook.lock() = Some(IndexWriteHook::FailAfterPersist);
+        assert!(journal.admit("authority", &request("retained", "pkg")).is_err());
+        journal.index_size_limit = std::fs::metadata(journal_path(&data).join(INDEX_NAME))?.len();
+
+        assert!(journal.may_contain("retained"));
+        assert!(journal.admit("authority", &request("beyond", "pkg")).is_err());
+        assert!(!journal.may_contain("beyond"));
+        assert!(journal.admit("authority", &request("also-beyond", "pkg")).is_err());
+        assert!(!journal.may_contain("also-beyond"));
+        assert!(journal.may_contain("retained"));
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.may_contain("retained"));
+        Ok(())
+    }
+
+    #[test]
+    fn orphaned_records_count_against_the_index_budget() -> anyhow::Result<()> {
+        // oracle: mutant orphaned records allow the snapshot to exceed the index's size limit
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &request("orphan", "pkg"))?;
+        let limit = std::fs::metadata(journal_path(&data).join(INDEX_NAME))?.len();
+        drop(journal);
+        std::fs::write(
+            journal_path(&data).join(INDEX_NAME),
+            serde_json::to_vec(&Index {
+                version: VERSION,
+                operations: BTreeSet::new(),
+            })?,
+        )?;
+
+        let mut journal = OperationJournal::open(&data)?;
+        journal.index_size_limit = limit;
+        assert!(journal.may_contain("orphan"));
+        assert!(journal.admit("authority", &request("beyond", "pkg")).is_err());
+        assert!(!journal.may_contain("beyond"));
+        assert!(journal.may_contain("orphan"));
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn an_index_at_its_budget_reopens_with_its_records() -> anyhow::Result<()> {
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let recorded = request("first", "pkg");
+        journal.admit("authority", &recorded)?;
+        journal.complete("authority", &recorded, Outcome::Succeeded)?;
+        let limit = std::fs::metadata(journal_path(&data).join(INDEX_NAME))?.len();
+        drop(journal);
+
+        let reopened = OperationJournal::open_with_index_size_limit(&data, limit);
+        assert!(reopened.is_ok(), "an index at its budget must reopen: {reopened:?}");
+        let reopened = reopened?;
+        assert_eq!(
+            reopened.lookup("authority", &DeliveryKey::new(&recorded))?,
+            Some(Admission::Recorded(settled(Outcome::Succeeded)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn index_budget_accepts_an_exact_fit() -> anyhow::Result<()> {
+        // oracle: mutant an off-by-one in the JSON index size permits publication past its limit
+        let (_dir, data) = data_dir()?;
+        let mut journal = OperationJournal::open(&data)?;
+        journal.admit("authority", &request("first", "pkg"))?;
+        let current_size = std::fs::metadata(journal_path(&data).join(INDEX_NAME))?.len();
+        let next_entry_size = format!(",\"{:064x}.json\"", 0).len() as u64;
+        journal.index_size_limit = current_size + next_entry_size - 1;
+
+        assert!(journal.admit("authority", &request("second", "pkg")).is_err());
+        assert!(!journal.may_contain("second"));
+        assert!(!journal.has_index_capacity(&record_name("second")));
+        journal.index_size_limit += 1;
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        assert!(journal.has_index_capacity(&record_name("second")));
+        assert_eq!(
+            journal.admit("authority", &request("second", "pkg"))?,
+            Admission::Admitted
+        );
+        assert!(journal.may_contain("first"));
+        assert!(journal.may_contain("second"));
+        Ok(())
+    }
+
     #[test]
     fn first_delivery_is_admitted_and_repeat_is_in_flight() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -710,7 +1313,7 @@ mod tests {
 
         let waiter = {
             let (journal, request) = (Arc::clone(&journal), Arc::clone(&request));
-            std::thread::spawn(move || journal.wait("authority", &request))
+            std::thread::spawn(move || journal.wait("authority", &DeliveryKey::new(&request)))
         };
         std::thread::sleep(Duration::from_millis(100));
         assert!(!waiter.is_finished());
@@ -758,7 +1361,10 @@ mod tests {
             journal.admit("second", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
         );
-        assert_eq!(journal.wait("second", &request)?, settled(Outcome::Succeeded));
+        assert_eq!(
+            journal.wait("second", &DeliveryKey::new(&request))?,
+            settled(Outcome::Succeeded)
+        );
         assert!(journal.complete("second", &request, Outcome::Unknown).is_err());
         assert_eq!(
             journal.admit("first", &request)?,
@@ -797,7 +1403,10 @@ mod tests {
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Unknown))
         );
-        assert_eq!(journal.wait("authority", &request)?, settled(Outcome::Unknown));
+        assert_eq!(
+            journal.wait("authority", &DeliveryKey::new(&request))?,
+            settled(Outcome::Unknown)
+        );
         Ok(())
     }
 
@@ -841,7 +1450,7 @@ mod tests {
 
         assert!(journal.admit("authority", &finished).is_err());
         assert!(journal.admit("authority", &pending).is_err());
-        assert!(journal.wait("authority", &finished).is_err());
+        assert!(journal.wait("authority", &DeliveryKey::new(&finished)).is_err());
         assert!(journal.complete("authority", &pending, Outcome::Succeeded).is_err());
         assert!(!record_path(&data, "finished").exists());
         assert_eq!(
@@ -956,7 +1565,7 @@ mod tests {
 
         // A later outcome keeps the evidence.
         journal.complete("authority", &started, Outcome::Unknown)?;
-        assert_eq!(journal.wait("authority", &started)?, expected);
+        assert_eq!(journal.wait("authority", &DeliveryKey::new(&started))?, expected);
 
         // Records written before the field existed carry no evidence.
         // oracle: mutant a record without start evidence is read back as proof that the operation started
@@ -970,7 +1579,10 @@ mod tests {
             Some(false.into())
         );
         std::fs::write(&path, serde_json::to_vec(&record)?)?;
-        assert_eq!(journal.wait("authority", &unproven)?, settled(Outcome::Unknown));
+        assert_eq!(
+            journal.wait("authority", &DeliveryKey::new(&unproven))?,
+            settled(Outcome::Unknown)
+        );
         Ok(())
     }
 
@@ -1139,6 +1751,7 @@ mod tests {
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
 
+        assert!(journal.may_contain(""));
         assert!(journal.admit("authority", &request("", "pkg")).is_err());
         assert!(journal.admit("", &request("op", "pkg")).is_err());
         Ok(())

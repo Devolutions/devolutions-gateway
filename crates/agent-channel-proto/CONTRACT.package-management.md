@@ -434,11 +434,41 @@ The Authority ignores `success` when the status is `UNKNOWN`.
 Agent and Authority versions must both understand `UNKNOWN` when they exchange operation results, including queued results after reconnect or rollback.
 Mixed versions that do not satisfy this requirement are unsupported.
 The Agent durably records an operation before making a grant for it available and does not submit another operation for the same operation ID.
-Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
+The Authority's new operation ID is a UUID in 36-character lowercase 8-4-4-4-12 hexadecimal form.
+The Agent compares and echoes the ID exactly as sent.
+A recorded operation retains its replay rules even when its ID is outside that form.
+An ID proven not to be recorded and outside that form is malformed.
+The Agent neither starts nor journals a malformed request, logs a warning once per connection, and sends no report for it.
+Correlated-report and capacity-failure guarantees do not apply to malformed requests.
+A recorded ID too long to fit in a channel report cannot be answered.
+For a repeated delivery with the same operation ID and payload, the Agent returns the recorded result or attaches it to the active operation.
+The Agent checks for a recorded operation before applying operation capacity limits.
+While a journal lookup or operation is in flight, the Agent retains only the most recent response attachment for that operation ID.
 When the final journal write fails, the Agent reports `UNKNOWN` for that delivery.
 The write may nevertheless have installed the record, so a later delivery returns its valid recorded result or `UNKNOWN` if none can be recovered.
 When journal writes cannot preserve observed start evidence, a later redelivery may omit evidence reported by the original delivery.
-A repeated operation ID with a different payload is rejected without submission and reports `UNKNOWN`.
+When the journal's deduplication index budget cannot fit another operation, an ID proven not to be recorded or in flight receives the known failure `agent journal full: nothing was started`.
+Otherwise, when operation or journal-admission capacity is full, an ID proven not to be recorded or in flight receives the known failure `agent busy: nothing was started`.
+The budget counts orphan record names as well as indexed names.
+The Agent logs a warning about the full journal once per connection.
+The Agent does not record either failure.
+Either answer means this Agent process had not admitted or started an operation with that ID when it decided to refuse the delivery.
+After any Authority receives a known result for an operation ID, including either capacity failure, no Authority sends that ID again.
+An administrator's retry is a new operation with a new ID.
+An operation ID identifies one operation across all of an Agent's Authorities.
+Authorities that send the same ID coordinate its deliveries and results.
+Because the Agent does not record either failure, a later delivery of that ID is treated as new unless the ID has since been recorded, even if the Authority violates that rule by sending it after receiving the failure.
+If an ID has been sent to the Agent more than once and the Authority cannot prove that at most one delivery reached the Agent, it treats either capacity failure as provisional.
+It does not record or display a provisional capacity failure as the operation's outcome.
+Any result for that ID other than these two capacity failures, including `UNKNOWN`, takes precedence over a provisional capacity failure regardless of arrival order.
+The Authority ignores either capacity failure after a result that is not one of those two failures.
+If the Authority knows that at most one delivery reached the Agent, either capacity failure is a final known result.
+DVLS does not redeliver an operation ID, so either failure is final for DVLS.
+Saturated journal admission does not itself block the Agent from processing channel traffic.
+The Agent imposes no package-operation rate limit on the Authority.
+The journal assumes that, while the Agent holds it open, this Agent process is its only writer.
+The in-memory membership does not see records another process creates under a privileged account until the next Agent start.
+A delivery whose operation ID matches a recorded or in-flight operation but has a different payload is rejected without submission and reports `UNKNOWN`.
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
 When an existing journal's deduplication state cannot be recovered, the Agent does not treat an operation ID as new and reports `UNKNOWN`.
 When the operation journal is missing, the Agent creates a new one; operations recorded only in the missing journal may execute again.

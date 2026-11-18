@@ -10,6 +10,11 @@ mod unigetui;
 #[cfg(any(windows, test))]
 mod user_registry;
 
+#[cfg(windows)]
+use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use agent_channel_client::Reporter;
 #[cfg(any(windows, test))]
 use agent_channel_proto::UniGetUiInstance;
@@ -43,10 +48,33 @@ struct Snapshot {
     update_scan_completed_at: Option<prost_types::Timestamp>,
 }
 
-/// Maximum number of concurrent device-management request workers.
+/// Maximum number of concurrent workers for each class of device-management request.
 const MAX_CONCURRENT_REQUESTS: usize = 8;
-// UNTESTED: This cap prevents request floods from spawning unbounded tasks.
-// Check that permits stay held for the worker lifetime when changing dispatch.
+// UNTESTED: The non-operation request cap prevents their workers from growing without bound.
+// Check that permits stay held for each worker's lifetime when changing dispatch.
+
+pub(crate) fn has_unrecorded_malformed_operation_id(
+    context: &DeviceManagementContext,
+    request: &DeviceManagementRequest,
+) -> bool {
+    let Some(Request::PackageOperation(operation)) = &request.request else {
+        return false;
+    };
+    let id = operation.operation_id.as_str();
+    #[cfg(windows)]
+    if !id.is_empty() && context.journal().is_none_or(|journal| journal.may_contain(id)) {
+        return false;
+    }
+    #[cfg(not(windows))]
+    let _ = context;
+    !Uuid::try_parse(id).is_ok_and(|uuid| *uuid.hyphenated().encode_lower(&mut Uuid::encode_buffer()) == *id)
+}
+
+pub(crate) struct ChannelReporter {
+    pub reporter: Reporter,
+    #[cfg(windows)]
+    pub journal_full_warned: Arc<AtomicBool>,
+}
 
 /// Serves one device management request, answering the request message `id` through `reporter`.
 pub(crate) fn handle(
@@ -55,12 +83,28 @@ pub(crate) fn handle(
     authority_id: Uuid,
     id: String,
     request: DeviceManagementRequest,
-    reporter: Reporter,
+    channel_reporter: ChannelReporter,
     shutdown: watch::Receiver<bool>,
 ) {
+    let ChannelReporter {
+        reporter,
+        #[cfg(windows)]
+        journal_full_warned,
+    } = channel_reporter;
     let Some(request) = request.request else {
         debug!(%id, "Device management request without content");
         return;
+    };
+
+    #[cfg(windows)]
+    let request = match request {
+        Request::PackageOperation(request) => {
+            if !*shutdown.borrow() {
+                dispatch_package_operation(context, authority_id, id, request, reporter, journal_full_warned);
+            }
+            return;
+        }
+        request => request,
     };
 
     let Some(permit) = request_permit() else {
@@ -87,8 +131,15 @@ pub(crate) fn handle(
                 }
                 Request::DiscoverUnigetuiInstances(_) => send_instances(&context, &reporter, &id).await,
                 Request::PackageOperation(request) => {
-                    let result = run_package_operation(&context, authority_id, request).await;
-                    reporter.send(Some(id), package_operation_report(result));
+                    #[cfg(windows)]
+                    dispatch_package_operation(context, authority_id, id, request, reporter, journal_full_warned);
+                    #[cfg(not(windows))]
+                    {
+                        let result = run_package_operation(&context, authority_id, request).await;
+                        send_operation_result(&id, result, &mut |correlation_id, report| {
+                            reporter.send(correlation_id, report);
+                        });
+                    }
                 }
                 Request::CatalogSync(request) => {
                     reporter.send(Some(id), catalog_unavailable_report(request.revision));
@@ -218,6 +269,15 @@ fn send_bounded_report(
     }
     send(Some(correlation_id.to_owned()), report);
     true
+}
+
+/// Sends an operation result, leaving it unanswered when a recorded ID outside the UUID form makes it too large.
+fn send_operation_result(
+    correlation_id: &str,
+    result: PackageOperationResult,
+    send: &mut impl FnMut(Option<String>, DeviceManagementReport),
+) {
+    send_bounded_report(correlation_id, package_operation_report(result), send);
 }
 
 /// Sends the inventory in parts that each fit in one channel envelope.
@@ -462,12 +522,27 @@ async fn collect_inventory(
 }
 
 #[cfg(windows)]
-async fn run_package_operation(
-    context: &DeviceManagementContext,
+fn dispatch_package_operation(
+    context: DeviceManagementContext,
     authority_id: Uuid,
+    id: String,
     request: PackageOperationRequest,
-) -> PackageOperationResult {
-    operation::run(context, authority_id, request).await
+    reporter: Reporter,
+    journal_full_warned: Arc<AtomicBool>,
+) {
+    operation::submit(
+        context,
+        authority_id,
+        request,
+        Box::new(move |result| {
+            if result.error == operation::JOURNAL_FULL_ERROR && !journal_full_warned.swap(true, Ordering::Relaxed) {
+                warn!("Package operation journal is full; nothing was started");
+            }
+            send_operation_result(&id, result, &mut |correlation_id, report| {
+                reporter.send(correlation_id, report);
+            });
+        }),
+    );
 }
 
 #[cfg(not(windows))]
@@ -488,6 +563,86 @@ async fn run_package_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // oracle: mutant package operations reserve a shared non-operation request permit
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn package_dispatch_does_not_take_a_shared_request_permit() -> anyhow::Result<()> {
+        use agent_channel_client::{ChannelClient, HelloFields, Settings, Target};
+
+        let root = tempfile::Builder::new().prefix("package-dispatch-").tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let recorded = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let (context, _entered, resume) = DeviceManagementContext::default()
+            .with_remote_features(true, false)
+            .with_recorded_operation_for_test(data, &recorded)?;
+        let coordinator = Arc::clone(context.operations());
+        let request = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let key = device_key::generate(
+            &device_key::KeyBackend::File { dir: data.join("keys") },
+            &device_key::new_key_name("test"),
+        )?;
+        let client = ChannelClient::new(http_client_proxy::ProxyConfig::Off, &[], Settings::default())?;
+        let channel = client.connect(Target {
+            url: url::Url::parse("https://127.0.0.1:1")?,
+            key: Arc::from(key),
+            leaf_certificate_der: Vec::new(),
+            hello: Arc::new(|| HelloFields {
+                metadata: Default::default(),
+                config_revision: 0,
+                capabilities: Vec::new(),
+            }),
+        })?;
+        let request_permits = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            let mut permits = Vec::new();
+            while permits.len() < MAX_CONCURRENT_REQUESTS {
+                match request_permit() {
+                    Some(permit) => permits.push(permit),
+                    None => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                }
+            }
+            permits
+        })
+        .await?;
+        let (_shutdown, shutdown) = watch::channel(false);
+        handle(
+            context.clone(),
+            Uuid::nil(),
+            Uuid::nil(),
+            Uuid::new_v4().to_string(),
+            DeviceManagementRequest {
+                request: Some(Request::PackageOperation(request.clone())),
+            },
+            ChannelReporter {
+                reporter: channel.reporter(),
+                journal_full_warned: Arc::new(AtomicBool::new(false)),
+            },
+            shutdown,
+        );
+
+        let mut other_workers = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            other_workers.push(permit);
+        }
+        assert_eq!(other_workers.len() + 1, MAX_CONCURRENT_REQUESTS);
+
+        drop(other_workers);
+        drop(request_permits);
+        resume.send(())?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            context.submit_operation_for_test(request),
+        )
+        .await?;
+        Ok(())
+    }
 
     fn inventory(
         packages: Vec<InstalledPackage>,
@@ -861,6 +1016,64 @@ mod tests {
         assert_eq!(
             legacy.package_operation_result.map(|result| result.operation_id),
             Some("operation-1".to_owned())
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn capacity_failures_fit_the_channel_envelope() {
+        use agent_channel_proto::{AgentMessage, agent_message};
+
+        let id = "550e8400-e29b-11d4-a716-446655440000";
+        for error in [
+            "agent busy: nothing was started",
+            "agent journal full: nothing was started",
+        ] {
+            let report = package_operation_report(PackageOperationResult {
+                operation_id: id.to_owned(),
+                success: false,
+                error: error.to_owned(),
+                status: PackageOperationStatus::Unspecified.into(),
+                execution_started: None,
+            });
+            let envelope = AgentMessage {
+                id: id.to_owned(),
+                correlation_id: Some(id.to_owned()),
+                payload: Some(agent_message::Payload::DeviceManagement(report)),
+            };
+            assert!(envelope.encoded_len() <= MAX_CHANNEL_ENVELOPE_BYTES);
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn operation_result_too_large_for_the_envelope_is_left_unanswered() {
+        let correlation_id = "550e8400-e29b-11d4-a716-446655440000";
+        let result = |operation_id: String| PackageOperationResult {
+            operation_id,
+            success: false,
+            error: "agent busy: nothing was started".to_owned(),
+            status: PackageOperationStatus::Unspecified.into(),
+            execution_started: None,
+        };
+        let mut reports = Vec::new();
+        let mut send = |correlation_id, report| reports.push((correlation_id, report));
+
+        send_operation_result(
+            correlation_id,
+            result("x".repeat(MAX_CHANNEL_ENVELOPE_BYTES)),
+            &mut send,
+        );
+        send_operation_result(correlation_id, result(correlation_id.to_owned()), &mut send);
+
+        assert_eq!(
+            reports,
+            [(
+                Some(correlation_id.to_owned()),
+                package_operation_report(result(correlation_id.to_owned()))
+            )]
         );
     }
 
