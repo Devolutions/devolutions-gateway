@@ -136,7 +136,9 @@ pub(crate) fn handle(
                     #[cfg(not(windows))]
                     {
                         let result = run_package_operation(&context, authority_id, request).await;
-                        reporter.send(Some(id), package_operation_report(result));
+                        send_operation_result(&id, result, &mut |correlation_id, report| {
+                            reporter.send(correlation_id, report);
+                        });
                     }
                 }
                 Request::CatalogSync(request) => {
@@ -267,6 +269,15 @@ fn send_bounded_report(
     }
     send(Some(correlation_id.to_owned()), report);
     true
+}
+
+/// Sends an operation result, leaving it unanswered when a recorded ID outside the UUID form makes it too large.
+fn send_operation_result(
+    correlation_id: &str,
+    result: PackageOperationResult,
+    send: &mut impl FnMut(Option<String>, DeviceManagementReport),
+) {
+    send_bounded_report(correlation_id, package_operation_report(result), send);
 }
 
 /// Sends the inventory in parts that each fit in one channel envelope.
@@ -527,7 +538,9 @@ fn dispatch_package_operation(
             if result.error == operation::JOURNAL_FULL_ERROR && !journal_full_warned.swap(true, Ordering::Relaxed) {
                 warn!("Package operation journal is full; nothing was started");
             }
-            reporter.send(Some(id), package_operation_report(result));
+            send_operation_result(&id, result, &mut |correlation_id, report| {
+                reporter.send(correlation_id, report);
+            });
         }),
     );
 }
@@ -951,6 +964,37 @@ mod tests {
             };
             assert!(envelope.encoded_len() <= MAX_CHANNEL_ENVELOPE_BYTES);
         }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn operation_result_too_large_for_the_envelope_is_left_unanswered() {
+        let correlation_id = "550e8400-e29b-11d4-a716-446655440000";
+        let result = |operation_id: String| PackageOperationResult {
+            operation_id,
+            success: false,
+            error: "agent busy: nothing was started".to_owned(),
+            status: PackageOperationStatus::Unspecified.into(),
+            execution_started: None,
+        };
+        let mut reports = Vec::new();
+        let mut send = |correlation_id, report| reports.push((correlation_id, report));
+
+        send_operation_result(
+            correlation_id,
+            result("x".repeat(MAX_CHANNEL_ENVELOPE_BYTES)),
+            &mut send,
+        );
+        send_operation_result(correlation_id, result(correlation_id.to_owned()), &mut send);
+
+        assert_eq!(
+            reports,
+            [(
+                Some(correlation_id.to_owned()),
+                package_operation_report(result(correlation_id.to_owned()))
+            )]
+        );
     }
 
     #[test]

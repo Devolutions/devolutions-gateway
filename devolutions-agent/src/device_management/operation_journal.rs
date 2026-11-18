@@ -359,14 +359,10 @@ impl OperationJournal {
     /// This can block on journal I/O and must run off the async runtime.
     ///
     /// ["Package operations"]: https://github.com/Devolutions/devolutions-gateway/blob/master/crates/agent-channel-proto/CONTRACT.package-management.md#operations
-    pub(super) fn lookup(
-        &self,
-        authority_id: &str,
-        request: &PackageOperationRequest,
-    ) -> anyhow::Result<Option<Admission>> {
-        let (name, encoded) = locate(authority_id, request)?;
+    pub(super) fn lookup(&self, authority_id: &str, delivery: &DeliveryKey) -> anyhow::Result<Option<Admission>> {
+        let name = delivery.locate(authority_id)?;
         let state = self.state.lock();
-        self.read_admission(&state, &name, request, &encoded)
+        self.read_admission(&state, &name, delivery)
     }
 
     /// Opens the journal, creating it when the data directory or the journal directory is missing.
@@ -475,7 +471,8 @@ impl OperationJournal {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
 
-        if let Some(admission) = self.read_admission(&state, &name, request, &encoded)? {
+        let delivery = DeliveryKey::from_encoded(&request.operation_id, &encoded);
+        if let Some(admission) = self.read_admission(&state, &name, &delivery)? {
             return Ok(admission);
         }
 
@@ -512,7 +509,7 @@ impl OperationJournal {
         let state = self.state.lock();
 
         let mut record = self
-            .read(&state, &name, request)?
+            .read(&state, &name, &request.operation_id)?
             .context("no package operation record to mark as started")?;
         ensure!(
             record.authority_id == authority_id && record.request == encoded,
@@ -539,7 +536,7 @@ impl OperationJournal {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
 
-        let record = self.read(&state, &name, request);
+        let record = self.read(&state, &name, &request.operation_id);
         if let Ok(Some(record)) = &record {
             ensure!(
                 record.authority_id == authority_id && record.request == encoded,
@@ -570,18 +567,18 @@ impl OperationJournal {
     /// An operation that is not in flight returns its recorded outcome at once, or [`Outcome::Unknown`] when it is
     /// still pending, with the start evidence recorded.
     /// Call it off the async runtime.
-    pub(super) fn wait(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<Settled> {
-        let (name, encoded) = locate(authority_id, request)?;
+    pub(super) fn wait(&self, authority_id: &str, delivery: &DeliveryKey) -> anyhow::Result<Settled> {
+        let name = delivery.locate(authority_id)?;
         let mut state = self.state.lock();
         while state.in_flight.contains(&name) {
             self.recorded.wait(&mut state);
         }
 
         let record = self
-            .read(&state, &name, request)?
+            .read(&state, &name, &delivery.operation_id)?
             .context("no package operation record to wait for")?;
         ensure!(
-            record.request == encoded,
+            delivery.matches(&record.request),
             "package operation record belongs to a different request"
         );
         Ok(Settled::new(
@@ -590,17 +587,11 @@ impl OperationJournal {
         ))
     }
 
-    fn read_admission(
-        &self,
-        state: &State,
-        name: &str,
-        request: &PackageOperationRequest,
-        encoded: &str,
-    ) -> anyhow::Result<Option<Admission>> {
-        let Some(record) = self.read(state, name, request)? else {
+    fn read_admission(&self, state: &State, name: &str, delivery: &DeliveryKey) -> anyhow::Result<Option<Admission>> {
+        let Some(record) = self.read(state, name, &delivery.operation_id)? else {
             return Ok(None);
         };
-        if record.request != encoded {
+        if !delivery.matches(&record.request) {
             return Ok(Some(Admission::PayloadMismatch));
         }
         let started = record.execution_started;
@@ -612,7 +603,7 @@ impl OperationJournal {
     }
 
     /// Reads and validates the record `name`, and returns `None` only when it neither exists nor is listed.
-    fn read(&self, state: &State, name: &str, request: &PackageOperationRequest) -> anyhow::Result<Option<Record>> {
+    fn read(&self, state: &State, name: &str, operation_id: &str) -> anyhow::Result<Option<Record>> {
         let listed = state.admitted.contains(name);
         let Some(file) = self
             .directory
@@ -641,7 +632,7 @@ impl OperationJournal {
             "package operation failure has no error"
         );
         ensure!(
-            record.operation_id == request.operation_id,
+            record.operation_id == operation_id,
             "package operation record belongs to another operation ID"
         );
         let stored = hex::decode(&record.request).context("decode stored package operation request")?;
@@ -704,6 +695,42 @@ fn read_limited(file: std::fs::File, limit: u64) -> anyhow::Result<Vec<u8>> {
         .context("read package operation file")?;
     ensure!(bytes.len() as u64 <= limit, "package operation file is too large");
     Ok(bytes)
+}
+
+/// A delivery as lookups compare it: its operation ID and a SHA-256 digest of its channel encoding.
+///
+/// A delivery waiting for journal I/O keeps this instead of its request, so its size does not grow with the payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DeliveryKey {
+    operation_id: String,
+    payload: [u8; 32],
+}
+
+impl DeliveryKey {
+    pub(super) fn new(request: &PackageOperationRequest) -> Self {
+        Self::from_encoded(&request.operation_id, &hex::encode(request.encode_to_vec()))
+    }
+
+    fn from_encoded(operation_id: &str, encoded: &str) -> Self {
+        Self {
+            operation_id: operation_id.to_owned(),
+            payload: Sha256::digest(encoded.as_bytes()).into(),
+        }
+    }
+
+    pub(super) fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+
+    fn matches(&self, encoded: &str) -> bool {
+        <[u8; 32]>::from(Sha256::digest(encoded.as_bytes())) == self.payload
+    }
+
+    fn locate(&self, authority_id: &str) -> anyhow::Result<String> {
+        ensure!(!authority_id.is_empty(), "authority ID is empty");
+        ensure!(!self.operation_id.is_empty(), "operation ID is empty");
+        Ok(record_name(&self.operation_id))
+    }
 }
 
 fn locate(authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<(String, String)> {
@@ -888,7 +915,7 @@ mod tests {
 
         let journal = OperationJournal::open(&data)?;
         assert!(journal.may_contain("orphan"));
-        assert!(journal.lookup("authority", &orphan).is_err());
+        assert!(journal.lookup("authority", &DeliveryKey::new(&orphan)).is_err());
         assert!(journal.admit("authority", &orphan).is_err());
         assert!(journal.may_contain("recorded"));
         assert_eq!(
@@ -954,7 +981,7 @@ mod tests {
 
         let journal = OperationJournal::open(&data)?;
         assert!(journal.may_contain("orphan"));
-        assert!(journal.lookup("authority", &orphan).is_err());
+        assert!(journal.lookup("authority", &DeliveryKey::new(&orphan)).is_err());
         assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
         assert!(journal.may_contain("orphan"));
         Ok(())
@@ -1004,16 +1031,19 @@ mod tests {
         let journal = OperationJournal::open(&data)?;
         let request = request("lookup", "pkg");
 
-        assert_eq!(journal.lookup("authority", &request)?, None);
+        assert_eq!(journal.lookup("authority", &DeliveryKey::new(&request))?, None);
         assert_eq!(journal.admit("authority", &request)?, Admission::Admitted);
-        assert_eq!(journal.lookup("another", &request)?, Some(Admission::InFlight));
         assert_eq!(
-            journal.lookup("another", &self::request("lookup", "other"))?,
+            journal.lookup("another", &DeliveryKey::new(&request))?,
+            Some(Admission::InFlight)
+        );
+        assert_eq!(
+            journal.lookup("another", &DeliveryKey::new(&self::request("lookup", "other")))?,
             Some(Admission::PayloadMismatch)
         );
         journal.complete("authority", &request, Outcome::Succeeded)?;
         assert_eq!(
-            journal.lookup("another", &request)?,
+            journal.lookup("another", &DeliveryKey::new(&request))?,
             Some(Admission::Recorded(settled(Outcome::Succeeded)))
         );
         Ok(())
@@ -1029,7 +1059,7 @@ mod tests {
 
         assert!(journal.admit("authority", &failed).is_err());
         assert!(journal.may_contain("failed"));
-        assert!(journal.lookup("authority", &failed).is_err());
+        assert!(journal.lookup("authority", &DeliveryKey::new(&failed)).is_err());
         assert!(!record_path(&data, "failed").exists());
         assert_eq!(
             journal.admit("authority", &request("other", "pkg"))?,
@@ -1039,7 +1069,7 @@ mod tests {
 
         let journal = OperationJournal::open(&data)?;
         assert!(journal.may_contain("failed"));
-        assert!(journal.lookup("authority", &failed).is_err());
+        assert!(journal.lookup("authority", &DeliveryKey::new(&failed)).is_err());
         Ok(())
     }
 
@@ -1141,7 +1171,7 @@ mod tests {
         assert!(reopened.is_ok(), "an index at its budget must reopen: {reopened:?}");
         let reopened = reopened?;
         assert_eq!(
-            reopened.lookup("authority", &recorded)?,
+            reopened.lookup("authority", &DeliveryKey::new(&recorded))?,
             Some(Admission::Recorded(settled(Outcome::Succeeded)))
         );
         Ok(())
@@ -1214,7 +1244,7 @@ mod tests {
 
         let waiter = {
             let (journal, request) = (Arc::clone(&journal), Arc::clone(&request));
-            std::thread::spawn(move || journal.wait("authority", &request))
+            std::thread::spawn(move || journal.wait("authority", &DeliveryKey::new(&request)))
         };
         std::thread::sleep(Duration::from_millis(100));
         assert!(!waiter.is_finished());
@@ -1262,7 +1292,10 @@ mod tests {
             journal.admit("second", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
         );
-        assert_eq!(journal.wait("second", &request)?, settled(Outcome::Succeeded));
+        assert_eq!(
+            journal.wait("second", &DeliveryKey::new(&request))?,
+            settled(Outcome::Succeeded)
+        );
         assert!(journal.complete("second", &request, Outcome::Unknown).is_err());
         assert_eq!(
             journal.admit("first", &request)?,
@@ -1301,7 +1334,10 @@ mod tests {
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Unknown))
         );
-        assert_eq!(journal.wait("authority", &request)?, settled(Outcome::Unknown));
+        assert_eq!(
+            journal.wait("authority", &DeliveryKey::new(&request))?,
+            settled(Outcome::Unknown)
+        );
         Ok(())
     }
 
@@ -1345,7 +1381,7 @@ mod tests {
 
         assert!(journal.admit("authority", &finished).is_err());
         assert!(journal.admit("authority", &pending).is_err());
-        assert!(journal.wait("authority", &finished).is_err());
+        assert!(journal.wait("authority", &DeliveryKey::new(&finished)).is_err());
         assert!(journal.complete("authority", &pending, Outcome::Succeeded).is_err());
         assert!(!record_path(&data, "finished").exists());
         assert_eq!(
@@ -1460,7 +1496,7 @@ mod tests {
 
         // A later outcome keeps the evidence.
         journal.complete("authority", &started, Outcome::Unknown)?;
-        assert_eq!(journal.wait("authority", &started)?, expected);
+        assert_eq!(journal.wait("authority", &DeliveryKey::new(&started))?, expected);
 
         // Records written before the field existed carry no evidence.
         // oracle: mutant a record without start evidence is read back as proof that the operation started
@@ -1474,7 +1510,10 @@ mod tests {
             Some(false.into())
         );
         std::fs::write(&path, serde_json::to_vec(&record)?)?;
-        assert_eq!(journal.wait("authority", &unproven)?, settled(Outcome::Unknown));
+        assert_eq!(
+            journal.wait("authority", &DeliveryKey::new(&unproven))?,
+            settled(Outcome::Unknown)
+        );
         Ok(())
     }
 

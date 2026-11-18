@@ -3,7 +3,7 @@
 //! The Broker's in-process record of the issued grant is the only source of start evidence.
 //! Once the grant may have reached UniGetUI, the verdict is unknown whatever UniGetUI answers or fails to answer.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 use win_api_wrappers::identity::sid::Sid;
 
 use super::DeviceManagementContext;
-use super::operation_journal::{Admission, OperationJournal, Outcome, Settled, record_name};
+use super::operation_journal::{Admission, DeliveryKey, OperationJournal, Outcome, Settled, record_name};
 
 /// Managers whose Broker builders exist on Windows.
 const SUPPORTED_MANAGERS: [ManagerName; 10] = [
@@ -178,7 +178,7 @@ pub(super) const JOURNAL_FULL_ERROR: &str = "agent journal full: nothing was sta
 
 struct Delivery {
     authority_id: String,
-    request: PackageOperationRequest,
+    key: DeliveryKey,
     reply: Reply,
 }
 
@@ -194,11 +194,19 @@ struct Tracked {
     stage: Stage,
 }
 
+/// Record names awaiting a journal lookup, served one at a time by a single task.
+#[derive(Default)]
+struct Lookups {
+    pending: VecDeque<(Arc<OperationJournal>, String)>,
+    draining: bool,
+}
+
 /// Coordinates journal lookups and operations without blocking the channel consumer.
 pub(super) struct Coordinator {
     workers: Arc<Semaphore>,
     admission: Arc<Semaphore>,
     tracked: Mutex<HashMap<String, Tracked>>,
+    lookups: Mutex<Lookups>,
 }
 
 impl Default for Coordinator {
@@ -207,6 +215,7 @@ impl Default for Coordinator {
             workers: Arc::new(Semaphore::new(super::MAX_CONCURRENT_REQUESTS)),
             admission: Arc::new(Semaphore::new(1)),
             tracked: Mutex::new(HashMap::new()),
+            lookups: Mutex::new(Lookups::default()),
         }
     }
 }
@@ -229,9 +238,10 @@ impl Coordinator {
     {
         let operation_id = request.operation_id.clone();
         let name = record_name(&operation_id);
+        let key = DeliveryKey::new(&request);
         let mut tracked = self.tracked.lock();
         if let Some(existing) = tracked.get_mut(&name) {
-            if !matches!(existing.stage, Stage::Lookup) && existing.delivery.request != request {
+            if !matches!(existing.stage, Stage::Lookup) && existing.delivery.key != key {
                 drop(tracked);
                 warn!("Package operation ID was used for a different request");
                 reply(result(operation_id, unknown(false)));
@@ -239,29 +249,36 @@ impl Coordinator {
             }
             existing.delivery = Delivery {
                 authority_id,
-                request,
+                key,
                 reply,
             };
             return;
         }
 
         if journal.may_contain(&operation_id) {
+            // A delivery awaiting its lookup keeps only its key and reply, and adds no task of its own.
             tracked.insert(
                 name.clone(),
                 Tracked {
                     delivery: Delivery {
                         authority_id,
-                        request,
+                        key,
                         reply,
                     },
                     stage: Stage::Lookup,
                 },
             );
             drop(tracked);
-            let coordinator = Arc::clone(self);
-            tokio::spawn(async move {
-                coordinator.lookup(journal, name).await;
-            });
+            let mut lookups = self.lookups.lock();
+            lookups.pending.push_back((journal, name));
+            if !lookups.draining {
+                lookups.draining = true;
+                drop(lookups);
+                let coordinator = Arc::clone(self);
+                tokio::spawn(async move {
+                    coordinator.drain_lookups().await;
+                });
+            }
             return;
         }
 
@@ -289,7 +306,7 @@ impl Coordinator {
             Tracked {
                 delivery: Delivery {
                     authority_id: authority_id.clone(),
-                    request: request.clone(),
+                    key,
                     reply,
                 },
                 stage: Stage::Admission,
@@ -300,6 +317,21 @@ impl Coordinator {
         tokio::spawn(async move {
             coordinator.admit(journal, authority_id, request, worker, execute).await;
         });
+    }
+
+    async fn drain_lookups(self: Arc<Self>) {
+        loop {
+            let next = {
+                let mut lookups = self.lookups.lock();
+                let next = lookups.pending.pop_front();
+                lookups.draining = next.is_some();
+                next
+            };
+            let Some((journal, name)) = next else {
+                return;
+            };
+            Arc::clone(&self).lookup(journal, name).await;
+        }
     }
 
     async fn lookup(self: Arc<Self>, journal: Arc<OperationJournal>, name: String) {
@@ -313,14 +345,14 @@ impl Coordinator {
                 .acquire_owned()
                 .await
                 .expect("admission semaphore stays open");
-            let (authority_id, request) = {
+            let (authority_id, key) = {
                 let tracked = self.tracked.lock();
                 let delivery = &tracked.get(&name).expect("lookup is tracked").delivery;
-                (delivery.authority_id.clone(), delivery.request.clone())
+                (delivery.authority_id.clone(), delivery.key.clone())
             };
             let lookup = {
-                let (journal, authority_id, request) = (Arc::clone(&journal), authority_id.clone(), request.clone());
-                journal_io(move || journal.lookup(&authority_id, &request)).await
+                let (journal, authority_id, key) = (Arc::clone(&journal), authority_id.clone(), key.clone());
+                journal_io(move || journal.lookup(&authority_id, &key)).await
             };
             let lookup = match lookup {
                 Ok(Ok(Some(admission))) => Some(admission),
@@ -341,7 +373,7 @@ impl Coordinator {
             let decision = {
                 let mut tracked = self.tracked.lock();
                 let current = tracked.get_mut(&name).expect("lookup is tracked");
-                if current.delivery.request != request {
+                if current.delivery.key != key {
                     Decision::Retry
                 } else if matches!(lookup, Some(Admission::InFlight)) {
                     current.stage = Stage::Running;
@@ -363,7 +395,7 @@ impl Coordinator {
                     let delivery = tracked.remove(&name).expect("lookup is tracked").delivery;
                     drop(tracked);
                     drop(admission);
-                    (delivery.reply)(result(delivery.request.operation_id, settled));
+                    (delivery.reply)(result(delivery.key.operation_id().to_owned(), settled));
                     return;
                 }
             };
@@ -371,8 +403,12 @@ impl Coordinator {
             match decision {
                 Decision::Retry => continue,
                 Decision::Wait => {
-                    let settled = wait(journal, authority_id, request).await;
-                    self.finish(name, settled);
+                    // An in-flight operation can run for minutes, so its waiter leaves the lookup queue.
+                    // Waiters are bounded by the operations in flight, one tracked entry each.
+                    tokio::spawn(async move {
+                        let settled = wait(journal, authority_id, key).await;
+                        self.finish(name, settled);
+                    });
                     return;
                 }
             }
@@ -448,14 +484,14 @@ impl Coordinator {
                                 );
                             }
                         }
-                        wait(journal, authority_id, request).await
+                        wait(journal, authority_id, DeliveryKey::new(&request)).await
                     }
                 }
             }
             Some(Admission::InFlight) => {
                 self.running(&name);
                 drop(admission);
-                wait(journal, authority_id, request).await
+                wait(journal, authority_id, DeliveryKey::new(&request)).await
             }
             Some(Admission::Recorded(settled)) => settled,
             Some(Admission::PayloadMismatch) => {
@@ -479,7 +515,7 @@ impl Coordinator {
             .remove(&name)
             .expect("operation is tracked")
             .delivery;
-        (delivery.reply)(result(delivery.request.operation_id, settled));
+        (delivery.reply)(result(delivery.key.operation_id().to_owned(), settled));
     }
 }
 
@@ -515,8 +551,8 @@ pub(super) fn submit(
     });
 }
 
-async fn wait(journal: Arc<OperationJournal>, authority_id: String, request: PackageOperationRequest) -> Settled {
-    match tokio::task::spawn_blocking(move || journal.wait(&authority_id, &request)).await {
+async fn wait(journal: Arc<OperationJournal>, authority_id: String, key: DeliveryKey) -> Settled {
+    match tokio::task::spawn_blocking(move || journal.wait(&authority_id, &key)).await {
         Ok(Ok(settled)) => settled,
         Ok(Err(error)) => {
             error!(
@@ -887,7 +923,7 @@ mod tests {
         assert_eq!(later.status, i32::from(PackageOperationStatus::Unknown));
         assert_eq!(later.execution_started, Some(true));
         assert_eq!(
-            journal.lookup("first-authority", &new)?,
+            journal.lookup("first-authority", &DeliveryKey::new(&new))?,
             Some(Admission::Recorded(Settled {
                 outcome: Outcome::Unknown,
                 execution_started: Some(true),
@@ -1061,6 +1097,42 @@ mod tests {
 
     fn numbered_id(n: usize) -> String {
         format!("11111111-2222-4333-8444-5555555555{n:02}")
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn recorded_redeliveries_share_one_lookup_task_while_lookups_are_held() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let recorded: Vec<_> = (0..16).map(|n| request_with_id(&numbered_id(n))).collect();
+        for request in &recorded {
+            assert_eq!(journal.admit("authority", request)?, Admission::Admitted);
+            journal.complete("authority", request, Outcome::Succeeded)?;
+        }
+        let admission = Arc::clone(&coordinator.admission).acquire_owned().await?;
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let tasks_before = metrics.num_alive_tasks();
+
+        let mut results = Vec::new();
+        for request in recorded {
+            let (reply, result) = response();
+            coordinator.submit(
+                Arc::clone(&journal),
+                "authority".to_owned(),
+                request,
+                reply,
+                |_| async { panic!("a recorded operation must not execute again") },
+            );
+            results.push(result);
+        }
+        tokio::task::yield_now().await;
+        assert_eq!(metrics.num_alive_tasks(), tasks_before + 1);
+
+        drop(admission);
+        for result in results {
+            assert!(tokio::time::timeout(Duration::from_secs(10), result).await??.success);
+        }
+        Ok(())
     }
 
     async fn wait_for_stall(entered: std::sync::mpsc::Receiver<()>) -> anyhow::Result<()> {
@@ -1254,7 +1326,10 @@ mod tests {
         assert_eq!(full.execution_started, None);
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert!(!journal.may_contain(&full.operation_id));
-        assert_eq!(journal.lookup("authority", &request_with_id(&full.operation_id))?, None);
+        assert_eq!(
+            journal.lookup("authority", &DeliveryKey::new(&request_with_id(&full.operation_id)))?,
+            None
+        );
         assert!(journal.may_contain(&succeeded.operation_id));
         Ok(())
     }
@@ -1288,7 +1363,7 @@ mod tests {
         assert_eq!(result.operation_id, original.operation_id);
         assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
         assert_eq!(
-            journal.lookup("authority", &original)?,
+            journal.lookup("authority", &DeliveryKey::new(&original))?,
             Some(Admission::Recorded(Settled {
                 outcome: Outcome::Succeeded,
                 execution_started: None,
@@ -1601,7 +1676,9 @@ mod tests {
         writer.join().expect("journal writer thread completed")?;
         runtime.join().expect("test runtime thread completed");
         assert_eq!(
-            journal.wait("authority", &interrupted_for_wait)?.outcome,
+            journal
+                .wait("authority", &DeliveryKey::new(&interrupted_for_wait))?
+                .outcome,
             Outcome::Unknown
         );
 
@@ -1849,7 +1926,9 @@ mod tests {
             armed: true,
         });
 
-        let settled = journal.wait("authority", &request).expect("outcome is settled");
+        let settled = journal
+            .wait("authority", &DeliveryKey::new(&request))
+            .expect("outcome is settled");
         assert_eq!(settled.outcome, Outcome::Unknown);
         assert_eq!(
             journal.admit("authority", &request).expect("operation is recorded"),
