@@ -718,6 +718,7 @@ impl DeliveryKey {
         }
     }
 
+    #[cfg(windows)]
     pub(super) fn operation_id(&self) -> &str {
         &self.operation_id
     }
