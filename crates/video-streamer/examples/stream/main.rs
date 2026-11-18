@@ -14,10 +14,6 @@ use tokio::sync::Notify;
 use tracing::{error, info};
 use video_streamer::{ReOpenableFile, SessionConfig, webm_stream};
 
-pub struct TokioSignal {
-    signal: tokio::sync::watch::Receiver<()>,
-}
-
 mod local_websocket;
 
 #[tokio::main]

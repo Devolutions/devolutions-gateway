@@ -19,7 +19,7 @@ pub async fn main() -> anyhow::Result<()> {
     tokio::task::spawn(async move {
         let mut socket = clone
             .new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)
-            .unwrap();
+            .expect("create the UDP socket");
         let addr = SocketAddr::from((std::net::Ipv4Addr::new(127, 0, 0, 1), 31255));
         tokio::time::sleep(std::time::Duration::from_secs(1)).await; // wait for the other socket to start
         tracing::info!("starting to send");
@@ -47,6 +47,7 @@ pub async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
+        // SAFETY: `recv_from` initialized the first `size` bytes of `buf`.
         let inited = unsafe { assume_init(&buf[..size]) };
         counter += 1;
         if counter == 9 {

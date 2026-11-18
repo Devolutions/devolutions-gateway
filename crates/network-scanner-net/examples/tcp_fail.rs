@@ -54,7 +54,7 @@ mod utils {
                         // connection was closed
                         break;
                     }
-                    let _ = stream.write(&read[0..n]).unwrap();
+                    let _ = stream.write(&read[0..n]).expect("echo the received bytes");
                 }
                 Err(_) => {
                     return;
@@ -65,7 +65,7 @@ mod utils {
 
     pub(super) fn start_server() {
         thread::spawn(|| {
-            let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+            let listener = TcpListener::bind("127.0.0.1:8080").expect("bind the echo server");
 
             for stream in listener.incoming() {
                 match stream {
