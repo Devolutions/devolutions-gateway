@@ -14,9 +14,10 @@ use crate::models;
 
 /// Error : The original crate-wide error type.
 /// The original crate-wide error type.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
 pub enum Error {
     #[serde(rename = "AccessDenied")]
+    #[default]
     AccessDenied,
     #[serde(rename = "NotFound")]
     NotFound,
@@ -37,11 +38,5 @@ impl std::fmt::Display for Error {
             Self::Internal => write!(f, "Internal"),
             Self::Cancelled => write!(f, "Cancelled"),
         }
-    }
-}
-
-impl Default for Error {
-    fn default() -> Error {
-        Self::AccessDenied
     }
 }

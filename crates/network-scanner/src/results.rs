@@ -107,11 +107,7 @@ impl ScanEventFilter {
                 LegacyScanEvent::Host { .. } => cfg.include_host_results,
             },
             LegacyNetworkScanResponse::Entry { status, .. } => {
-                if matches!(status, ScanStatus::Failed) && !cfg.report_tcp_failure {
-                    return false;
-                }
-
-                true
+                cfg.report_tcp_failure || !matches!(status, ScanStatus::Failed)
             }
         }
     }

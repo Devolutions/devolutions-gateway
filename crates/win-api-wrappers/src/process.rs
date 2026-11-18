@@ -673,7 +673,6 @@ impl Module {
         // SAFETY: No preconditions. Both handle and symbol are valid.
         match unsafe { GetProcAddress(self.handle, symbol.as_pcstr()) } {
             // This cast is intended. See also: https://github.com/rust-lang/rust-clippy/issues/12638
-            #[expect(clippy::fn_to_numeric_cast_any)]
             Some(func) => Ok(func as *const c_void),
             None => Err(windows::core::Error::from_win32()),
         }

@@ -5,6 +5,7 @@
 #[allow(
     unused_qualifications,
     clippy::clone_on_ref_ptr,
+    clippy::result_large_err,
     clippy::pedantic,
     reason = "generated code; the set of triggered lints depends on the proto"
 )]

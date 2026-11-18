@@ -108,20 +108,15 @@ impl ManualProxyConfig {
     clippy::large_enum_variant,
     reason = "Manual is the most common variant in practice, boxing would add unnecessary indirection"
 )]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum ProxyConfig {
     /// Never use a proxy, ignore environment variables.
     Off,
     /// Use environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) or WinHTTP configuration.
+    #[default]
     System,
     /// Use manually configured proxy URLs from the configuration file.
     Manual(ManualProxyConfig),
-}
-
-impl Default for ProxyConfig {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 /// Windows automatic proxy configuration, which System mode doesn't evaluate.

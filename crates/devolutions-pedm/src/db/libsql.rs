@@ -734,7 +734,7 @@ impl Database for LibsqlConn {
 
         let where_sql = format!(" WHERE {}", where_clauses.join(" AND "));
 
-        let mut count_sql = format!("SELECT COUNT(*) {}", &base_sql);
+        let mut count_sql = format!("SELECT COUNT(*) {}", base_sql);
         count_sql.push_str(&where_sql);
         let total_records_row = self
             .query_one(&count_sql, libsql::params_from_iter(params.clone()))

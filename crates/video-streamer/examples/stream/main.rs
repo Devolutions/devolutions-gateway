@@ -141,7 +141,6 @@ async fn get_slowly_written_file(
             if n == 0 {
                 break;
             }
-            size += n;
             temp_file.write_all(&buf[..n]).await?;
             file_written_sender.send(()).unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;

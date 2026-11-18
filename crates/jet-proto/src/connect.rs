@@ -23,35 +23,22 @@ impl JetConnectReq {
         match self.version {
             1 => {
                 stream.write_fmt(format_args!("GET / HTTP/1.1\r\n"))?;
-                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, self.host))?;
                 stream.write_fmt(format_args!("{JET_HEADER_CONNECTION}: Keep-Alive\r\n"))?;
                 stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_METHOD, "Connect"))?;
-                stream.write_fmt(format_args!(
-                    "{}: {}\r\n",
-                    JET_HEADER_ASSOCIATION,
-                    &self.association.to_string()
-                ))?;
-                stream.write_fmt(format_args!(
-                    "{}: {}\r\n",
-                    JET_HEADER_VERSION,
-                    &self.version.to_string()
-                ))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_ASSOCIATION, self.association))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, self.version))?;
                 stream.write_fmt(format_args!("\r\n"))?;
             }
             _ => {
                 // version = 2
                 stream.write_fmt(format_args!(
                     "GET /jet/connect/{}/{} HTTP/1.1\r\n",
-                    &self.association.to_string(),
-                    &self.candidate.to_string()
+                    self.association, self.candidate
                 ))?;
-                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, self.host))?;
                 stream.write_fmt(format_args!("{JET_HEADER_CONNECTION}: Keep-Alive\r\n"))?;
-                stream.write_fmt(format_args!(
-                    "{}: {}\r\n",
-                    JET_HEADER_VERSION,
-                    &self.version.to_string()
-                ))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, self.version))?;
                 stream.write_fmt(format_args!("\r\n"))?;
             }
         }
@@ -114,14 +101,10 @@ impl JetConnectRsp {
     pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         stream.write_fmt(format_args!(
             "HTTP/1.1 {} {}\r\n",
-            &self.status_code,
+            self.status_code,
             self.status_code.as_str()
         ))?;
-        stream.write_fmt(format_args!(
-            "{}: {}\r\n",
-            JET_HEADER_VERSION,
-            &self.version.to_string()
-        ))?;
+        stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, self.version))?;
         stream.write_fmt(format_args!("\r\n"))?;
         Ok(())
     }

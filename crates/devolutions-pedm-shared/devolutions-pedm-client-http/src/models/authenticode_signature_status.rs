@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
 pub enum AuthenticodeSignatureStatus {
     #[serde(rename = "Valid")]
+    #[default]
     Valid,
     #[serde(rename = "Incompatible")]
     Incompatible,
@@ -38,11 +39,5 @@ impl std::fmt::Display for AuthenticodeSignatureStatus {
             Self::NotSupportedFileFormat => write!(f, "NotSupportedFileFormat"),
             Self::NotTrusted => write!(f, "NotTrusted"),
         }
-    }
-}
-
-impl Default for AuthenticodeSignatureStatus {
-    fn default() -> AuthenticodeSignatureStatus {
-        Self::Valid
     }
 }

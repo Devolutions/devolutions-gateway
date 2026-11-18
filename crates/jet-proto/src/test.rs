@@ -18,12 +18,11 @@ impl JetTestReq {
     pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         stream.write_fmt(format_args!(
             "GET /jet/test/{}/{} HTTP/1.1\r\n",
-            &self.association.to_string(),
-            &self.candidate.to_string()
+            self.association, self.candidate
         ))?;
-        stream.write_fmt(format_args!("Host: {}\r\n", &self.host))?;
+        stream.write_fmt(format_args!("Host: {}\r\n", self.host))?;
         stream.write_fmt(format_args!("Connection: Close\r\n"))?;
-        stream.write_fmt(format_args!("Jet-Version: {}\r\n", &self.version.to_string()))?;
+        stream.write_fmt(format_args!("Jet-Version: {}\r\n", self.version))?;
         stream.write_fmt(format_args!("\r\n"))?;
         Ok(())
     }
@@ -62,14 +61,10 @@ impl JetTestRsp {
     pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         stream.write_fmt(format_args!(
             "HTTP/1.1 {} {}\r\n",
-            &self.status_code,
+            self.status_code,
             self.status_code.as_str()
         ))?;
-        stream.write_fmt(format_args!(
-            "{}: {}\r\n",
-            JET_HEADER_VERSION,
-            &self.version.to_string()
-        ))?;
+        stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, self.version))?;
         stream.write_fmt(format_args!("\r\n"))?;
         Ok(())
     }

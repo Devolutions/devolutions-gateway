@@ -233,7 +233,6 @@ impl RetryDelay {
 
 #[cfg(test)]
 mod tests {
-    use std::os::windows::io::AsRawHandle as _;
     use std::time::Instant;
 
     use devolutions_pedm_shared::pipe::{

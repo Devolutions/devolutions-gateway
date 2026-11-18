@@ -115,7 +115,7 @@ impl ProvisionerTask for Echo {
     async fn publish(&self, record: &ProvisionerTaskRecord, _: &serde_json::Value) -> anyhow::Result<()> {
         if self
             .publish_failures
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
             .is_ok()
         {
             anyhow::bail!("the publication failed");
@@ -128,7 +128,7 @@ impl ProvisionerTask for Echo {
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
         if self
             .end_failures
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
             .is_ok()
         {
             anyhow::bail!("the end failed");
