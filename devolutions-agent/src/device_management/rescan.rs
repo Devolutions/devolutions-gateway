@@ -76,6 +76,7 @@ async fn wait_for_rescan(
         return;
     };
 
+    // Shutdown is polled first, so a stop that is already signalled requests no rescan.
     // The rescan is polled before the timer, so it is requested even when the wait has no time left.
     // UNTESTED: Each ending but a completed rescan and a shutdown is logged as a warning, the only trace that a rescan is missing.
     // The tests do not capture logs; keep a warning on the rejected, unanswered and no-permit paths when changing them.
