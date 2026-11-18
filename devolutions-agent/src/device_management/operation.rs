@@ -258,6 +258,10 @@ struct Pending {
 
 impl Pending {
     /// Records the end of the operation; a record that cannot be written leaves the unknown outcome to later deliveries.
+    #[expect(
+        unused_assignments,
+        reason = "the closure captures all of `self` because `Pending` implements `Drop`, and `drop` reads `armed`"
+    )]
     async fn finish(mut self, outcome: Outcome, started: bool) -> Settled {
         let recorded = outcome.clone();
         let written = tokio::task::spawn_blocking(move || {

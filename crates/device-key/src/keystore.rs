@@ -612,8 +612,10 @@ fn ensure_supported_algorithm(key: &Key) -> anyhow::Result<()> {
         .get(..usize::try_from(used)?)
         .filter(|bytes| bytes.len() % 2 == 0)
         .context("invalid machine-key algorithm name")?
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .collect::<Vec<_>>();
     ensure!(
         algorithm == wide("ECDSA_P256"),

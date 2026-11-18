@@ -326,7 +326,7 @@ impl Drop for CatalogAdminContext {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Seek as _, SeekFrom};
+    use std::io::SeekFrom;
 
     use super::*;
 
@@ -753,9 +753,11 @@ pub fn cert_ctx_eku(ctx: &CERT_CONTEXT) -> Result<Vec<String>> {
         bail!(Error::from_win32(ERROR_INCORRECT_SIZE));
     }
 
-    // SAFETY: We assume `CertGetEnhancedKeyUsage` actually wrote a valid `CTL_USAGE`.
     #[allow(clippy::cast_ptr_alignment)] // FIXME(DGW-221): Raw* hack is flawed.
-    let ctl_usage = unsafe { raw_buf.as_ptr().cast::<CTL_USAGE>().read() };
+    let ctl_usage_ptr = raw_buf.as_ptr().cast::<CTL_USAGE>();
+
+    // SAFETY: We assume `CertGetEnhancedKeyUsage` actually wrote a valid `CTL_USAGE`.
+    let ctl_usage = unsafe { ctl_usage_ptr.read() };
 
     Ok(
         // SAFETY: We assume `ctl_usage` is truthful. We assume `ctl_usage` is big enough to fit the VLA.

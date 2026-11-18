@@ -646,9 +646,7 @@ where
     type Rejection = HttpError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let RawQuery(query) = RawQuery::from_request(req, state)
-            .await
-            .map_err(|e| HttpError::bad_request().build(e))?;
+        let Ok(RawQuery(query)) = RawQuery::from_request(req, state).await;
 
         let query = query.unwrap_or_default();
         let parsed_query = serde_querystring::from_str::<T>(&query, serde_querystring::ParseMode::Duplicate)
