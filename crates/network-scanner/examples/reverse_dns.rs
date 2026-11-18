@@ -1,3 +1,6 @@
+#![expect(clippy::print_stdout, reason = "the example reports its results on the console")]
+#![expect(clippy::print_stderr, reason = "the example reports errors on the console")]
+
 use std::env;
 use std::net::IpAddr;
 

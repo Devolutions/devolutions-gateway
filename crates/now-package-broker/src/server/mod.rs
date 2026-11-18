@@ -491,14 +491,13 @@ fn configured_policy_path(state: &BrokerState) -> PathBuf {
     PathBuf::from(state.policy_store.management_snapshot().configured_path)
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "the shared API contract requires ErrorResponse values"
-)]
-fn require_policy_management_authentication() -> Result<(), ErrorResponse> {
-    POLICY_MANAGEMENT_AUTHENTICATED
-        .try_with(|()| ())
-        .map_err(|_| error_response(ErrorCode::Unauthorized, "pipe client authentication failed"))
+fn require_policy_management_authentication() -> Result<(), Box<ErrorResponse>> {
+    POLICY_MANAGEMENT_AUTHENTICATED.try_with(|()| ()).map_err(|_| {
+        Box::new(error_response(
+            ErrorCode::Unauthorized,
+            "pipe client authentication failed",
+        ))
+    })
 }
 
 struct BrokerConnection {
@@ -525,11 +524,11 @@ impl PackageBrokerServer for BrokerConnection {
                 error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
             })?;
 
-        self.state.policy_response()
+        self.state.policy_response().map_err(|error| *error)
     }
 
     async fn policy_management(&self) -> Result<PolicyManagementResponse, ErrorResponse> {
-        require_policy_management_authentication()?;
+        require_policy_management_authentication().map_err(|error| *error)?;
         Ok(PolicyManagementResponse {
             response_kind: now_policy_api::PolicyManagementResponseKind,
             response_version: api_version(),
@@ -542,7 +541,7 @@ impl PackageBrokerServer for BrokerConnection {
         &self,
         request: PolicyValidationRequest,
     ) -> Result<PolicyValidationResponse, ErrorResponse> {
-        require_policy_management_authentication()?;
+        require_policy_management_authentication().map_err(|error| *error)?;
         Ok(PolicyValidationResponse {
             response_kind: now_policy_api::PolicyValidationResponseKind,
             response_version: api_version(),
@@ -555,7 +554,7 @@ impl PackageBrokerServer for BrokerConnection {
         &self,
         request: PolicyReplacementRequest,
     ) -> Result<PolicyReplacementResponse, ErrorResponse> {
-        require_policy_management_authentication()?;
+        require_policy_management_authentication().map_err(|error| *error)?;
         // The middleware already rejected and recorded any other caller; this keeps the handler
         // safe on its own.
         if !self.client.is_elevated_administrator() {
@@ -568,6 +567,7 @@ impl PackageBrokerServer for BrokerConnection {
             .policy_store
             .replace(request, audit)
             .await
+            .map_err(|error| *error)
             .map(|success| PolicyReplacementResponse {
                 response_kind: now_policy_api::PolicyReplacementResponseKind,
                 response_version: api_version(),
@@ -586,7 +586,7 @@ impl PackageBrokerServer for BrokerConnection {
                 error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
             })?;
 
-        self.state.evaluate(request).await
+        self.state.evaluate(request).await.map_err(|error| *error)
     }
 
     async fn execute(&self, request: PackageRequest) -> Result<ExecutionResponse, ErrorResponse> {
@@ -597,7 +597,10 @@ impl PackageBrokerServer for BrokerConnection {
                 error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
             })?;
 
-        self.state.execute(request, self.client.user_sid()).await
+        self.state
+            .execute(request, self.client.user_sid())
+            .await
+            .map_err(|error| *error)
     }
 
     async fn execute_grant(
@@ -605,7 +608,9 @@ impl PackageBrokerServer for BrokerConnection {
         request: PackageRequest,
         grant: now_policy_api::PackageGrant,
     ) -> Result<now_policy_api::GrantExecutionResponse, ErrorResponse> {
-        grant::execute_grant(&self.state, &self.client, self.identity.as_ref(), request, grant).await
+        grant::execute_grant(&self.state, &self.client, self.identity.as_ref(), request, grant)
+            .await
+            .map_err(|error| *error)
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
@@ -617,7 +622,10 @@ impl PackageBrokerServer for BrokerConnection {
             })?;
 
         let owner_key = request.client.owner_key();
-        self.state.status_for_client(request, owner_key).await
+        self.state
+            .status_for_client(request, owner_key)
+            .await
+            .map_err(|error| *error)
     }
 
     async fn cancel(&self, request: CancelRequest) -> Result<CancelResponse, ErrorResponse> {
@@ -629,7 +637,10 @@ impl PackageBrokerServer for BrokerConnection {
             })?;
 
         let owner_key = request.client.owner_key();
-        self.state.cancel_for_client(request, owner_key).await
+        self.state
+            .cancel_for_client(request, owner_key)
+            .await
+            .map_err(|error| *error)
     }
 }
 
@@ -638,11 +649,7 @@ impl BrokerState {
         self.policy_store.active_policy()
     }
 
-    #[expect(
-        clippy::result_large_err,
-        reason = "the shared API contract requires ErrorResponse values"
-    )]
-    fn policy_response(&self) -> Result<PolicyResponse, ErrorResponse> {
+    fn policy_response(&self) -> Result<PolicyResponse, Box<ErrorResponse>> {
         let policy = self
             .active_policy_snapshot()
             .ok_or_else(|| error_response(ErrorCode::NotFound, "active policy is unavailable"))?;
@@ -706,7 +713,7 @@ impl BrokerState {
         filter_manager_capabilities(supported_manager_capabilities(), &available)
     }
 
-    async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, ErrorResponse> {
+    async fn evaluate(&self, request: PackageRequest) -> Result<EvaluationResponse, Box<ErrorResponse>> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
 
@@ -729,7 +736,11 @@ impl BrokerState {
     ///
     /// The pipe server calls it after authenticating the client; an in-process caller supplies the user itself.
     /// Follow the operation with `tracker`.
-    pub async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
+    pub async fn execute(
+        &self,
+        request: PackageRequest,
+        user_sid: &Sid,
+    ) -> Result<ExecutionResponse, Box<ErrorResponse>> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
@@ -842,14 +853,14 @@ impl BrokerState {
         &self,
         request: StatusRequest,
         owner_key: String,
-    ) -> Result<StatusResponse, ErrorResponse> {
+    ) -> Result<StatusResponse, Box<ErrorResponse>> {
         let operation = if owner_key.is_empty() {
             self.tracker.get(&request.operation_id)
         } else {
             self.tracker.get_for_owner(&request.operation_id, &owner_key)
         };
         let Some(operation) = operation else {
-            return Err(error_response(ErrorCode::NotFound, "operation not found"));
+            return Err(Box::new(error_response(ErrorCode::NotFound, "operation not found")));
         };
 
         Ok(StatusResponse {
@@ -871,9 +882,9 @@ impl BrokerState {
         &self,
         request: CancelRequest,
         owner_key: String,
-    ) -> Result<CancelResponse, ErrorResponse> {
+    ) -> Result<CancelResponse, Box<ErrorResponse>> {
         let Some(operation) = self.tracker.request_cancel(&request.operation_id, &owner_key) else {
-            return Err(error_response(ErrorCode::NotFound, "operation not found"));
+            return Err(Box::new(error_response(ErrorCode::NotFound, "operation not found")));
         };
 
         let message = if operation.status == OperationStatus::Canceling {
@@ -894,20 +905,16 @@ impl BrokerState {
         })
     }
 
-    #[expect(
-        clippy::result_large_err,
-        reason = "the shared API contract requires ErrorResponse values"
-    )]
-    fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, ErrorResponse> {
+    fn evaluate_request(&self, request: &PackageRequest) -> Result<EvaluatedRequest, Box<ErrorResponse>> {
         if !evaluator::source_name_is_unambiguous_for_manager(request.manager, &request.source.name) {
             warn!(
                 request_id = %request.request_id,
                 "Rejecting request: package source name has ambiguous spelling"
             );
-            return Err(error_response(
+            return Err(Box::new(error_response(
                 ErrorCode::ValidationFailed,
                 "package source name has unsupported leading, trailing, default-ignorable, or wildcard characters",
-            ));
+            )));
         }
 
         // SECURITY: Pre/post operation commands are raw command strings executed via
@@ -927,10 +934,10 @@ impl BrokerState {
                 request_id = %request.request_id,
                 "Rejecting request: pre/post operation commands are not allowed for elevated execution"
             );
-            return Err(error_response(
+            return Err(Box::new(error_response(
                 ErrorCode::ValidationFailed,
                 "pre/post operation commands are only allowed for non-elevated execution",
-            ));
+            )));
         }
 
         // A custom install location (typed or passed through WinGet custom parameters) must be a
@@ -940,10 +947,10 @@ impl BrokerState {
                 request_id = %request.request_id,
                 "Rejecting request: unacceptable custom install location"
             );
-            return Err(error_response(
+            return Err(Box::new(error_response(
                 ErrorCode::ValidationFailed,
                 "custom install location must be a single absolute local drive path without relative segments",
-            ));
+            )));
         }
 
         let received_at = Utc::now();
@@ -953,7 +960,7 @@ impl BrokerState {
 
         if let Some(reason) = policy_validity_failure(&policy, received_at) {
             warn!(%reason, "Rejecting request: policy outside validity window");
-            return Err(error_response(ErrorCode::Forbidden, reason));
+            return Err(Box::new(error_response(ErrorCode::Forbidden, reason)));
         }
 
         trace!(

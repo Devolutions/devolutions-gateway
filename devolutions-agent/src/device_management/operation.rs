@@ -295,6 +295,10 @@ impl Pending {
         self.finish_with_durability(outcome, started).await.settled
     }
 
+    #[expect(
+        unused_assignments,
+        reason = "the closure captures all of `self` because `Pending` implements `Drop`, and `drop` reads `armed`"
+    )]
     async fn finish_with_durability(mut self, outcome: Outcome, started: bool) -> Completion {
         let recorded = outcome.clone();
         let written = tokio::task::spawn_blocking(move || {

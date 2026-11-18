@@ -37,6 +37,7 @@ pub mod channel;
 pub mod encoding;
 pub mod fs;
 pub mod io;
+pub mod message_name;
 pub mod now_message_dissector;
 pub mod process;
 pub mod rdm;

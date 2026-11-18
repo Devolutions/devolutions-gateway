@@ -59,7 +59,7 @@ fn main() -> anyhow::Result<()> {
     };
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let scanner = NetworkScanner::new(params).unwrap();
+        let scanner = NetworkScanner::new(params)?;
         let stream = scanner.start()?;
         let now = std::time::Instant::now();
         tokio::task::spawn(async move {

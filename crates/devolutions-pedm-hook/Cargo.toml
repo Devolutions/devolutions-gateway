@@ -7,6 +7,8 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 description = "Devolutions PEDM AppInfo service hook"
 publish = false
 
+[lints]
+
 [lib]
 crate-type = ["cdylib"]
 

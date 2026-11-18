@@ -5,6 +5,8 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
 publish = false
 
+[lints]
+
 [dependencies]
 tokio = { version = "1.52", features = ["rt", "net"] }
 proxy-http = { path = "../proxy-http" }

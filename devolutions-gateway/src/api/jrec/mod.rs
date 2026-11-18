@@ -944,10 +944,7 @@ fn zip_file_body_stream(
             }
 
             match state.file.read(&mut state.buffer).await {
-                Ok(0) => {
-                    state.finished = true;
-                    None
-                }
+                Ok(0) => None,
                 Ok(n) => {
                     let chunk = Bytes::copy_from_slice(&state.buffer[..n]);
                     Some((Ok(chunk), state))
