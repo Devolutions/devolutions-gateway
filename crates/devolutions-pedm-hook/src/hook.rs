@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::ptr;
 
 use anyhow::Result;
 use devolutions_pedm_shared::client::models::{LaunchPayload, StartupInfoDto};
@@ -15,13 +16,13 @@ use win_api_wrappers::rpc::{RPC_BINDING_HANDLE, RpcBindingHandle};
 use win_api_wrappers::thread::Thread;
 use win_api_wrappers::utils::SafeWindowsString;
 
-use crate::appinfo::{APP_PROCESS_INFORMATION, APP_STARTUP_INFO};
+use super::appinfo::{APP_PROCESS_INFORMATION, APP_STARTUP_INFO};
 
 /// In Appinfo.dll, RAiLaunchAdminProcess sets the elevation type to 6.
 /// The name is unofficial.
 const ELEVATION_TYPE_SUCCESS: u32 = 6;
 
-pub unsafe extern "system" fn rai_launch_admin_process(
+pub(crate) unsafe extern "system" fn rai_launch_admin_process(
     state: *mut RPC_ASYNC_STATE,                       // in, out
     binding: RPC_BINDING_HANDLE,                       // in
     executable_path: PCWSTR,                           // in
@@ -36,24 +37,32 @@ pub unsafe extern "system" fn rai_launch_admin_process(
     process_information: *mut APP_PROCESS_INFORMATION, // out
     elevation_type: *mut u32,                          // out
 ) {
-    // SAFETY: All pointers are assumed valid by the function contract.
-    let result = unsafe {
-        rai_launch_admin_process_handler(
-            state,
-            RpcBindingHandle(binding),
-            executable_path.to_path_safe().ok().as_deref(),
-            command_line.to_string().ok().as_deref(),
-            start_flags,
-            PROCESS_CREATION_FLAGS(creation_flags),
-            working_directory.to_path_safe().ok().as_deref(),
-            window_station.to_string().ok().as_deref(),
-            &*startup_info,
-            hwnd,
-            timeout,
-            &mut *process_information,
-            &mut *elevation_type,
-        )
-    };
+    // SAFETY: The RPC runtime passes a valid null-terminated wide string for `command_line`.
+    let command_line = unsafe { command_line.to_string() }.ok();
+    // SAFETY: The RPC runtime passes a valid null-terminated wide string for `window_station`.
+    let window_station = unsafe { window_station.to_string() }.ok();
+    // SAFETY: The RPC runtime passes a valid, aligned `APP_STARTUP_INFO` for the duration of the call.
+    let startup_info = unsafe { &*startup_info };
+    // SAFETY: The RPC runtime passes a valid, aligned, exclusive out pointer for the duration of the call.
+    let process_information = unsafe { &mut *process_information };
+    // SAFETY: The RPC runtime passes a valid, aligned, exclusive out pointer for the duration of the call.
+    let elevation_type = unsafe { &mut *elevation_type };
+
+    let result = rai_launch_admin_process_handler(
+        state,
+        RpcBindingHandle(binding),
+        executable_path.to_path_safe().ok().as_deref(),
+        command_line.as_deref(),
+        start_flags,
+        PROCESS_CREATION_FLAGS(creation_flags),
+        working_directory.to_path_safe().ok().as_deref(),
+        window_station.as_deref(),
+        startup_info,
+        hwnd,
+        timeout,
+        process_information,
+        elevation_type,
+    );
 
     let reply: i32 = match result {
         Ok(()) => RPC_S_OK.0,
@@ -62,12 +71,13 @@ pub unsafe extern "system" fn rai_launch_admin_process(
             let win_err = error.root_cause().downcast_ref::<win_api_wrappers::raw::core::Error>();
             match win_err {
                 Some(w) => w.code().0,
-                None => ERROR_INVALID_DATA.0 as _,
+                None => ERROR_INVALID_DATA.0.cast_signed(),
             }
         }
     };
 
-    let status = unsafe { RpcAsyncCompleteCall(state, Some(&reply as *const i32 as _)) };
+    // SAFETY: `state` is the async state the RPC runtime passed to this call, and `reply` outlives the call.
+    let status = unsafe { RpcAsyncCompleteCall(state, Some(ptr::from_ref(&reply).cast_mut().cast())) };
 
     if status != RPC_S_OK {
         error!(?status, "RPC error when completing async call");
@@ -93,7 +103,7 @@ fn rai_launch_admin_process_handler(
     let caller = binding.inquire_caller()?;
 
     let startup_info = StartupInfoDto {
-        desktop: window_station.map(str::to_string),
+        desktop: window_station.map(str::to_owned),
         title: startup_info.Title.to_string_safe().ok(),
         x: startup_info.X,
         y: startup_info.Y,
@@ -103,7 +113,7 @@ fn rai_launch_admin_process_handler(
         y_count_chars: startup_info.YCountChars,
         fill_attribute: startup_info.FillAttribute,
         flags: startup_info.Flags & 0xfffffcff, // as decompiler says (not STARTF_PREVENTPINNING and STARTF_TITLEISAPPID)
-        show_window: startup_info.ShowWindow as _,
+        show_window: u32::from(startup_info.ShowWindow),
         parent_pid: Some(caller.client_pid),
     };
 
@@ -123,8 +133,8 @@ fn rai_launch_admin_process_handler(
 
     drop(ctx);
 
-    let proc_info =
-        proc_info.map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error as _)))?;
+    let proc_info = proc_info
+        .map_err(|x| win_api_wrappers::raw::core::Error::from_hresult(HRESULT(x.win32_error.cast_signed())))?;
 
     let mut process = Process::get_by_pid(proc_info.process_id, PROCESS_ALL_ACCESS)?;
     let mut thread = Thread::get_by_id(proc_info.thread_id, THREAD_ALL_ACCESS)?;
