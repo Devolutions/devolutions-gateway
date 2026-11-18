@@ -198,7 +198,9 @@ When UniGetUI cannot produce the installed snapshot required by `CONTRACT.packag
 `sourceName` is empty for uninstall and may be empty for update, as specified in `CONTRACT.package-management.md §operations`.
 For update and uninstall, `reportedScope` is the selected inventory row's `reported_scope`, including an empty string when no scope was reported.
 For install, `reportedScope` is omitted.
-UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations` and answers when the outcome is known.
+UniGetUI submits `ExecutePackageOperation` to the Broker with the grant under `CONTRACT.package-management.md §operations`.
+When the Broker accepts or rejects the request, or its response is lost or times out after the request may have been sent, UniGetUI answers `Unknown` without waiting for the package process to exit.
+UniGetUI answers `Failed` only when it can prove that the request was not sent.
 `Unknown` means UniGetUI cannot establish the outcome; `error` is empty unless `status` is `Failed`.
 A rejected or unanswered `ExecutePackageOperation`, or one whose connection closes first, is reported to the Authority as `UNKNOWN` unless trusted Broker evidence establishes the outcome.
 While its operation journal retains the operation ID, the Agent never resends it on this or another connection.
@@ -393,8 +395,14 @@ For grant operations, the Broker emits `Finish` only after both output readers h
 On a read failure, reader panic, invalid UTF-8, output overflow or other loss, it closes the event stream without `Finish`.
 The grant client accepts output only after a valid `Hello` and `Finish` with no overflow or malformed frames and only when it can establish that no output was lost or injected.
 The v1 event stream cannot establish completeness: another reader can consume whole frames without leaving a gap visible to the client.
-An exit code or output alone does not establish a package outcome.
-When the operation's verdict depends on either, the Agent reports `UNKNOWN`.
+Output never establishes a package outcome; when the operation's verdict depends on output, the Agent reports `UNKNOWN`.
+When the Broker record shows that the process exited, its exit code establishes the outcome.
+Exit code 0 is a known success.
+Any other exit code is a known failure whose error is exactly `<manager> exited with code <N>`.
+`<manager>` is the request's `manager` string, unchanged.
+`<N>` is the exit code as an unsigned 32-bit integer in plain decimal.
+For example, a `Winget` request whose process exits with `0x8A150010` fails with `Winget exited with code 2316632080`, not `-1978335216`.
+An exit code does not prove the package's state: exit code 0 can mean that nothing changed, and a nonzero code can be a success that needs a restart.
 
 The Broker atomically records consumption of each grant in memory before starting its authorized operation.
 The record is bound to the issued grant and Broker request ID and records positive evidence of process start and termination, including the exit code when available.
@@ -403,6 +411,11 @@ A missing, evicted or restart-lost record, a mismatch, or an outcome that cannot
 A Broker rejection establishes only that the rejected request started no work; it does not prove that another request did not or cannot consume the same grant.
 After a grant has been made available to UniGetUI, the Agent reports an unverified outcome as `UNKNOWN`, not a definite failure.
 The in-memory Broker record need not survive a restart.
+The Agent waits up to 60 seconds from dispatch to observe a Broker record.
+When the first record observed within that wait is `Consumed`, the Agent waits up to 60 seconds from that observation for `Started` or `Exited`, without exceeding 30 minutes from dispatch.
+Once the Broker proves the process started, the Agent waits for it to exit while its record remains available, until the Agent stops or 30 minutes have elapsed since dispatch began.
+The Agent durably records observed start evidence before continuing to wait for termination.
+A wait that ends without evidence of exit reports `UNKNOWN`.
 
 The .NET broker passes `--source` for install and for updates with an explicit source, which overrides NuGet configuration including Package Source Mapping.
 The source override is documented in [dotnet tool install].
@@ -431,6 +444,9 @@ A recorded ID too long to fit in a channel report cannot be answered.
 For a repeated delivery with the same operation ID and payload, the Agent returns the recorded result or attaches it to the active operation.
 The Agent checks for a recorded operation before applying operation capacity limits.
 While a journal lookup or operation is in flight, the Agent retains only the most recent response attachment for that operation ID.
+When the final journal write fails, the Agent reports `UNKNOWN` for that delivery.
+The write may nevertheless have installed the record, so a later delivery returns its valid recorded result or `UNKNOWN` if none can be recovered.
+When journal writes cannot preserve observed start evidence, a later redelivery may omit evidence reported by the original delivery.
 When the journal's deduplication index budget cannot fit another operation, an ID proven not to be recorded or in flight receives the known failure `agent journal full: nothing was started`.
 Otherwise, when operation or journal-admission capacity is full, an ID proven not to be recorded or in flight receives the known failure `agent busy: nothing was started`.
 The budget counts orphan record names as well as indexed names.

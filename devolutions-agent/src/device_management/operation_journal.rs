@@ -38,6 +38,8 @@ use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsStr;
 use std::io::{Read as _, Write as _};
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use agent_channel_proto::PackageOperationRequest;
 use anyhow::{Context as _, bail, ensure};
@@ -192,6 +194,12 @@ pub(super) struct OperationJournal {
     // Tests lower this limit to exercise its boundary with small files.
     index_size_limit: u64,
     recorded: Condvar,
+    #[cfg(test)]
+    failed_start_writes: AtomicUsize,
+    #[cfg(test)]
+    failed_completion_writes: AtomicUsize,
+    #[cfg(test)]
+    failed_completion_writes_after_install: AtomicUsize,
     // UNTESTED: The exclusive lock must outlive the records handle to prevent overlapping owners during drop.
     // Check declaration and drop order when changing this struct.
     _lock: JournalLock,
@@ -416,6 +424,12 @@ impl OperationJournal {
             index_write_hook: Mutex::new(None),
             index_size_limit: limit,
             recorded: Condvar::new(),
+            #[cfg(test)]
+            failed_start_writes: AtomicUsize::new(0),
+            #[cfg(test)]
+            failed_completion_writes: AtomicUsize::new(0),
+            #[cfg(test)]
+            failed_completion_writes_after_install: AtomicUsize::new(0),
         };
         let admitted = journal.load_index(was_missing)?;
         let mut membership = Membership::new(admitted.clone(), limit)?;
@@ -505,6 +519,14 @@ impl OperationJournal {
     /// Call it after the grant is delivered and before [`complete`](Self::complete) when the evidence exists.
     /// The evidence is never withdrawn, so recording it again succeeds.
     pub(super) fn mark_started(&self, authority_id: &str, request: &PackageOperationRequest) -> anyhow::Result<()> {
+        #[cfg(test)]
+        if self
+            .failed_start_writes
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+            .is_ok()
+        {
+            bail!("injected start evidence write failure");
+        }
         let (name, encoded) = locate(authority_id, request)?;
         let state = self.state.lock();
 
@@ -523,15 +545,42 @@ impl OperationJournal {
             .context("persist package operation start evidence")
     }
 
+    #[cfg(all(test, windows))]
+    pub(super) fn fail_start_writes(&self, count: usize) {
+        self.failed_start_writes.store(count, Ordering::SeqCst);
+    }
+
+    #[cfg(all(test, windows))]
+    pub(super) fn fail_completion_writes(&self, count: usize) {
+        self.failed_completion_writes.store(count, Ordering::SeqCst);
+    }
+
+    #[cfg(all(test, windows))]
+    pub(super) fn fail_completion_writes_after_install(&self, count: usize) {
+        self.failed_completion_writes_after_install
+            .store(count, Ordering::SeqCst);
+    }
+
     /// Durably records the end of an operation [`admitted`](Self::admit) for `request`, and wakes its waiters.
     ///
     /// Recording the outcome already recorded succeeds; recording a different outcome over a recorded one is an error.
-    /// When the outcome cannot be written, the operation stops being in flight, so waiters read it as unknown.
+    /// A failed outcome write ends the in-flight operation; waiters read the record as it exists.
     pub(super) fn complete(
         &self,
         authority_id: &str,
         request: &PackageOperationRequest,
         outcome: Outcome,
+    ) -> anyhow::Result<()> {
+        self.complete_with_started(authority_id, request, outcome, false)
+    }
+
+    /// Records an outcome together with any observed start evidence in the same durable write.
+    pub(super) fn complete_with_started(
+        &self,
+        authority_id: &str,
+        request: &PackageOperationRequest,
+        outcome: Outcome,
+        started: bool,
     ) -> anyhow::Result<()> {
         let (name, encoded) = locate(authority_id, request)?;
         let mut state = self.state.lock();
@@ -546,11 +595,30 @@ impl OperationJournal {
 
         let completed = record.and_then(|record| {
             let mut record = record.context("no package operation record to complete")?;
-            match record.outcome {
-                Some(recorded) if recorded == outcome => Ok(()),
+            match &record.outcome {
+                Some(recorded) if *recorded == outcome && (!started || record.execution_started) => Ok(()),
                 Some(_) => bail!("package operation already has a different recorded outcome"),
                 None => {
+                    record.execution_started |= started;
                     record.outcome = Some(outcome);
+                    #[cfg(test)]
+                    if self
+                        .failed_completion_writes
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+                        .is_ok()
+                    {
+                        bail!("injected completion write failure");
+                    }
+                    #[cfg(test)]
+                    if self
+                        .failed_completion_writes_after_install
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1))
+                        .is_ok()
+                    {
+                        self.write_record(&name, &record, Replace::Allow)
+                            .context("persist package operation outcome")?;
+                        bail!("injected completion write failure after install");
+                    }
                     self.write_record(&name, &record, Replace::Allow)
                         .context("persist package operation outcome")
                 }
@@ -562,10 +630,9 @@ impl OperationJournal {
         completed
     }
 
-    /// Blocks until the operation in flight for `request` has its outcome recorded, and returns it.
+    /// Blocks until the operation for `delivery` is no longer in flight, then reads its outcome.
     ///
-    /// An operation that is not in flight returns its recorded outcome at once, or [`Outcome::Unknown`] when it is
-    /// still pending, with the start evidence recorded.
+    /// Returns the recorded outcome, or [`Outcome::Unknown`] for a record without one, with the recorded start evidence.
     /// Call it off the async runtime.
     pub(super) fn wait(&self, authority_id: &str, delivery: &DeliveryKey) -> anyhow::Result<Settled> {
         let name = delivery.locate(authority_id)?;

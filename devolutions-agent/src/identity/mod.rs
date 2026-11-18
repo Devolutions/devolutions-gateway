@@ -99,6 +99,9 @@ async fn run_identity(
     device_management: DeviceManagementContext,
     mut shutdown: ShutdownSignal,
 ) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    let device_management = device_management.with_shutdown(shutdown.clone());
+
     let settings = conf.debug.identity.clone().unwrap_or_default();
     let poll_interval = Duration::from_millis(settings.pending_poll_interval_ms.unwrap_or(5_000).max(1));
     let mut last_store_error = None;
