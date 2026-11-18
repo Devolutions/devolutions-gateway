@@ -4,6 +4,8 @@ import { Percentage, Status, VideoTime } from './util';
 import type { PlaybackObservation, SourceMetadata } from './video-player/player';
 import type { SingleVideoSeekBar } from './video-player/single-video-seek-bar';
 
+const seekTimeTolerance = (target: number) => (target === 0 ? 0.01 : 0.001);
+
 export function playableSource(player: Player, metadata: SourceMetadata) {
   if (typeof metadata.src !== 'string' || metadata.src.trim().length === 0) {
     throw new RangeError('source URL must be a nonempty string');
@@ -418,7 +420,7 @@ export class ProgressManager {
         pending.loadId === this.sourceLoadId &&
         !this.player.seeking()
       ) {
-        const tolerance = pending.target === 0 ? 0.01 : 0.000001;
+        const tolerance = seekTimeTolerance(pending.target);
         if ((this.player.currentTime() ?? 0) >= pending.target - tolerance) {
           pending.observedSeekTimeUpdate = true;
         }
@@ -508,7 +510,7 @@ export class ProgressManager {
     // A completed seek queues timeupdate before seeked; playback may advance between them.
     // Some WebM files report their first sample a few milliseconds after zero.
     const time = this.player.currentTime() ?? 0;
-    const tolerance = pending.target === 0 ? 0.01 : 0.000001;
+    const tolerance = seekTimeTolerance(pending.target);
     if (
       event?.type === 'seeked' &&
       pending.seekStarted &&
@@ -539,7 +541,7 @@ export class ProgressManager {
           pending.target >= endpoint && endpoint < handle.souce.duration
             ? { time: pending.offset, rate: this.player.playbackRate() ?? 1 }
             : undefined;
-        this.holdEndpoint = !pending.resume && pending.offset >= handle.souce.duration;
+        this.holdEndpoint = !pending.resume && handle.souce.duration > 0 && pending.offset >= handle.souce.duration;
         this.publishObservation(handle, 'ready');
         if (this.pendingSeek !== pending) {
           return;

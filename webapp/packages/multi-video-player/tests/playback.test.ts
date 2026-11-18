@@ -70,6 +70,7 @@ function createPlayer() {
     ended: false,
     automaticSeeked: true,
     zeroSeekTime: 0,
+    seekTimeOverride: undefined as number | undefined,
   };
   const progress = new MultiVideoProgressControl(player);
   const controlBar = jest.mocked(new Component(player));
@@ -111,7 +112,7 @@ function createPlayer() {
       if (!state.metadataLoaded) {
         throw new Error('cannot seek before loadedmetadata');
       }
-      state.time = Number(time) === 0 ? state.zeroSeekTime : Number(time);
+      state.time = Number(time) === 0 ? state.zeroSeekTime : (state.seekTimeOverride ?? Number(time));
       state.ended = false;
       state.seeking = true;
       emit('seeking');
@@ -914,6 +915,28 @@ describe('recording playback API', () => {
     expect(element.currentTime).toBe(0.001);
   });
 
+  // oracle: regression Devolutions/devolutions-gateway#2206
+  it('settles a paused seek when media reports a rounded position', async () => {
+    await start();
+    fixture.state.automaticSeeked = false;
+    fixture.state.seekTimeOverride = 4.124;
+
+    const seeking = element.seek(4.123456);
+    fixture.state.seeking = false;
+    fixture.emit('timeupdate');
+    fixture.emit('seeked');
+    const settled = await Promise.race([
+      seeking.then(
+        () => true,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 0)),
+    ]);
+
+    expect(settled).toBe(true);
+    expect(element.currentTime).toBe(4.124);
+  });
+
   it('does not settle a superseding same-source seek from a stale seeked event', async () => {
     await start();
     fixture.state.automaticSeeked = false;
@@ -1646,6 +1669,15 @@ describe('recording playback API', () => {
     await element.seek(5);
     expect(element.currentTime).toBe(0);
     expect(element.duration).toBe(0);
+  });
+
+  // oracle: regression Devolutions/devolutions-gateway#2206
+  it('resumes playback after a paused seek on a zero-duration clip', async () => {
+    await start([{ ...playlist[0], duration: 0 }]);
+    await element.seek(0);
+    await element.resume();
+
+    expect(fixture.state.paused).toBe(false);
   });
 
   it('clamps fractional endpoint arithmetic before constructing a percentage', async () => {
