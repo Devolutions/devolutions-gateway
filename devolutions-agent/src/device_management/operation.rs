@@ -307,6 +307,8 @@ impl Pending {
             } else {
                 Ok(())
             };
+            // UNTESTED: A failed start write can already have installed start evidence.
+            // A successful completion must retain the observed outcome; inject a post-install failure when changing this.
             let result = self
                 .journal
                 .complete_with_started(&self.authority_id, &self.request, recorded, started);
@@ -892,13 +894,10 @@ mod tests {
         drop(journal);
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let reopened = OperationJournal::open(data)?;
-        assert_eq!(
-            reopened.admit("authority", &request)?,
-            Admission::Recorded(Settled {
-                outcome: Outcome::Unknown,
-                execution_started: None,
-            })
-        );
+        let Admission::Recorded(replayed) = reopened.admit("authority", &request)? else {
+            anyhow::bail!("operation replay was not recorded");
+        };
+        assert_eq!(replayed.outcome, Outcome::Unknown);
         Ok(())
     }
 
