@@ -22,7 +22,6 @@ const MAX_WAITING_RESCANS: usize = 8;
 // UNTESTED: At most `MAX_WAITING_RESCANS` operations wait for a rescan at once, which bounds how many reports are held back.
 // The tests pass their own pool; check that every wait takes its permit from this one when changing the callers.
 #[cfg(windows)]
-#[cfg_attr(test, expect(dead_code, reason = "called by the package-operation path"))]
 pub(super) fn waiting_rescans() -> &'static Semaphore {
     static WAITING_RESCANS: Semaphore = Semaphore::const_new(MAX_WAITING_RESCANS);
     &WAITING_RESCANS

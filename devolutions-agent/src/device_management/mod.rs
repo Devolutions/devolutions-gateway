@@ -6,7 +6,6 @@ mod operation;
 #[cfg(any(windows, test))]
 mod operation_journal;
 #[cfg(any(windows, test))]
-#[cfg_attr(not(test), expect(dead_code, reason = "called by the package-operation path"))]
 mod rescan;
 #[cfg(any(windows, test))]
 mod unigetui;
