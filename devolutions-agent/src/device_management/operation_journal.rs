@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn repeat_after_completion_returns_recorded_outcome() -> anyhow::Result<()> {
-        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
         let request = request("op", "pkg");
@@ -922,7 +922,7 @@ mod tests {
 
     #[test]
     fn pending_record_reads_as_unknown_after_reopen() -> anyhow::Result<()> {
-        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
         let journal = OperationJournal::open(&data)?;
@@ -950,7 +950,7 @@ mod tests {
 
         let journal = OperationJournal::open(&data)?;
 
-        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         assert_eq!(
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
@@ -1172,7 +1172,7 @@ mod tests {
 
     #[test]
     fn wholly_missing_journal_is_created_empty() -> anyhow::Result<()> {
-        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         let (_dir, data) = data_dir()?;
         let request = request("op", "pkg");
 
@@ -1432,7 +1432,7 @@ mod tests {
 
         // oracle: mutant a second journal owner opens the same directory and overwrites the first owner's admissions
         assert!(OperationJournal::open(&data).is_err());
-        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         assert_eq!(
             journal.admit("authority", &request)?,
             Admission::Recorded(settled(Outcome::Succeeded))
@@ -1545,7 +1545,7 @@ mod tests {
 
     #[test]
     fn concurrent_deliveries_admit_once() -> anyhow::Result<()> {
-        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-remote-operations
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         let (_dir, data) = data_dir()?;
         let journal = Arc::new(OperationJournal::open(&data)?);
         let request = Arc::new(request("op", "pkg"));
