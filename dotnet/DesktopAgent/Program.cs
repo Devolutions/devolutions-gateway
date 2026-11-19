@@ -13,6 +13,7 @@ using System.Reflection;
 using System.Security.Principal;
 using Devolutions.Agent.Desktop.SingleInstance;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Application = System.Windows.Forms.Application;
 
@@ -159,6 +160,63 @@ namespace Devolutions.Agent.Desktop
                 Text = $"{StaticResources.DevolutionsAgent} v{version.Major}.{version.Minor}.{version.Build}",
                 Visible = true,
             };
+
+            this.NotifyIfDeviceRedirectorBroken();
+        }
+
+        // Remote Desktop starts the device redirector driver when it starts, so a driver that is still stopped
+        // some time after logon is not coming up. The check runs again before notifying, to ignore a slow start.
+        private void NotifyIfDeviceRedirectorBroken()
+        {
+            if (!(config?.Session?.Enabled ?? false))
+            {
+                return;
+            }
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    if (!ChannelProbe.IsRdpSession())
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(10));
+
+                    ProbeResult[] results = DeviceRedirectorChecks.Run();
+
+                    if (!DeviceRedirectorChecks.IsBroken(results))
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(20));
+
+                    results = DeviceRedirectorChecks.Run();
+
+                    if (!DeviceRedirectorChecks.IsBroken(results))
+                    {
+                        return;
+                    }
+
+                    string details = string.Join(" ", results.Where(r => r.Problem != null).Select(r => r.Problem));
+
+                    Program.Log.Warn($"Virtual channels are unavailable: {details}");
+
+                    this.synchronizationContext.Post(_ =>
+                    {
+                        new ToastContentBuilder()
+                            .AddText("Remote desktop virtual channels are unavailable", hintMaxLines: 1)
+                            .AddText($"{details} Open the Devolutions Agent tray menu with Ctrl held and choose \"Test virtual channels...\" for details.")
+                            .Show();
+                    }, null);
+                }
+                catch (Exception e)
+                {
+                    Program.Log.Error(e.ToString());
+                }
+            });
         }
 
         private void ContextMenuOnPopup(object sender, EventArgs e)
