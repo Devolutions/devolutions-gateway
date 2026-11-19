@@ -241,7 +241,7 @@ namespace Devolutions.Agent.Desktop
                 this.contextMenu.MenuItems.Add(new MenuItem("Session") { Enabled = false, Checked = config?.Session?.Enabled ?? false });
                 this.contextMenu.MenuItems.Add(new MenuItem("PEDM") { Enabled = false, Checked = config?.Pedm?.Enabled ?? false });
                 this.contextMenu.MenuItems.Add(new MenuItem("-"));
-                this.contextMenu.MenuItems.Add(new MenuItem("Test virtual channels...", (_, _) =>
+                this.contextMenu.MenuItems.Add(new MenuItem("Test Remote Desktop integration...", (_, _) =>
                 {
                     using ChannelProbeForm probeWindow = new();
                     probeWindow.ShowDialog();
