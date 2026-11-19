@@ -112,7 +112,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
                     expected,
                     "missing (error 2)",
                     ProbeStatus.Fail,
-                    "The device that hands virtual channels to programs is missing.");
+                    "The Remote Desktop redirection device (\\Device\\DrDynVc) is missing.");
             }
 
             return new ProbeResult(name, expected, $"unexpected error {error}", ProbeStatus.Skipped);
@@ -136,7 +136,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
                             expected,
                             status.ToString().ToLowerInvariant(),
                             ProbeStatus.Fail,
-                            "The device redirector driver (rdpdr) is not running.");
+                            "The Remote Desktop device redirector driver (rdpdr) is not running.");
                 }
             }
             catch (Exception e) when (e is InvalidOperationException || e is System.ComponentModel.Win32Exception)
