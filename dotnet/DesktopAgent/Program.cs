@@ -202,13 +202,13 @@ namespace Devolutions.Agent.Desktop
 
                     string details = string.Join(" ", results.Where(r => r.Problem != null).Select(r => r.Problem));
 
-                    Program.Log.Warn($"Virtual channels are unavailable: {details}");
+                    Program.Log.Warn($"Remote Desktop integration is not functional: {details}");
 
                     this.synchronizationContext.Post(_ =>
                     {
                         new ToastContentBuilder()
-                            .AddText("Remote desktop virtual channels are unavailable", hintMaxLines: 1)
-                            .AddText($"{details} Open the Devolutions Agent tray menu with Ctrl held and choose \"Test virtual channels...\" for details.")
+                            .AddText("Remote Desktop integration is not functional", hintMaxLines: 1)
+                            .AddText($"{details} Contact Devolutions support.")
                             .Show();
                     }, null);
                 }
