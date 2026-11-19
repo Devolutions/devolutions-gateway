@@ -93,7 +93,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             bool remote = IsRdpSession();
 
             StringBuilder report = new StringBuilder();
-            report.AppendLine("Virtual channel diagnostics");
+            report.AppendLine("Remote Desktop integration diagnostics");
             report.AppendLine($"Time:     {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz}");
             report.AppendLine($"Session:  {sessionId} ({(remote ? "RDP" : "console")})");
             report.AppendLine($"User:     {WindowsIdentity.GetCurrent().Name}");
@@ -111,7 +111,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             }
             else
             {
-                report.AppendLine("Channel checks not run: virtual channels are only available in a remote desktop session.");
+                report.AppendLine("Channel checks not run: they are only available in a remote desktop session.");
                 report.AppendLine();
             }
 
