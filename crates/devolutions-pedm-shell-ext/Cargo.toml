@@ -8,6 +8,7 @@ description = "Devolutions PEDM Windows shell extension"
 publish = false
 
 [lints]
+workspace = true
 
 [lib]
 crate-type = ["cdylib"]

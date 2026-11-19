@@ -23,9 +23,6 @@ pub use devolutions_pedm_client_http::models;
 #[pin_project]
 struct NamedPipeStream(#[pin] NamedPipeClient);
 
-unsafe impl Sync for NamedPipeStream {}
-unsafe impl Send for NamedPipeStream {}
-
 impl AsyncRead for NamedPipeStream {
     fn poll_read(
         self: Pin<&mut Self>,

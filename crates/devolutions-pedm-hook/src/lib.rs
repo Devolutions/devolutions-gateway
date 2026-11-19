@@ -3,8 +3,8 @@
 mod lib_win {
     #![allow(non_snake_case, non_camel_case_types)] // WinAPI naming.
 
-    pub mod appinfo;
-    pub mod hook;
+    mod appinfo;
+    mod hook;
 
     use std::collections::HashMap;
     use std::sync::OnceLock;
@@ -27,7 +27,7 @@ mod lib_win {
 
     /// GUID obtained from RpcView on the AppInfo service.
     /// Can also be obtained from [here](https://github.com/tyranid/WindowsRpcClients/blob/master/Win10_20H1/appinfo.dll/201ef99a-7fa0-444c-9399-19ba84f12a1a_1.0.cs).
-    pub const APPINFO_GUID: GUID = GUID::from_u128(0x201ef99a_7fa0_444c_9399_19ba84f12a1a);
+    pub(crate) const APPINFO_GUID: GUID = GUID::from_u128(0x201ef99a_7fa0_444c_9399_19ba84f12a1a);
 
     fn hook() -> Result<()> {
         if Module::from_name("appinfo.dll").is_err() {
@@ -47,6 +47,7 @@ mod lib_win {
                     .get(&interface.id())
                     .expect("interface hooks not found")
                     .to_owned();
+                // SAFETY: `rai_launch_admin_process` matches the signature of the AppInfo handler it replaces.
                 hooks[0] = unsafe {
                     mem::transmute::<*const (), Option<unsafe extern "system" fn() -> i32>>(
                         rai_launch_admin_process as *const (),
@@ -96,6 +97,3 @@ mod lib_win {
         }
     }
 }
-
-#[cfg(target_os = "windows")]
-pub(crate) use lib_win::*;
