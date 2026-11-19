@@ -159,4 +159,19 @@
   <data name="mnuServiceAvailable" xml:space="preserve">
     <value>Service en cours d’exécution</value>
   </data>
+  <data name="msgRemoteDesktopIntegrationFailed" xml:space="preserve">
+    <value>L’intégration de Bureau à distance ne fonctionne pas</value>
+  </data>
+  <data name="msgContactSupport" xml:space="preserve">
+    <value>Contactez le support Devolutions.</value>
+  </data>
+  <data name="msgRedirectionDeviceUnavailable" xml:space="preserve">
+    <value>Le périphérique de redirection de Bureau à distance n’est pas disponible.</value>
+  </data>
+  <data name="msgServiceNotRunning" xml:space="preserve">
+    <value>« {0} » n’est pas en cours d’exécution.</value>
+  </data>
+  <data name="msgServiceDisabled" xml:space="preserve">
+    <value>Le démarrage de « {0} » est désactivé.</value>
+  </data>
 </root>

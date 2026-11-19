@@ -207,8 +207,8 @@ namespace Devolutions.Agent.Desktop
                     this.synchronizationContext.Post(_ =>
                     {
                         new ToastContentBuilder()
-                            .AddText("Remote Desktop integration is not functional", hintMaxLines: 1)
-                            .AddText($"{details} Contact Devolutions support.")
+                            .AddText(Resources.msgRemoteDesktopIntegrationFailed, hintMaxLines: 1)
+                            .AddText($"{details} {Resources.msgContactSupport}")
                             .Show();
                     }, null);
                 }
