@@ -309,7 +309,9 @@ The scans that answer a `RescanInventory` start after UniGetUI received that req
 When a scan is running at that time, UniGetUI waits for it to end and then starts the new scans.
 Requests received while scans are waiting to start share those scans, so UniGetUI has at most one rescan waiting to start.
 When a scan fails or cannot start, UniGetUI answers with an error, and the Agent treats every error code alike.
-A rescan only lists packages: because of it, UniGetUI starts nothing but the listing of installed packages and available updates, so it runs no repair or recovery action and installs, updates or uninstalls nothing.
+Besides listing installed packages and available updates, a rescan only refreshes package indexes: because of it, UniGetUI runs no repair or recovery action and installs, updates or uninstalls nothing.
+A Reload is the reload of the package lists that the UniGetUI user requests.
+The package-index refresh a Reload performs runs only for managers whose refresh updates a catalogue and nothing else, and is skipped for any manager whose refresh updates the manager itself or a working tree.
 
 The Agent sends `RescanInventory` when a package operation that it sent to UniGetUI as `ExecutePackageOperation` reaches its final result, whether success, failure or `UNKNOWN`.
 It sends the request on the connection that carried the operation, after it recorded the result in its operation journal and before it reports the result to the Authority.
