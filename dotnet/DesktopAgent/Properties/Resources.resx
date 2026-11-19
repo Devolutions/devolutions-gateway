@@ -162,16 +162,7 @@
   <data name="msgRemoteDesktopIntegrationFailed" xml:space="preserve">
     <value>Remote Desktop integration is not functional</value>
   </data>
-  <data name="msgContactSupport" xml:space="preserve">
-    <value>Contact Devolutions support.</value>
-  </data>
-  <data name="msgRedirectionDeviceUnavailable" xml:space="preserve">
-    <value>The Remote Desktop redirection device is not available.</value>
-  </data>
-  <data name="msgServiceNotRunning" xml:space="preserve">
-    <value>{0} is not running.</value>
-  </data>
-  <data name="msgServiceDisabled" xml:space="preserve">
-    <value>The startup type of {0} is Disabled.</value>
+  <data name="msgContactAdministrator" xml:space="preserve">
+    <value>Contact your administrator.</value>
   </data>
 </root>

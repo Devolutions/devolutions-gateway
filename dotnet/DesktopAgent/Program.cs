@@ -208,7 +208,7 @@ namespace Devolutions.Agent.Desktop
                     {
                         new ToastContentBuilder()
                             .AddText(Resources.msgRemoteDesktopIntegrationFailed, hintMaxLines: 1)
-                            .AddText($"{details} {Resources.msgContactSupport}")
+                            .AddText(Resources.msgContactAdministrator)
                             .Show();
                     }, null);
                 }
