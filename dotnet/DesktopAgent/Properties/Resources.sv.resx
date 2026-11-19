@@ -57,16 +57,7 @@
   <data name="msgRemoteDesktopIntegrationFailed" xml:space="preserve">
     <value>Integrationen med Fjärrskrivbord fungerar inte</value>
   </data>
-  <data name="msgContactSupport" xml:space="preserve">
-    <value>Kontakta Devolutions support.</value>
-  </data>
-  <data name="msgRedirectionDeviceUnavailable" xml:space="preserve">
-    <value>Enheten för omdirigering i Fjärrskrivbord är inte tillgänglig.</value>
-  </data>
-  <data name="msgServiceNotRunning" xml:space="preserve">
-    <value>{0} körs inte.</value>
-  </data>
-  <data name="msgServiceDisabled" xml:space="preserve">
-    <value>Starttypen för {0} är inaktiverad.</value>
+  <data name="msgContactAdministrator" xml:space="preserve">
+    <value>Kontakta din administratör.</value>
   </data>
 </root>

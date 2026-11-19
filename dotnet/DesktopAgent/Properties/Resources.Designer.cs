@@ -196,38 +196,11 @@ namespace Devolutions.Agent.Desktop.Properties {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Contact Devolutions support..
+        ///   Looks up a localized string similar to Contact your administrator..
         /// </summary>
-        internal static string msgContactSupport {
+        internal static string msgContactAdministrator {
             get {
-                return ResourceManager.GetString("msgContactSupport", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to The Remote Desktop redirection device is not available..
-        /// </summary>
-        internal static string msgRedirectionDeviceUnavailable {
-            get {
-                return ResourceManager.GetString("msgRedirectionDeviceUnavailable", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to {0} is not running..
-        /// </summary>
-        internal static string msgServiceNotRunning {
-            get {
-                return ResourceManager.GetString("msgServiceNotRunning", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to The startup type of {0} is Disabled..
-        /// </summary>
-        internal static string msgServiceDisabled {
-            get {
-                return ResourceManager.GetString("msgServiceDisabled", resourceCulture);
+                return ResourceManager.GetString("msgContactAdministrator", resourceCulture);
             }
         }
     }
