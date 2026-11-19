@@ -1,3 +1,4 @@
+using Devolutions.Agent.Desktop.Properties;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -140,7 +141,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
                     expected,
                     "not available (error 2)",
                     ProbeStatus.Fail,
-                    "The Remote Desktop redirection device is not available.");
+                    Resources.msgRedirectionDeviceUnavailable);
             }
 
             return new ProbeResult(name, expected, $"unexpected error {error}", ProbeStatus.Skipped);
@@ -164,7 +165,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
                             expected,
                             status.ToString().ToLowerInvariant(),
                             ProbeStatus.Fail,
-                            "The Remote Desktop Device Redirector Driver is not running.");
+                            string.Format(Resources.msgServiceNotRunning, driver.DisplayName));
                 }
             }
             catch (Exception e) when (e is InvalidOperationException || e is System.ComponentModel.Win32Exception)
@@ -173,9 +174,12 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             }
         }
 
-        private static ProbeResult CheckStartType(string displayName, string serviceName)
+        private static ProbeResult CheckStartType(string fallbackDisplayName, string serviceName)
         {
             const string expected = "not Disabled";
+
+            // Windows localizes the display name, so a user sees the service as it is listed on their system.
+            string displayName = ReadDisplayName(serviceName) ?? fallbackDisplayName;
             string name = displayName + " start type";
 
             int? start = ReadDword($@"SYSTEM\CurrentControlSet\Services\{serviceName}", "Start");
@@ -188,8 +192,23 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             string actual = $"{DescribeStartType(start.Value)} ({start.Value})";
 
             return start.Value == StartTypeDisabled
-                ? new ProbeResult(name, expected, actual, ProbeStatus.Warning, $"{displayName} is Disabled.")
+                ? new ProbeResult(name, expected, actual, ProbeStatus.Warning, string.Format(Resources.msgServiceDisabled, displayName))
                 : new ProbeResult(name, expected, actual, ProbeStatus.Pass);
+        }
+
+        private static string ReadDisplayName(string serviceName)
+        {
+            try
+            {
+                using (ServiceController service = new ServiceController(serviceName))
+                {
+                    return service.DisplayName;
+                }
+            }
+            catch (Exception e) when (e is InvalidOperationException || e is System.ComponentModel.Win32Exception)
+            {
+                return null;
+            }
         }
 
         private static int? ReadDword(string subKey, string valueName)
