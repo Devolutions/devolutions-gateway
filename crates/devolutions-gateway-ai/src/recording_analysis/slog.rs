@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::session_actions::Action;
+use crate::session_actions::{Action, Sensitivity};
 
 /// One line of the AI `.slog`.
 ///
@@ -36,6 +36,8 @@ enum Event<'a> {
         object: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         parameters: Option<&'a BTreeMap<String, String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sensitivity: Option<Sensitivity>,
     },
     #[serde(rename = "session.end")]
     End {
@@ -99,6 +101,7 @@ impl<W: std::io::Write> SlogWriter<W> {
                 description: &action.description,
                 object: action.object.as_deref(),
                 parameters: Some(&action.parameters).filter(|parameters| !parameters.is_empty()),
+                sensitivity: action.sensitivity,
             },
         )
     }
@@ -177,6 +180,7 @@ mod tests {
                 .iter()
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                 .collect(),
+            sensitivity: None,
         }
     }
 
@@ -203,6 +207,25 @@ mod tests {
                 .collect()
         };
         assert_eq!(lines(&slog), lines(&expected.join("\n")));
+    }
+
+    // oracle: scaffold
+    #[test]
+    fn an_action_line_has_a_sensitivity_only_when_known() {
+        let rated = Action {
+            sensitivity: Some(Sensitivity::High),
+            ..action(1000, "Deleted a database", Some("orders"), &[])
+        };
+        let unrated = action(2000, "Closed the shell", None, &[]);
+
+        let slog = write(0, 5, &[rated, unrated], None);
+
+        let events: Vec<serde_json::Value> = slog
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON line"))
+            .collect();
+        assert_eq!(events[1]["sensitivity"], "high");
+        assert_eq!(events[2].get("sensitivity"), None);
     }
 
     #[test]

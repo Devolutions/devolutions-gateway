@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::client::{AiClient, Input, Prompt, prompt_version, with_language};
@@ -26,9 +26,10 @@ Each object has these fields:
 - "description": string. A short past-tense sentence naming the action, like "Listed directory contents".
 - "object": string, optional. The main thing acted on, like a file path, host, service, or account.
 - "parameters": object, optional. Every value is a string. Important details, like the exact command.
+- "sensitivity": string. How sensitive the action is, always one of these English words: "low" for viewing or reading, "medium" for creating or changing something, "high" for deleting or destroying something, restarting a system, resetting a password, unlocking an account, or viewing sensitive data such as secrets or personal information.
 
 Example output line:
-{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"}}
+{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"},"sensitivity":"low"}
 
 Rules:
 - Write one line per meaningful user action, in time order. Merge the keystrokes of one command into one action.
@@ -53,6 +54,19 @@ pub struct Action {
     pub object: Option<String>,
     /// Important details, such as the exact command, keyed by name.
     pub parameters: BTreeMap<String, String>,
+    /// How sensitive the action is, as the model judged it; `None` when the model gave no valid level.
+    pub sensitivity: Option<Sensitivity>,
+}
+
+/// How sensitive a user action is, so a reviewer can find the risky ones first.
+///
+/// Viewing is low, changing something is medium, and destroying something or viewing sensitive data is high.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sensitivity {
+    Low,
+    Medium,
+    High,
 }
 
 impl AiClient {
@@ -245,6 +259,11 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
         .ok_or_else(|| format!("missing {citation}"))?;
     let offset = time(cited.trim()).ok_or_else(|| format!("{citation} is not in the input"))?;
 
+    // An invalid level drops only the level, because the action itself is still worth listing.
+    let sensitivity = value
+        .get("sensitivity")
+        .and_then(|sensitivity| Sensitivity::deserialize(sensitivity).ok());
+
     let parsed: ActionLine = serde_json::from_value(value).map_err(|_| "invalid action fields".to_owned())?;
 
     let description = parsed.description.trim();
@@ -260,6 +279,7 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
             .map(|object| object.trim().to_owned())
             .filter(|object| !object.is_empty()),
         parameters: parsed.parameters,
+        sensitivity,
     })
 }
 #[cfg(test)]
@@ -292,12 +312,14 @@ mod tests {
                     description: "Listed files".to_owned(),
                     object: Some("/var/log".to_owned()),
                     parameters: BTreeMap::from([("Command".to_owned(), "ls".to_owned())]),
+                    sensitivity: None,
                 },
                 Action {
                     offset: Duration::from_secs(3),
                     description: "Opened a shell".to_owned(),
                     object: None,
                     parameters: BTreeMap::new(),
+                    sensitivity: None,
                 },
             ]
         );
@@ -320,6 +342,43 @@ mod tests {
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].description, "Listed files");
+    }
+
+    // oracle: scaffold
+    #[test]
+    fn reads_the_sensitivity_of_each_action() {
+        let answer = concat!(
+            "{\"line\":\"L1\",\"description\":\"Listed files\",\"sensitivity\":\"low\"}\n",
+            "{\"line\":\"L2\",\"description\":\"Edited a config file\",\"sensitivity\":\"medium\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Deleted a database\",\"sensitivity\":\"high\"}\n",
+        );
+
+        let actions = parse(answer).expect("valid answer");
+
+        let sensitivities: Vec<_> = actions.iter().map(|action| action.sensitivity).collect();
+        assert_eq!(
+            sensitivities,
+            [
+                Some(Sensitivity::Low),
+                Some(Sensitivity::Medium),
+                Some(Sensitivity::High)
+            ]
+        );
+    }
+
+    // oracle: scaffold
+    #[test]
+    fn an_action_without_a_valid_sensitivity_is_kept_without_one() {
+        let answer = concat!(
+            "{\"line\":\"L1\",\"description\":\"No level\"}\n",
+            "{\"line\":\"L2\",\"description\":\"Unknown level\",\"sensitivity\":\"Mod\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Not a string\",\"sensitivity\":3}\n",
+        );
+
+        let actions = parse(answer).expect("valid answer");
+
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().all(|action| action.sensitivity.is_none()));
     }
 
     #[test]
@@ -414,6 +473,7 @@ mod tests {
             "description",
             "object",
             "parameters",
+            "\"sensitivity\"",
             "JSON Lines",
             "noActions",
         ] {
