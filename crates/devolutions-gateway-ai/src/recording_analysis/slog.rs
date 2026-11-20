@@ -215,7 +215,7 @@ mod tests {
 
     // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
     #[test]
-    fn an_action_line_has_impact_and_sensitive_data_only_when_known() {
+    fn an_action_line_has_impact_only_when_rated_and_sensitive_data_only_when_true() {
         let rated = Action {
             impact: Some(Impact::High),
             sensitive_data: true,

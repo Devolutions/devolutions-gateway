@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{trace, warn};
 
 use crate::client::{AiClient, Input, Prompt, prompt_version, with_language};
 use crate::{Error, Language, Response};
@@ -55,13 +55,14 @@ pub struct Action {
     pub object: Option<String>,
     /// Important details, such as the exact command, keyed by name.
     pub parameters: BTreeMap<String, String>,
-    /// What the action did to the system, as the model judged it; `None` when the model gave no valid level.
+    /// What the action did, or tried to do when it failed, to the system, as the model judged it; `None` when the model
+    /// gave no valid level.
     pub impact: Option<Impact>,
     /// Whether the action showed or touched secrets, credentials, or personal data, as the model judged it.
     pub sensitive_data: bool,
 }
 
-/// What a user action did to the system, so a reviewer can find the risky ones first.
+/// What a user action did, or tried to do when it failed, to the system, so a reviewer can find the risky ones first.
 ///
 /// Changing nothing is low, a change that is easy to undo is medium, and a change that is hard to undo or affects
 /// security is high.
@@ -266,7 +267,7 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
     // An invalid impact or sensitiveData is dropped alone, because the action itself is still worth listing.
     let impact = value.get("impact").and_then(|impact| {
         Impact::deserialize(impact)
-            .inspect_err(|_| debug!("Dropped the invalid impact of an AI action line"))
+            .inspect_err(|_| trace!("Dropped the invalid impact of an AI action line"))
             .ok()
     });
     let sensitive_data = value.get("sensitiveData").and_then(serde_json::Value::as_bool) == Some(true);
