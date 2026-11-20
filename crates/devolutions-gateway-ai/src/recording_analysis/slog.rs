@@ -215,7 +215,7 @@ mod tests {
 
     // oracle: scaffold
     #[test]
-    fn an_action_line_has_its_rating_only_when_known() {
+    fn an_action_line_has_impact_and_sensitive_data_only_when_known() {
         let rated = Action {
             impact: Some(Impact::High),
             sensitive_data: true,

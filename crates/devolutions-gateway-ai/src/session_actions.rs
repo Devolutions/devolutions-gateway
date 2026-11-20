@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::client::{AiClient, Input, Prompt, prompt_version, with_language};
 use crate::{Error, Language, Response};
@@ -26,7 +26,7 @@ Each object has these fields:
 - "description": string. A short past-tense sentence naming the action, like "Listed directory contents".
 - "object": string, optional. The main thing acted on, like a file path, host, service, or account.
 - "parameters": object, optional. Every value is a string. Important details, like the exact command.
-- "impact": string. What the action did to the system, always one of these English words: "low" if it changed nothing, like viewing or reading; "medium" for a change that is easy to undo, like editing a file or a setting; "high" for a change that is hard to undo or affects security, like deleting something, restarting a system, resetting a password, or unlocking an account.
+- "impact": string. What the action did to the system, or tried to do when it failed, always one of these English words: "low" if it changed nothing, like viewing or reading; "medium" for a change that is easy to undo, like editing a file or a setting; "high" for a change that is hard to undo or affects security, like deleting something, restarting a system, resetting a password, or unlocking an account.
 - "sensitiveData": boolean, optional. true only when the action showed or touched secrets, credentials, or personal data; otherwise leave it out.
 
 Example output line:
@@ -39,7 +39,7 @@ Rules:
 - If the user did nothing, write only this line: {"noActions":true}"#;
 
 /// Last rule of the prompt, naming the language of the descriptions.
-pub(crate) const LANGUAGE_RULE: &str = r#"- Write every description in the language `{language}`; keep the JSON field names and "[redacted]" as they are."#;
+pub(crate) const LANGUAGE_RULE: &str = r#"- Write every description in the language `{language}`; keep the JSON field names, the "impact" words, and "[redacted]" as they are."#;
 
 /// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
@@ -263,8 +263,12 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
         .ok_or_else(|| format!("missing {citation}"))?;
     let offset = time(cited.trim()).ok_or_else(|| format!("{citation} is not in the input"))?;
 
-    // An invalid rating drops only the rating, because the action itself is still worth listing.
-    let impact = value.get("impact").and_then(|impact| Impact::deserialize(impact).ok());
+    // An invalid impact or sensitiveData is dropped alone, because the action itself is still worth listing.
+    let impact = value.get("impact").and_then(|impact| {
+        Impact::deserialize(impact)
+            .inspect_err(|_| debug!("Dropped the invalid impact of an AI action line"))
+            .ok()
+    });
     let sensitive_data = value.get("sensitiveData").and_then(serde_json::Value::as_bool) == Some(true);
 
     let parsed: ActionLine = serde_json::from_value(value).map_err(|_| "invalid action fields".to_owned())?;
@@ -354,12 +358,9 @@ mod tests {
     #[test]
     fn reads_the_impact_of_each_action() {
         let answer = concat!(
-            "{\"line\":\"L1\",\"description\":\"Listed files\",\"impact\":\"low\"}
-",
-            "{\"line\":\"L2\",\"description\":\"Edited a config file\",\"impact\":\"medium\"}
-",
-            "{\"line\":\"L3\",\"description\":\"Deleted a database\",\"impact\":\"high\"}
-",
+            "{\"line\":\"L1\",\"description\":\"Listed files\",\"impact\":\"low\"}\n",
+            "{\"line\":\"L2\",\"description\":\"Edited a config file\",\"impact\":\"medium\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Deleted a database\",\"impact\":\"high\"}\n",
         );
 
         let actions = parse(answer).expect("valid answer");
@@ -372,12 +373,9 @@ mod tests {
     #[test]
     fn an_action_without_a_valid_impact_is_kept_without_one() {
         let answer = concat!(
-            "{\"line\":\"L1\",\"description\":\"No impact\"}
-",
-            "{\"line\":\"L2\",\"description\":\"Unknown impact\",\"impact\":\"Mod\"}
-",
-            "{\"line\":\"L3\",\"description\":\"Not a string\",\"impact\":3}
-",
+            "{\"line\":\"L1\",\"description\":\"No impact\"}\n",
+            "{\"line\":\"L2\",\"description\":\"Unknown impact\",\"impact\":\"Mod\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Not a string\",\"impact\":3}\n",
         );
 
         let actions = parse(answer).expect("valid answer");
@@ -390,14 +388,10 @@ mod tests {
     #[test]
     fn only_a_true_boolean_marks_sensitive_data() {
         let answer = concat!(
-            "{\"line\":\"L1\",\"description\":\"Read a key file\",\"sensitiveData\":true}
-",
-            "{\"line\":\"L2\",\"description\":\"Listed files\",\"sensitiveData\":false}
-",
-            "{\"line\":\"L3\",\"description\":\"Opened a shell\"}
-",
-            "{\"line\":\"L4\",\"description\":\"Not a boolean\",\"sensitiveData\":\"true\"}
-",
+            "{\"line\":\"L1\",\"description\":\"Read a key file\",\"sensitiveData\":true}\n",
+            "{\"line\":\"L2\",\"description\":\"Listed files\",\"sensitiveData\":false}\n",
+            "{\"line\":\"L3\",\"description\":\"Opened a shell\"}\n",
+            "{\"line\":\"L4\",\"description\":\"Not a boolean\",\"sensitiveData\":\"true\"}\n",
         );
 
         let actions = parse(answer).expect("valid answer");

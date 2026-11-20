@@ -111,6 +111,7 @@ pub(super) fn read(path: &Utf8Path) -> anyhow::Result<DescribedChunk> {
 mod tests {
     use super::*;
 
+    // oracle: property round-trip
     #[test]
     fn described_chunk_round_trips() {
         let dir = tempfile::tempdir().expect("temp dir");
