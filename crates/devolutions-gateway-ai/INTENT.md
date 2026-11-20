@@ -33,3 +33,13 @@ For now, what the shell echoes back is output and is still sent; further protect
 Analyze video recordings breaks down the video into frames, and we apply motion detection algorithms to filter out idle or close enough frames.
 Then we send the frames in chronological order to the AI services in batches.
 
+<a id="action-rating"></a>
+#### Action rating
+
+<!-- Agent wording Irving adopted in a grill-intent interview, 2026-11-20. -->
+Each `session.action` may carry an `impact` (`low`, `medium` or `high`): how much the action changed, or tried to change, the system; and `sensitiveData: true` when it showed or touched secrets, credentials or personal data.
+Both are the model's best-effort hint to help a reviewer triage a session, never a security control or an audit verdict: a `low` action is not proven harmless.
+Gateway writes the two separately and never combines them into one level; how to show them is up to the viewer.
+A rating outside these values is dropped and the action is kept without it, because the action is the fact a reviewer needs and a rating Gateway cannot read is no rating; this checks the rating's form, not its content.
+A missing rating means the action was not rated, never that it is `low`.
+

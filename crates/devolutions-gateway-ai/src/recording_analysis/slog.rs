@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(lines(&slog), lines(&expected.join("\n")));
     }
 
-    // oracle: scaffold
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
     #[test]
     fn an_action_line_has_impact_and_sensitive_data_only_when_known() {
         let rated = Action {

@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(actions[0].description, "Listed files");
     }
 
-    // oracle: scaffold
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
     #[test]
     fn reads_the_impact_of_each_action() {
         let answer = concat!(
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(impacts, [Some(Impact::Low), Some(Impact::Medium), Some(Impact::High)]);
     }
 
-    // oracle: scaffold
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
     #[test]
     fn an_action_without_a_valid_impact_is_kept_without_one() {
         let answer = concat!(
@@ -384,7 +384,7 @@ mod tests {
         assert!(actions.iter().all(|action| action.impact.is_none()));
     }
 
-    // oracle: scaffold
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
     #[test]
     fn only_a_true_boolean_marks_sensitive_data() {
         let answer = concat!(
