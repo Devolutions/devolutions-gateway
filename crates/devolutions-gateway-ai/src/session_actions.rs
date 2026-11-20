@@ -26,10 +26,11 @@ Each object has these fields:
 - "description": string. A short past-tense sentence naming the action, like "Listed directory contents".
 - "object": string, optional. The main thing acted on, like a file path, host, service, or account.
 - "parameters": object, optional. Every value is a string. Important details, like the exact command.
-- "sensitivity": string. How sensitive the action is, always one of these English words: "low" for viewing or reading, "medium" for creating or changing something, "high" for deleting or destroying something, restarting a system, resetting a password, unlocking an account, or viewing sensitive data such as secrets or personal information.
+- "impact": string. What the action did to the system, always one of these English words: "low" if it changed nothing, like viewing or reading; "medium" for a change that is easy to undo, like editing a file or a setting; "high" for a change that is hard to undo or affects security, like deleting something, restarting a system, resetting a password, or unlocking an account.
+- "sensitiveData": boolean, optional. true only when the action showed or touched secrets, credentials, or personal data; otherwise leave it out.
 
 Example output line:
-{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"},"sensitivity":"low"}
+{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"},"impact":"low"}
 
 Rules:
 - Write one line per meaningful user action, in time order. Merge the keystrokes of one command into one action.
@@ -54,16 +55,19 @@ pub struct Action {
     pub object: Option<String>,
     /// Important details, such as the exact command, keyed by name.
     pub parameters: BTreeMap<String, String>,
-    /// How sensitive the action is, as the model judged it; `None` when the model gave no valid level.
-    pub sensitivity: Option<Sensitivity>,
+    /// What the action did to the system, as the model judged it; `None` when the model gave no valid level.
+    pub impact: Option<Impact>,
+    /// Whether the action showed or touched secrets, credentials, or personal data, as the model judged it.
+    pub sensitive_data: bool,
 }
 
-/// How sensitive a user action is, so a reviewer can find the risky ones first.
+/// What a user action did to the system, so a reviewer can find the risky ones first.
 ///
-/// Viewing is low, changing something is medium, and destroying something or viewing sensitive data is high.
+/// Changing nothing is low, a change that is easy to undo is medium, and a change that is hard to undo or affects
+/// security is high.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Sensitivity {
+pub enum Impact {
     Low,
     Medium,
     High,
@@ -259,10 +263,9 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
         .ok_or_else(|| format!("missing {citation}"))?;
     let offset = time(cited.trim()).ok_or_else(|| format!("{citation} is not in the input"))?;
 
-    // An invalid level drops only the level, because the action itself is still worth listing.
-    let sensitivity = value
-        .get("sensitivity")
-        .and_then(|sensitivity| Sensitivity::deserialize(sensitivity).ok());
+    // An invalid rating drops only the rating, because the action itself is still worth listing.
+    let impact = value.get("impact").and_then(|impact| Impact::deserialize(impact).ok());
+    let sensitive_data = value.get("sensitiveData").and_then(serde_json::Value::as_bool) == Some(true);
 
     let parsed: ActionLine = serde_json::from_value(value).map_err(|_| "invalid action fields".to_owned())?;
 
@@ -279,7 +282,8 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
             .map(|object| object.trim().to_owned())
             .filter(|object| !object.is_empty()),
         parameters: parsed.parameters,
-        sensitivity,
+        impact,
+        sensitive_data,
     })
 }
 #[cfg(test)]
@@ -312,14 +316,16 @@ mod tests {
                     description: "Listed files".to_owned(),
                     object: Some("/var/log".to_owned()),
                     parameters: BTreeMap::from([("Command".to_owned(), "ls".to_owned())]),
-                    sensitivity: None,
+                    impact: None,
+                    sensitive_data: false,
                 },
                 Action {
                     offset: Duration::from_secs(3),
                     description: "Opened a shell".to_owned(),
                     object: None,
                     parameters: BTreeMap::new(),
-                    sensitivity: None,
+                    impact: None,
+                    sensitive_data: false,
                 },
             ]
         );
@@ -346,39 +352,58 @@ mod tests {
 
     // oracle: scaffold
     #[test]
-    fn reads_the_sensitivity_of_each_action() {
+    fn reads_the_impact_of_each_action() {
         let answer = concat!(
-            "{\"line\":\"L1\",\"description\":\"Listed files\",\"sensitivity\":\"low\"}\n",
-            "{\"line\":\"L2\",\"description\":\"Edited a config file\",\"sensitivity\":\"medium\"}\n",
-            "{\"line\":\"L3\",\"description\":\"Deleted a database\",\"sensitivity\":\"high\"}\n",
+            "{\"line\":\"L1\",\"description\":\"Listed files\",\"impact\":\"low\"}
+",
+            "{\"line\":\"L2\",\"description\":\"Edited a config file\",\"impact\":\"medium\"}
+",
+            "{\"line\":\"L3\",\"description\":\"Deleted a database\",\"impact\":\"high\"}
+",
         );
 
         let actions = parse(answer).expect("valid answer");
 
-        let sensitivities: Vec<_> = actions.iter().map(|action| action.sensitivity).collect();
-        assert_eq!(
-            sensitivities,
-            [
-                Some(Sensitivity::Low),
-                Some(Sensitivity::Medium),
-                Some(Sensitivity::High)
-            ]
-        );
+        let impacts: Vec<_> = actions.iter().map(|action| action.impact).collect();
+        assert_eq!(impacts, [Some(Impact::Low), Some(Impact::Medium), Some(Impact::High)]);
     }
 
     // oracle: scaffold
     #[test]
-    fn an_action_without_a_valid_sensitivity_is_kept_without_one() {
+    fn an_action_without_a_valid_impact_is_kept_without_one() {
         let answer = concat!(
-            "{\"line\":\"L1\",\"description\":\"No level\"}\n",
-            "{\"line\":\"L2\",\"description\":\"Unknown level\",\"sensitivity\":\"Mod\"}\n",
-            "{\"line\":\"L3\",\"description\":\"Not a string\",\"sensitivity\":3}\n",
+            "{\"line\":\"L1\",\"description\":\"No impact\"}
+",
+            "{\"line\":\"L2\",\"description\":\"Unknown impact\",\"impact\":\"Mod\"}
+",
+            "{\"line\":\"L3\",\"description\":\"Not a string\",\"impact\":3}
+",
         );
 
         let actions = parse(answer).expect("valid answer");
 
         assert_eq!(actions.len(), 3);
-        assert!(actions.iter().all(|action| action.sensitivity.is_none()));
+        assert!(actions.iter().all(|action| action.impact.is_none()));
+    }
+
+    // oracle: scaffold
+    #[test]
+    fn only_a_true_boolean_marks_sensitive_data() {
+        let answer = concat!(
+            "{\"line\":\"L1\",\"description\":\"Read a key file\",\"sensitiveData\":true}
+",
+            "{\"line\":\"L2\",\"description\":\"Listed files\",\"sensitiveData\":false}
+",
+            "{\"line\":\"L3\",\"description\":\"Opened a shell\"}
+",
+            "{\"line\":\"L4\",\"description\":\"Not a boolean\",\"sensitiveData\":\"true\"}
+",
+        );
+
+        let actions = parse(answer).expect("valid answer");
+
+        let sensitive: Vec<_> = actions.iter().map(|action| action.sensitive_data).collect();
+        assert_eq!(sensitive, [true, false, false, false]);
     }
 
     #[test]
@@ -473,7 +498,8 @@ mod tests {
             "description",
             "object",
             "parameters",
-            "\"sensitivity\"",
+            "\"impact\"",
+            "\"sensitiveData\"",
             "JSON Lines",
             "noActions",
         ] {

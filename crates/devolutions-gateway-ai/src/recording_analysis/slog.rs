@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::session_actions::{Action, Sensitivity};
+use crate::session_actions::{Action, Impact};
 
 /// One line of the AI `.slog`.
 ///
@@ -29,7 +29,7 @@ enum Event<'a> {
         prompt_version: &'a str,
         language: &'a str,
     },
-    #[serde(rename = "session.action")]
+    #[serde(rename = "session.action", rename_all = "camelCase")]
     Action {
         description: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,7 +37,9 @@ enum Event<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         parameters: Option<&'a BTreeMap<String, String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        sensitivity: Option<Sensitivity>,
+        impact: Option<Impact>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        sensitive_data: bool,
     },
     #[serde(rename = "session.end")]
     End {
@@ -101,7 +103,8 @@ impl<W: std::io::Write> SlogWriter<W> {
                 description: &action.description,
                 object: action.object.as_deref(),
                 parameters: Some(&action.parameters).filter(|parameters| !parameters.is_empty()),
-                sensitivity: action.sensitivity,
+                impact: action.impact,
+                sensitive_data: action.sensitive_data,
             },
         )
     }
@@ -180,7 +183,8 @@ mod tests {
                 .iter()
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                 .collect(),
-            sensitivity: None,
+            impact: None,
+            sensitive_data: false,
         }
     }
 
@@ -211,10 +215,11 @@ mod tests {
 
     // oracle: scaffold
     #[test]
-    fn an_action_line_has_a_sensitivity_only_when_known() {
+    fn an_action_line_has_its_rating_only_when_known() {
         let rated = Action {
-            sensitivity: Some(Sensitivity::High),
-            ..action(1000, "Deleted a database", Some("orders"), &[])
+            impact: Some(Impact::High),
+            sensitive_data: true,
+            ..action(1000, "Deleted a key file", Some("id_rsa"), &[])
         };
         let unrated = action(2000, "Closed the shell", None, &[]);
 
@@ -224,8 +229,10 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).expect("JSON line"))
             .collect();
-        assert_eq!(events[1]["sensitivity"], "high");
-        assert_eq!(events[2].get("sensitivity"), None);
+        assert_eq!(events[1]["impact"], "high");
+        assert_eq!(events[1]["sensitiveData"], true);
+        assert_eq!(events[2].get("impact"), None);
+        assert_eq!(events[2].get("sensitiveData"), None);
     }
 
     #[test]

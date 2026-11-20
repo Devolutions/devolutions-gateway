@@ -23,10 +23,11 @@ Each object has these fields:
 - "description": string. A short past-tense sentence naming the action, like "Reset the password of a user account". Say so when the screen shows that it failed.
 - "object": string, optional. The main thing acted on, like a file path, host, service, user, or setting.
 - "parameters": object, optional. Every value is a string. Important details, like the window, the exact command, or the new value.
-- "sensitivity": string. How sensitive the action is, always one of these English words: "low" for viewing or reading, "medium" for creating or changing something, "high" for deleting or destroying something, restarting a system, resetting a password, unlocking an account, or viewing sensitive data such as secrets or personal information.
+- "impact": string. What the action did to the system, always one of these English words: "low" if it changed nothing, like viewing or reading; "medium" for a change that is easy to undo, like editing a file or a setting; "high" for a change that is hard to undo or affects security, like deleting something, restarting a system, resetting a password, or unlocking an account.
+- "sensitiveData": boolean, optional. true only when the action showed or touched secrets, credentials, or personal data; otherwise leave it out.
 
 Example output line:
-{"frame":"F00012","description":"Reset the password of a user account","object":"David Moreau","parameters":{"Window":"Active Directory Users and Computers"},"sensitivity":"high"}
+{"frame":"F00012","description":"Reset the password of a user account","object":"David Moreau","parameters":{"Window":"Active Directory Users and Computers"},"impact":"high"}
 
 Rules:
 - Write one line per meaningful user action, in time order, such as opening a tool, changing a setting, running a command, or confirming a dialog.
@@ -174,7 +175,8 @@ mod tests {
             "description",
             "object",
             "parameters",
-            "\"sensitivity\"",
+            "\"impact\"",
+            "\"sensitiveData\"",
             "context",
             "noActions",
         ] {

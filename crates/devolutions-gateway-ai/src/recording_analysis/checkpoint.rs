@@ -9,7 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::Response;
-use crate::session_actions::{Action, Sensitivity};
+use crate::session_actions::{Action, Impact};
 
 pub(super) fn path(workspace: &Utf8Path, index: usize) -> Utf8PathBuf {
     workspace.join(format!("chunk-{index:04}.json"))
@@ -49,7 +49,9 @@ struct SavedAction {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     parameters: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    sensitivity: Option<Sensitivity>,
+    impact: Option<Impact>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    sensitive_data: bool,
 }
 
 /// Writes the checkpoint through a temporary file, so a crash never leaves a partial one.
@@ -66,7 +68,8 @@ pub(super) fn write(path: &Utf8Path, chunk: &DescribedChunk) -> anyhow::Result<(
                 description: action.description.clone(),
                 object: action.object.clone(),
                 parameters: action.parameters.clone(),
-                sensitivity: action.sensitivity,
+                impact: action.impact,
+                sensitive_data: action.sensitive_data,
             })
             .collect(),
     };
@@ -92,7 +95,8 @@ pub(super) fn read(path: &Utf8Path) -> anyhow::Result<DescribedChunk> {
                 description: saved.description,
                 object: saved.object,
                 parameters: saved.parameters,
-                sensitivity: saved.sensitivity,
+                impact: saved.impact,
+                sensitive_data: saved.sensitive_data,
             })
         })
         .collect::<anyhow::Result<_>>()?;
@@ -118,14 +122,16 @@ mod tests {
                     description: "Listed files".to_owned(),
                     object: Some("/var/log".to_owned()),
                     parameters: BTreeMap::from([("Command".to_owned(), "ls".to_owned())]),
-                    sensitivity: Some(Sensitivity::Low),
+                    impact: Some(Impact::Low),
+                    sensitive_data: true,
                 },
                 Action {
                     offset: Duration::from_secs(62),
                     description: "Closed the shell".to_owned(),
                     object: None,
                     parameters: BTreeMap::new(),
-                    sensitivity: None,
+                    impact: None,
+                    sensitive_data: false,
                 },
             ],
             model: Some("gpt-test-2026-09-30".to_owned()),
