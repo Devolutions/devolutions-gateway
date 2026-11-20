@@ -25,6 +25,7 @@ docs/AiAnalysisSucceededPayload.md
 docs/AiAnalysisTask.md
 docs/AiAnalysisUsage.md
 docs/AiProvider.md
+docs/ApiError.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -40,6 +41,7 @@ docs/DeleteManyResult.md
 docs/DiagnosticsApi.md
 docs/EnrollRequest.md
 docs/EnrollResponse.md
+docs/ErrorCode.md
 docs/EventOutcomeResponse.md
 docs/GetUpdateProductsResponse.md
 docs/GetUpdateScheduleResponse.md
@@ -53,6 +55,7 @@ docs/JrecApi.md
 docs/JrlApi.md
 docs/JrlInfo.md
 docs/ListenerUrls.md
+docs/LogFileInfo.md
 docs/MonitorDefinition.md
 docs/MonitorDefinitionProbeTypeError.md
 docs/MonitorResult.md
@@ -157,6 +160,7 @@ src/Devolutions.Gateway.Client/Model/AiAnalysisSucceededPayload.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisTask.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisUsage.cs
 src/Devolutions.Gateway.Client/Model/AiProvider.cs
+src/Devolutions.Gateway.Client/Model/ApiError.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
@@ -170,6 +174,7 @@ src/Devolutions.Gateway.Client/Model/DataEncoding.cs
 src/Devolutions.Gateway.Client/Model/DeleteManyResult.cs
 src/Devolutions.Gateway.Client/Model/EnrollRequest.cs
 src/Devolutions.Gateway.Client/Model/EnrollResponse.cs
+src/Devolutions.Gateway.Client/Model/ErrorCode.cs
 src/Devolutions.Gateway.Client/Model/EventOutcomeResponse.cs
 src/Devolutions.Gateway.Client/Model/GetUpdateProductsResponse.cs
 src/Devolutions.Gateway.Client/Model/GetUpdateScheduleResponse.cs
@@ -179,6 +184,7 @@ src/Devolutions.Gateway.Client/Model/Identity.cs
 src/Devolutions.Gateway.Client/Model/InterfaceInfo.cs
 src/Devolutions.Gateway.Client/Model/JrlInfo.cs
 src/Devolutions.Gateway.Client/Model/ListenerUrls.cs
+src/Devolutions.Gateway.Client/Model/LogFileInfo.cs
 src/Devolutions.Gateway.Client/Model/MonitorDefinition.cs
 src/Devolutions.Gateway.Client/Model/MonitorDefinitionProbeTypeError.cs
 src/Devolutions.Gateway.Client/Model/MonitorResult.cs

@@ -24,10 +24,10 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     path = "/jet/jrl",
     responses(
         (status = 200, description = "JRL updated successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to update the JRL"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to update the JRL", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("jrl_token" = [])),
 ))]
@@ -91,10 +91,10 @@ pub(crate) struct JrlInfo {
     path = "/jet/jrl/info",
     responses(
         (status = 200, description = "Current JRL Info", body = JrlInfo),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to update the JRL"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to update the JRL", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.jrl.read"])),
 ))]

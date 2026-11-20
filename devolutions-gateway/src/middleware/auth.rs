@@ -11,6 +11,7 @@ use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
 
 use crate::config::Conf;
+use crate::error_code::ErrorCode;
 use crate::http::HttpError;
 use crate::recording::ActiveRecordings;
 use crate::session::DisconnectedInfo;
@@ -135,6 +136,7 @@ pub async fn auth_middleware(
 
                 let Ok(query) = serde_urlencoded::from_str::<TokenQueryParam<'_>>(query) else {
                     return Err(HttpError::unauthorized()
+                        .with_error_code(ErrorCode::MissingToken)
                         .msg("both authorization header and token query param invalid or missing"));
                 };
 
@@ -163,19 +165,22 @@ pub async fn auth_middleware(
         let access_token_claims = match result {
             Ok(access_token_claims) => access_token_claims,
             Err(error) => {
+                // The event log entry carries the same code as the response.
+                let error_code = error.code();
+
                 match &error {
                     crate::token::TokenError::SignatureVerification { source, key } => {
                         let _ = SYSTEM_LOGGER.emit(
-                            sysevent_codes::jwt_rejected("bad_signature", format!("{source:#}")).field("key", key),
+                            sysevent_codes::jwt_rejected(error_code.as_str(), format!("{source:#}")).field("key", key),
                         );
                     }
                     crate::token::TokenError::UnexpectedReplay { reason } => {
-                        let _ = SYSTEM_LOGGER.emit(sysevent_codes::jwt_rejected("unexpected_replay", reason));
+                        let _ = SYSTEM_LOGGER.emit(sysevent_codes::jwt_rejected(error_code.as_str(), reason));
                     }
                     _ => {}
                 }
 
-                return Err(HttpError::unauthorized().err()(error));
+                return Err(HttpError::unauthorized().with_error_code(error_code).build(error));
             }
         };
 

@@ -21,6 +21,8 @@ import { AckRequest } from '../model/ackRequest';
 // @ts-ignore
 import { AckResponse } from '../model/ackResponse';
 // @ts-ignore
+import { ApiError } from '../model/apiError';
+// @ts-ignore
 import { ClaimedTrafficEvent } from '../model/claimedTrafficEvent';
 
 // @ts-ignore
@@ -100,10 +102,10 @@ export class TrafficService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public ackTrafficEvents(ackRequest: AckRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<AckResponse>;
-    public ackTrafficEvents(ackRequest: AckRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<AckResponse>>;
-    public ackTrafficEvents(ackRequest: AckRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<AckResponse>>;
-    public ackTrafficEvents(ackRequest: AckRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public ackTrafficEvents(ackRequest: AckRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<AckResponse>;
+    public ackTrafficEvents(ackRequest: AckRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<AckResponse>>;
+    public ackTrafficEvents(ackRequest: AckRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<AckResponse>>;
+    public ackTrafficEvents(ackRequest: AckRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (ackRequest === null || ackRequest === undefined) {
             throw new Error('Required parameter ackRequest was null or undefined when calling ackTrafficEvents.');
         }
@@ -121,7 +123,8 @@ export class TrafficService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -182,10 +185,10 @@ export class TrafficService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public claimTrafficEvents(leaseMs: number, max: number, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<Array<ClaimedTrafficEvent>>;
-    public claimTrafficEvents(leaseMs: number, max: number, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<ClaimedTrafficEvent>>>;
-    public claimTrafficEvents(leaseMs: number, max: number, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<ClaimedTrafficEvent>>>;
-    public claimTrafficEvents(leaseMs: number, max: number, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public claimTrafficEvents(leaseMs: number, max: number, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<Array<ClaimedTrafficEvent>>;
+    public claimTrafficEvents(leaseMs: number, max: number, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<ClaimedTrafficEvent>>>;
+    public claimTrafficEvents(leaseMs: number, max: number, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<ClaimedTrafficEvent>>>;
+    public claimTrafficEvents(leaseMs: number, max: number, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (leaseMs === null || leaseMs === undefined) {
             throw new Error('Required parameter leaseMs was null or undefined when calling claimTrafficEvents.');
         }
@@ -216,7 +219,8 @@ export class TrafficService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
