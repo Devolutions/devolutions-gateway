@@ -265,11 +265,15 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
     let offset = time(cited.trim()).ok_or_else(|| format!("{citation} is not in the input"))?;
 
     // An invalid impact or sensitiveData is dropped alone, because the action itself is still worth listing.
-    let impact = value.get("impact").and_then(|impact| {
-        Impact::deserialize(impact)
-            .inspect_err(|_| trace!("Dropped the invalid impact of an AI action line"))
-            .ok()
-    });
+    // Only a string is a rating: serde would also read `{"low":null}` as `low`.
+    let impact = value
+        .get("impact")
+        .filter(|impact| impact.is_string())
+        .and_then(|impact| {
+            Impact::deserialize(impact)
+                .inspect_err(|_| trace!("Dropped the invalid impact of an AI action line"))
+                .ok()
+        });
     let sensitive_data = value.get("sensitiveData").and_then(serde_json::Value::as_bool) == Some(true);
 
     let parsed: ActionLine = serde_json::from_value(value).map_err(|_| "invalid action fields".to_owned())?;
@@ -377,11 +381,12 @@ mod tests {
             "{\"line\":\"L1\",\"description\":\"No impact\"}\n",
             "{\"line\":\"L2\",\"description\":\"Unknown impact\",\"impact\":\"Mod\"}\n",
             "{\"line\":\"L3\",\"description\":\"Not a string\",\"impact\":3}\n",
+            "{\"line\":\"L4\",\"description\":\"An object\",\"impact\":{\"low\":null}}\n",
         );
 
         let actions = parse(answer).expect("valid answer");
 
-        assert_eq!(actions.len(), 3);
+        assert_eq!(actions.len(), 4);
         assert!(actions.iter().all(|action| action.impact.is_none()));
     }
 
