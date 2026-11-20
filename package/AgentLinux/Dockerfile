@@ -51,7 +51,12 @@ RUN apt-get update \
 
 RUN useradd --system --create-home --home-dir /var/lib/devolutions-agent --shell /usr/sbin/nologin devolutions-agent \
     && mkdir -p "${DAGENT_CONFIG_PATH}" \
-    && runuser -u devolutions-agent -- env HOME="${HOME}" multi-pwsh install "${MULTI_PWSH_POWERSHELL_VERSION}" \
+    && for attempt in 1 2 3 4; do \
+        runuser -u devolutions-agent -- env HOME="${HOME}" multi-pwsh install "${MULTI_PWSH_POWERSHELL_VERSION}" && break; \
+        test "${attempt}" -lt 4 || exit 1; \
+        echo "multi-pwsh install failed (attempt ${attempt}); retrying" >&2; \
+        sleep $((attempt * 15)); \
+    done \
     && runuser -u devolutions-agent -- env HOME="${HOME}" multi-pwsh alias set pwsh "${MULTI_PWSH_POWERSHELL_VERSION}" \
     && runuser -u devolutions-agent -- env HOME="${HOME}" multi-pwsh host pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' \
     && test -x "${HOME}/.pwsh/bin/pwsh"
