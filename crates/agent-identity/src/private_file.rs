@@ -56,16 +56,16 @@ pub(crate) fn is_untrusted(error: &anyhow::Error) -> bool {
     error.is::<UntrustedStateFile>()
 }
 
-/// An identity directory whose owner the agent does not accept, such as another account, which provisioning never
-/// repairs.
+/// An identity directory, `<data-dir>/identity` or its `authorities`, `keys`, `rejected` or `pending`, whose owner the
+/// agent does not accept, such as another account, which provisioning never repairs.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): such a directory stops all identity processing until it is
 /// fixed, because the account that created it can keep a handle that still changes it after a reset.
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 #[derive(Debug)]
-struct ForeignIdentityDirectory {
-    path: Utf8PathBuf,
+pub struct ForeignIdentityDirectory {
+    pub path: Utf8PathBuf,
     source: private_fs::Error,
 }
 
