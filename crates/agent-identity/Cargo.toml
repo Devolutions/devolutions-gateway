@@ -13,7 +13,7 @@ workspace = true
 agent-identity-httpsig = { path = "../agent-identity-httpsig" }
 device-key = { path = "../device-key" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 camino = "1"
 der = "0.8"
 hex = "0.4"
