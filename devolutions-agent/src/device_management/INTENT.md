@@ -46,9 +46,17 @@ Remote writes are limited to operations supported by the existing package broker
 
 Remote writes never fall back to local package execution.
 
+<a id="device-management-operation-journal"></a>
+## Operation journal
+
+The operation journal is the Agent's durable record, on the device, of the remote package operations it has accepted, with one entry per operation ID and its status.
+It exists so that an operation is executed at most once and its recorded status can be returned again.
+
 Repeated delivery of an operation ID recorded in the journal returns its recorded status and never starts a second execution.
 
 When the operation journal is missing, the Agent creates a new journal; operations recorded in the missing journal may execute again.
+
+When the journal is found damaged or partly missing, the Agent refuses new remote package writes on the device until it starts again and finds the journal intact; discovery and inventory remain available.
 
 When an operation's outcome cannot be recovered after a crash or disconnection, its status is `UNKNOWN`, except when its record was lost with a missing journal.
 

@@ -424,7 +424,19 @@ The Agent durably records an operation before making a grant for it available an
 Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
 A repeated operation ID with a different payload is rejected without submission and reports `UNKNOWN`.
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
-When an existing journal's deduplication state cannot be recovered, the Agent does not treat an operation ID as new and reports `UNKNOWN`.
+When the Agent detects a missing, corrupt or unindexed record in an existing journal, it refuses new remote package writes on that device and reports `UNKNOWN`.
+The same refusal applies when the journal's records directory or index is missing, or the index is corrupt or inconsistent with its records.
+After detecting a missing index, the Agent does not recreate it during that process's lifetime.
+When a journal write fails and its state cannot be trusted, the Agent also refuses new remote package writes.
+During refusal, a repeated delivery with the same payload and an intact, valid record returns its recorded status without dispatch.
+A delivery without a record, or with a missing or corrupt record, reports `UNKNOWN` without dispatch.
+An intact record without a recorded outcome reports `UNKNOWN` during refusal.
+The refusal lasts for the life of the Agent process and recurs after restart if the journal remains damaged.
+Discovery and inventory remain available when their own dependencies are healthy.
+Already active operations are not assumed to have stopped.
+After restart, if an index entry and its record are both lost, the surviving journal cannot identify that operation and the operation ID may execute again.
+If SYSTEM, an administrator or the Agent account removes the index between its integrity check and atomic replacement, the Agent can recreate it from memory without detecting the loss.
+If one of these accounts replaces the records directory after the check and before admission completes, the Agent can write to a disconnected directory without detecting the loss.
 When the operation journal is missing, the Agent creates a new one; operations recorded only in the missing journal may execute again.
 The Authority may submit a new operation ID after an `UNKNOWN` outcome only by explicitly accepting that the earlier operation may have completed.
 The Broker's request-ID replay tracking does not replace this Authority operation-ID tracking.

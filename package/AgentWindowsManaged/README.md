@@ -39,18 +39,27 @@ When upgrading from a release without the UniGetUI Package Broker option, setup 
 
 ## Package operation journal recovery
 
-If the Agent logs `Cannot open the device-management operation journal; package writes are unavailable`, it does not start remote package operations and reports `UNKNOWN` to the authority.
+When its operation journal cannot be trusted, the Agent refuses new remote package writes and reports `UNKNOWN` to the authority.
+Previously recorded operations with intact records retain their recorded results.
+It logs `Cannot open the device-management operation journal; package writes are unavailable` or `Package operation journal is unrecoverable; package writes are unavailable` when it detects damage.
+The refusal remains until the journal is recovered and the Agent is restarted.
+A crash during admission can leave the journal incomplete and cause refusal after restart.
 Discovery and inventory remain available when their own dependencies are healthy.
 An `UNKNOWN` result does not prove that an earlier operation with the same ID did not run.
+If an index entry and its record are both lost, the loss can go undetected after restart and that operation ID may execute again.
 
 To recover the journal, use an elevated administrator session:
 
 1. Stop submitting package operations, wait for active operations to finish, and inspect any operations whose outcomes are unknown.
-2. Stop the `DevolutionsAgent` service and any other Agent instance using that data directory.
-3. Restore a trusted, complete and current backup of `%ProgramData%\Devolutions\Agent\package-operations`, including its original permissions.
+2. Verify that the journal has a complete, current operation history, such as by comparing it with a trusted backup.
+   If you cannot verify it, continue to step 3 or accept the replay risk before restarting.
+   Restart the `DevolutionsAgent` service and check new Agent log entries for journal errors.
+   If no journal errors appear, resume operations; otherwise continue to step 3.
+3. Stop the service and any other Agent instance using that data directory.
+4. Restore a trusted, complete and current backup of `%ProgramData%\Devolutions\Agent\package-operations`, including its original permissions.
    If the Agent uses `DAGENT_CONFIG_PATH`, the journal is under that directory instead.
    If no complete backup is available, move or delete the entire `package-operations` directory to create a new journal.
-4. Start the service and check the Agent log for journal errors.
+5. Start the service and check the Agent log for journal errors.
 
 Resetting the journal, or restoring a backup that lacks recent records, allows previously recorded operation IDs to execute again.
 Accept that risk before resetting or restoring the journal; do not remove only individual journal files.
