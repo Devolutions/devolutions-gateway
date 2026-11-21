@@ -117,6 +117,24 @@ pub fn agent_path() -> &'static std::path::Path {
     &AGENT_BIN_PATH
 }
 
+static CREDENTIAL_INJECTION_MOCK_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../crates/credential-injection-mock/Cargo.toml")
+        .bin("credential-injection-mock")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build credential-injection-mock")
+        .path()
+        .to_path_buf()
+});
+
+pub fn credential_injection_mock_tokio_cmd() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(&*CREDENTIAL_INJECTION_MOCK_BIN_PATH);
+    cmd.env("RUST_BACKTRACE", "0");
+    cmd
+}
+
 pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_test::Expect) {
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);
