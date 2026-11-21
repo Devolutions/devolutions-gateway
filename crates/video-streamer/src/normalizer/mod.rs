@@ -1,5 +1,7 @@
 use std::io::{self, SeekFrom, Write};
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration, Instant};
 
@@ -28,6 +30,8 @@ const VPX_EFLAG_FORCE_KF: u32 = 0x0000_0001;
 const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 const MAX_WEBM_BLOCK_TIMESTAMP: u64 = 32_767;
 const MAX_CONSECUTIVE_FRAME_SKIPS: u32 = 1;
+// Media Foundation waits for 256 KiB per read, so at this rate a still screen fills one read in about a second.
+const SYNTHETIC_KEY_FRAME_BYTES_PER_SECOND: u64 = 300_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SegmentInfo {
@@ -45,6 +49,8 @@ pub(crate) enum SegmentEvent {
 
 pub(crate) struct NormalizedSession {
     receiver: mpsc::Receiver<anyhow::Result<SegmentEvent>>,
+    key_frame_requests: mpsc::Sender<()>,
+    key_frame_wanted: Arc<AtomicBool>,
     supervisor: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -57,6 +63,23 @@ impl Stream for NormalizedSession {
 }
 
 impl NormalizedSession {
+    /// Asks for a key frame of the current picture when no new source frame has arrived.
+    ///
+    /// The channel wakes the normalizer; the flag says whether the caller still waits, so a request that is
+    /// still in flight after [`Self::key_frame_answered`] makes no key frame.
+    ///
+    /// The request is dropped when one is already waiting, when there is no picture yet, or when the byte budget
+    /// for synthetic key frames does not allow one yet; the caller asks again while it still waits.
+    pub(crate) fn request_key_frame(&self) {
+        self.key_frame_wanted.store(true, Ordering::Release);
+        let _ = self.key_frame_requests.try_send(());
+    }
+
+    /// Withdraws the request once the caller got its answer, so a request still in flight makes no key frame.
+    pub(crate) fn key_frame_answered(&self) {
+        self.key_frame_wanted.store(false, Ordering::Release);
+    }
+
     pub(crate) async fn shutdown(mut self) -> anyhow::Result<()> {
         self.receiver.close();
         let supervisor = self.supervisor.take().context("normalizer supervisor is missing")?;
@@ -77,7 +100,16 @@ pub(crate) fn test_session<S>(stream: S) -> NormalizedSession
 where
     S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
 {
+    test_session_with_requests(stream).0
+}
+
+#[cfg(test)]
+pub(crate) fn test_session_with_requests<S>(stream: S) -> (NormalizedSession, mpsc::Receiver<()>)
+where
+    S: Stream<Item = anyhow::Result<SegmentEvent>> + Send + 'static,
+{
     let (sender, receiver) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
+    let (key_frame_requests, request_receiver) = mpsc::channel(1);
     let supervisor = tokio::spawn(async move {
         tokio::pin!(stream);
         loop {
@@ -92,10 +124,20 @@ where
             }
         }
     });
-    NormalizedSession {
-        receiver,
-        supervisor: Some(supervisor),
-    }
+    (
+        NormalizedSession {
+            receiver,
+            key_frame_requests,
+            key_frame_wanted: Arc::default(),
+            supervisor: Some(supervisor),
+        },
+        request_receiver,
+    )
+}
+
+enum InputEvent {
+    Recording(anyhow::Result<RecordingEvent>),
+    KeyFrameRequested,
 }
 
 pub(crate) fn normalize<S>(source: S, config: SessionConfig) -> NormalizedSession
@@ -104,13 +146,25 @@ where
 {
     let (output_sender, output_receiver) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
     let (input_sender, input_receiver) = mpsc::channel(INPUT_CHANNEL_CAPACITY);
+    let (key_frame_requests, mut request_receiver) = mpsc::channel(1);
+    let key_frame_wanted = Arc::new(AtomicBool::new(false));
+    let worker_key_frame_wanted = Arc::clone(&key_frame_wanted);
 
     let supervisor = tokio::spawn(async move {
         let worker_sender = output_sender.clone();
-        let mut worker = tokio::task::spawn_blocking(move || normalize_events(input_receiver, worker_sender, config));
+        let mut worker = tokio::task::spawn_blocking(move || {
+            normalize_events(input_receiver, worker_sender, config, &worker_key_frame_wanted)
+        });
         let mut forward = Box::pin(async move {
             tokio::pin!(source);
-            while let Some(event) = source.next().await {
+            loop {
+                let event = tokio::select! {
+                    event = source.next() => match event {
+                        Some(event) => InputEvent::Recording(event),
+                        None => break,
+                    },
+                    Some(()) = request_receiver.recv() => InputEvent::KeyFrameRequested,
+                };
                 if input_sender.send(event).await.is_err() {
                     break;
                 }
@@ -132,6 +186,8 @@ where
 
     NormalizedSession {
         receiver: output_receiver,
+        key_frame_requests,
+        key_frame_wanted,
         supervisor: Some(supervisor),
     }
 }
@@ -149,14 +205,25 @@ async fn publish_worker_result(
 }
 
 fn normalize_events(
-    mut receiver: mpsc::Receiver<anyhow::Result<RecordingEvent>>,
+    mut receiver: mpsc::Receiver<InputEvent>,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
+    key_frame_wanted: &AtomicBool,
 ) -> anyhow::Result<()> {
     let mut phase = SessionPhase::AwaitClip;
     let mut next_segment_sequence = 0;
+    let mut last_synthetic_key_frame = None;
 
     while let Some(event) = receiver.blocking_recv() {
+        let event = match event {
+            InputEvent::Recording(event) => event,
+            InputEvent::KeyFrameRequested => {
+                if let SessionPhase::InClip(clip) = &mut phase {
+                    clip.provide_key_frame(key_frame_wanted, &mut last_synthetic_key_frame)?;
+                }
+                continue;
+            }
+        };
         match event.context("recording source failed")? {
             RecordingEvent::ClipStarted {
                 sequence,
@@ -275,8 +342,29 @@ struct ClipNormalizer {
     processing_time: Duration,
     first_frame_timestamp: Option<u64>,
     frames_since_last_encode: u32,
+    source_frames_processed: u64,
+    last_source_frame: Option<SourceFrameClock>,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
+}
+
+#[derive(Clone, Copy)]
+struct SourceFrameClock {
+    timestamp: u64,
+    processed_at: Instant,
+}
+
+#[derive(Clone, Copy)]
+struct SyntheticKeyFrame {
+    sent_at: Instant,
+    bytes: u64,
+}
+
+impl SyntheticKeyFrame {
+    fn next_allowed_at(self) -> Instant {
+        let spacing_ms = self.bytes.saturating_mul(1000) / SYNTHETIC_KEY_FRAME_BYTES_PER_SECOND;
+        self.sent_at + Duration::from_millis(spacing_ms)
+    }
 }
 
 impl ClipNormalizer {
@@ -314,9 +402,59 @@ impl ClipNormalizer {
             processing_time: Duration::ZERO,
             first_frame_timestamp: None,
             frames_since_last_encode: 0,
+            source_frames_processed: 0,
+            last_source_frame: None,
             sender,
             config,
         })
+    }
+
+    /// Answers a key-frame request: new source frames first, otherwise a key frame of the current picture.
+    ///
+    /// Synthetic key frames share a byte budget, so each one waits until the previous one has had time to drain.
+    fn provide_key_frame(
+        &mut self,
+        key_frame_wanted: &AtomicBool,
+        last_synthetic_key_frame: &mut Option<SyntheticKeyFrame>,
+    ) -> anyhow::Result<()> {
+        if !matches!(self.phase, ClipPhase::Live) || self.sender.is_closed() {
+            return Ok(());
+        }
+
+        let processed_before = self.source_frames_processed;
+        self.scan_available()?;
+        if self.source_frames_processed != processed_before {
+            return Ok(());
+        }
+
+        if last_synthetic_key_frame.is_some_and(|previous| Instant::now() < previous.next_allowed_at()) {
+            return Ok(());
+        }
+        let Some(source) = self.last_source_frame else {
+            return Ok(());
+        };
+        let (Some(segment), Some(picture)) = (
+            self.output_segment.as_mut(),
+            self.input_decoder.as_ref().and_then(InputDecoder::picture),
+        ) else {
+            return Ok(());
+        };
+        if key_frame_wanted
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Ok(());
+        }
+
+        let elapsed_ms = u64::try_from(source.processed_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let timestamp = source.timestamp.saturating_add(elapsed_ms);
+        let bytes = segment.encode(picture, timestamp, true)?;
+        trace!(timestamp, bytes, "Sent a synthetic key frame");
+        *last_synthetic_key_frame = Some(SyntheticKeyFrame {
+            sent_at: Instant::now(),
+            bytes,
+        });
+        Ok(())
     }
 
     fn scan_available(&mut self) -> anyhow::Result<()> {
@@ -607,8 +745,12 @@ impl ClipNormalizer {
         let input_decoder = self
             .input_decoder
             .get_or_insert_with(|| InputDecoder::new(frame.codec, self.config.encoder_threads));
-        let decoded = input_decoder.decode(&frame.data)?;
-        let dimensions = decoded.dimensions;
+        let dimensions = input_decoder.decode(&frame.data)?;
+        self.source_frames_processed = self.source_frames_processed.saturating_add(1);
+        self.last_source_frame = Some(SourceFrameClock {
+            timestamp: frame.timestamp,
+            processed_at: Instant::now(),
+        });
         let new_segment = next_segment_info(
             self.output_segment.as_ref().map(|segment| segment.dimensions),
             dimensions,
@@ -635,10 +777,15 @@ impl ClipNormalizer {
                 .checked_add(1)
                 .context("segment sequence overflow")?;
         }
+        let picture = self
+            .input_decoder
+            .as_ref()
+            .and_then(InputDecoder::picture)
+            .context("decoded picture is missing")?;
         self.output_segment
             .as_mut()
             .context("output segment is missing")?
-            .encode(&decoded.image, frame.timestamp)?;
+            .encode(picture, frame.timestamp, false)?;
         Ok(())
     }
 
@@ -857,6 +1004,7 @@ struct OutputSegment {
     dimensions: Dimensions,
     origin_timestamp: Option<u64>,
     previous_timestamp: Option<u64>,
+    has_synthetic_frames: bool,
     cluster_timestamp: Option<u64>,
     encoder: VpxEncoder,
     writer: WebmWriter<EventWriter>,
@@ -891,13 +1039,21 @@ impl OutputSegment {
             },
             origin_timestamp: None,
             previous_timestamp: None,
+            has_synthetic_frames: false,
             cluster_timestamp: None,
             encoder,
             writer,
         })
     }
 
-    fn encode(&mut self, image: &VpxImage<'_>, timestamp: u64) -> anyhow::Result<()> {
+    /// Encodes one picture and returns how many frame bytes it wrote.
+    fn encode(&mut self, image: &VpxImage<'_>, timestamp: u64, force_key_frame: bool) -> anyhow::Result<u64> {
+        // A synthetic key frame takes its time from the wall clock, so a source frame can arrive with an earlier one.
+        self.has_synthetic_frames |= force_key_frame;
+        let timestamp = match self.previous_timestamp {
+            Some(previous) if self.has_synthetic_frames && timestamp <= previous => previous.saturating_add(1),
+            _ => timestamp,
+        };
         let origin = *self.origin_timestamp.get_or_insert(timestamp);
         let relative_timestamp = timestamp.saturating_sub(origin);
         let duration = self
@@ -908,7 +1064,7 @@ impl OutputSegment {
         let cluster_timestamp_expired = self.cluster_timestamp.is_some_and(|cluster_timestamp| {
             relative_timestamp.saturating_sub(cluster_timestamp) > MAX_WEBM_BLOCK_TIMESTAMP
         });
-        let flags = if relative_timestamp == 0 || cluster_timestamp_expired {
+        let flags = if force_key_frame || relative_timestamp == 0 || cluster_timestamp_expired {
             VPX_EFLAG_FORCE_KF
         } else {
             0
@@ -922,7 +1078,7 @@ impl OutputSegment {
         self.write_encoded_frames()
     }
 
-    fn write_encoded_frames(&mut self) -> anyhow::Result<()> {
+    fn write_encoded_frames(&mut self) -> anyhow::Result<u64> {
         let frames = self
             .encoder
             .packet_iterator()
@@ -934,7 +1090,9 @@ impl OutputSegment {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
+        let mut bytes = 0u64;
         for (timestamp, data) in frames {
+            bytes = bytes.saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
             let is_key_frame = is_vpx_key_frame(&data, VpxCodec::VP8);
             anyhow::ensure!(
                 self.cluster_timestamp.is_some() || is_key_frame,
@@ -962,7 +1120,7 @@ impl OutputSegment {
             self.writer.write(&MatroskaSpec::from(block))?;
         }
 
-        Ok(())
+        Ok(bytes)
     }
 
     fn finish(mut self) -> anyhow::Result<()> {

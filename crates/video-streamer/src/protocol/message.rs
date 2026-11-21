@@ -15,6 +15,8 @@ pub(super) enum ServerMessage {
 pub(super) enum ClientMessage {
     Start,
     Pull,
+    /// A `Pull` that gets a synthetic key frame of the current picture instead of waiting for new data.
+    PullOrKeyFrame,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,6 +36,7 @@ pub(super) fn decode_client_message(message: &[u8]) -> anyhow::Result<ClientMess
     match message {
         [0] => Ok(ClientMessage::Start),
         [1] => Ok(ClientMessage::Pull),
+        [2] => Ok(ClientMessage::PullOrKeyFrame),
         _ => anyhow::bail!("invalid client message"),
     }
 }
