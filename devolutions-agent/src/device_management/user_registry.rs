@@ -271,6 +271,10 @@ fn read_state(dir: &Dir, rule: &Rule) -> anyhow::Result<Option<State>> {
 /// Writes `state` to a temporary file and installs it under the store's name, durably.
 fn write_state(dir: &Dir, rule: &Rule, state: &State, replace: Replace) -> anyhow::Result<()> {
     let bytes = Zeroizing::new(serde_json::to_vec(&state.to_file()).context("encode registry")?);
+    ensure!(
+        u64::try_from(bytes.len())? <= MAX_STORE_BYTES,
+        "registry file is larger than {MAX_STORE_BYTES} bytes"
+    );
     let file = dir
         .create_file(TEMP_NAME, rule, FileOptions::new())
         .context("create temporary registry file")?;
@@ -419,6 +423,96 @@ mod tests {
         assert_eq!(second.epoch(), epoch);
         assert_eq!(second.get_or_create(&sid(ALICE)).expect("alice again"), alice);
         assert_eq!(second.resolve(alice), Some(sid(ALICE)));
+    }
+
+    // oracle: regression #2194
+    #[test]
+    fn full_registry_remains_readable_and_rejects_new_users() -> anyhow::Result<()> {
+        const LIMIT: usize = 4 * 1024 * 1024;
+        const MIN_SID_LEN: usize = 19;
+        const MAX_SID_LEN: usize = 162;
+
+        let dir = registry_dir();
+        let registry = open(&dir)?;
+        let epoch = registry.epoch();
+        drop(registry);
+
+        let row_overhead = format!(r#",{{"sid":"","id":"{}"}}"#, Uuid::nil()).len();
+        let target = LIMIT - row_overhead - MAX_SID_LEN;
+        let max_row = row_overhead + MAX_SID_LEN;
+        let mut content = format!(r#"{{"version":1,"epoch":"{epoch}","users":["#);
+        content.push_str(&entry(0, MAX_SID_LEN));
+        let mut index = 1;
+        while 2 * max_row < target - content.len() - 2 {
+            content.push(',');
+            content.push_str(&entry(index, MAX_SID_LEN));
+            index += 1;
+        }
+        let remaining_sids = target - content.len() - 2 - 2 * row_overhead;
+        let (first_len, second_len) = (MIN_SID_LEN..=MAX_SID_LEN)
+            .filter(|length| *length != MIN_SID_LEN + 1)
+            .find_map(|first| {
+                let second = remaining_sids.checked_sub(first)?;
+                ((MIN_SID_LEN..=MAX_SID_LEN).contains(&second) && second != MIN_SID_LEN + 1).then_some((first, second))
+            })
+            .expect("two valid SIDs fill the remaining bytes");
+        content.push(',');
+        content.push_str(&entry(index, first_len));
+        content.push(',');
+        content.push_str(&entry(index + 1, second_len));
+        content.push_str("]}");
+        assert_eq!(content.len(), target);
+        fs::write(dir.join(STORE_NAME), content)?;
+
+        let registry = open(&dir)?;
+        let added_user = sid(&padded_sid(1_000_000, MAX_SID_LEN));
+        let issued_id = registry.get_or_create(&added_user)?;
+        let full_store = fs::read(dir.join(STORE_NAME))?;
+        assert_eq!(full_store.len(), LIMIT);
+
+        let error = registry
+            .get_or_create(&sid(&padded_sid(2_000_000, MAX_SID_LEN)))
+            .expect_err("a new user would exceed the limit");
+        let message = format!("{error:#}");
+        assert!(message.contains("registry") && message.contains(&LIMIT.to_string()));
+        assert_eq!(fs::read(dir.join(STORE_NAME))?, full_store);
+        assert!(!dir.join(TEMP_NAME).exists());
+
+        fs::write(dir.join(TEMP_NAME), b"sentinel")?;
+        let error = registry
+            .get_or_create(&sid(&padded_sid(2_000_000, MAX_SID_LEN)))
+            .expect_err("the oversized registry is rejected before creating a temporary file");
+        let message = format!("{error:#}");
+        assert!(message.contains("registry") && message.contains(&LIMIT.to_string()));
+        assert_eq!(fs::read(dir.join(TEMP_NAME))?, b"sentinel");
+        fs::remove_file(dir.join(TEMP_NAME))?;
+        drop(registry);
+
+        let reopened = open(&dir)?;
+        assert_eq!(reopened.epoch(), epoch);
+        assert_eq!(reopened.get_or_create(&added_user)?, issued_id);
+        assert_eq!(reopened.resolve(issued_id), Some(added_user));
+        return Ok(());
+
+        fn entry(index: u32, length: usize) -> String {
+            let sid = padded_sid(index, length);
+            format!(r#"{{"sid":"{sid}","id":"{}"}}"#, Uuid::new_v4())
+        }
+
+        fn padded_sid(index: u32, length: usize) -> String {
+            let mut sid = format!("S-1-5-21-{}", 1_000_000_000 + index);
+            let mut remaining = length - sid.len();
+            while remaining != 0 {
+                let mut digits = (remaining - 1).min(10);
+                if remaining == digits + 2 {
+                    digits -= 1;
+                }
+                sid.push('-');
+                sid.extend(std::iter::repeat_n('1', digits));
+                remaining -= digits + 1;
+            }
+            sid
+        }
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §instances
