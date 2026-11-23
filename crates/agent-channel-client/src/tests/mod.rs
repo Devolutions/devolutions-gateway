@@ -1574,6 +1574,114 @@ async fn a_full_outbound_buffer_does_not_block_reopening_with_queued_reports() -
     panic!("the report queued before the stream closed was not sent after reopening");
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+#[tokio::test]
+async fn a_full_outbound_buffer_with_a_pending_ack_does_not_block_reopening() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let renew = |reason: &str| {
+        Payload::RenewRequested(RenewRequested {
+            reason: reason.to_owned(),
+        })
+    };
+    let mut first = authority.next_opening().await.accept();
+    first.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    queue_large_inventory_reports(&channel.reporter());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let old_id = new_id();
+    first.send(&old_id, None, renew("admin")).await;
+    assert!(matches!(next_event(&mut channel).await, Event::RenewRequested { id, .. } if id == old_id));
+    channel.ack(&old_id);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The authority ends its side but leaves the request unread, so only reading the closure can end the stream.
+    first
+        .close_response(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    drop(first);
+    let mut second = authority.next_opening().await.accept();
+    second.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let new_id = new_id();
+    second.send(&new_id, None, renew("rotation")).await;
+    assert!(matches!(next_event(&mut channel).await, Event::RenewRequested { id, .. } if id == new_id));
+    channel.ack(&new_id);
+    // The reopened stream carries the queued reports and only the new acknowledgement (step 5).
+    for _ in 0..=512 {
+        let message = second.receive().await;
+        if matches!(message.payload, Some(agent_message::Payload::Ack(_))) {
+            assert_eq!(message.correlation_id, Some(new_id));
+            return Ok(());
+        }
+    }
+    panic!("the acknowledgement on the reopened stream was not sent");
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
+#[tokio::test]
+async fn a_dropped_channel_sends_a_pending_ack_before_the_queued_ones() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let renew_id = new_id();
+    stream
+        .send(
+            &renew_id,
+            None,
+            Payload::RenewRequested(RenewRequested {
+                reason: "admin".to_owned(),
+            }),
+        )
+        .await;
+    next_event(&mut channel).await;
+    let update_id = new_id();
+    stream
+        .send(
+            &update_id,
+            None,
+            Payload::ConfigUpdate(ConfigUpdate {
+                config_json: r#"{"version":1,"revision":2}"#.to_owned(),
+            }),
+        )
+        .await;
+    next_event(&mut channel).await;
+
+    // The authority stops reading, so the first acknowledgement waits for room and the second stays queued.
+    queue_large_inventory_reports(&channel.reporter());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    channel.ack(&renew_id);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    channel.ack(&update_id);
+    drop(channel);
+
+    let mut acknowledged = Vec::new();
+    loop {
+        match stream.receive_within(WAIT).await {
+            Some(Ok(Some(message))) => {
+                if matches!(message.payload, Some(agent_message::Payload::Ack(_))) {
+                    acknowledged.push(message.correlation_id);
+                }
+            }
+            end => {
+                // The agent then ends its side, which the authority reads as the end of the stream.
+                assert!(matches!(end, Some(Ok(None))), "{end:?}");
+                break;
+            }
+        }
+    }
+    assert_eq!(acknowledged, [Some(renew_id), Some(update_id)]);
+    Ok(())
+}
+
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {

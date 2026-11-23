@@ -90,29 +90,37 @@ async fn stream_once(
     while acks.try_recv().is_ok() {}
     events.send(Event::Authenticated).await.ok()?;
     let mut reports_open = true;
+    // The acknowledgement waiting for room on the stream; a closure drops it, like those of a closed stream.
+    let mut pending_ack = None;
     loop {
         tokio::select! {
-            // Acknowledgements come first, so that those queued before the caller dropped the channel are sent.
+            // Acknowledgements come first, in order, so that those queued before the caller dropped the channel are
+            // sent: the queue is not read, and thus its end not seen, until the pending one is sent.
             biased;
-            correlation_id = acks.recv() => {
+            permit = opened.outbound.clone().reserve_owned(), if pending_ack.is_some() => {
+                let ack = pending_ack.take();
+                // A stream that can't take the acknowledgement has closed, which its next message reports.
+                if let (Ok(permit), Some(ack)) = (permit, ack) {
+                    permit.send(ack);
+                }
+            }
+            correlation_id = acks.recv(), if pending_ack.is_none() => {
                 let Some(correlation_id) = correlation_id else {
                     close(opened).await;
                     return None;
                 };
-                let ack = AgentMessage {
+                pending_ack = Some(AgentMessage {
                     id: Uuid::new_v4().to_string(),
                     correlation_id: Some(correlation_id),
                     payload: Some(agent_message::Payload::Ack(Ack {})),
-                };
-                // A stream that can't take the acknowledgement has closed, which its next message reports.
-                let _ = opened.outbound.send(ack).await;
+                });
             }
             // Reserve before dequeueing so a stalled stream can close without losing a queued report.
             report = async {
                 let permit = opened.outbound.clone().reserve_owned().await.ok()?;
                 let report = reports.recv().await?;
                 Some((permit, report))
-            }, if reports_open => {
+            }, if reports_open && pending_ack.is_none() => {
                 if let Some((permit, report)) = report {
                     permit.send(report);
                 } else {
