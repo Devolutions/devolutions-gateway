@@ -453,6 +453,10 @@ impl JsonRpcMessage {
             .cloned()
             .unwrap_or_else(|| "2.0".to_owned());
 
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "JSON-RPC ids are integers in practice; the saturating cast is acceptable for echoing them back"
+        )]
         let id = obj.get("id").and_then(|v| v.get::<f64>()).map(|f| *f as i32);
 
         let method = obj.get("method").and_then(|v| v.get::<String>()).cloned();

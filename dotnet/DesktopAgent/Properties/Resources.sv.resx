@@ -54,4 +54,10 @@
   <data name="mnuServiceAvailable" xml:space="preserve">
     <value>Tjänsten körs</value>
   </data>
+  <data name="msgRemoteDesktopIntegrationFailed" xml:space="preserve">
+    <value>Integrationen med Fjärrskrivbord fungerar inte</value>
+  </data>
+  <data name="msgContactAdministrator" xml:space="preserve">
+    <value>Kontakta din administratör.</value>
+  </data>
 </root>

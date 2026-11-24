@@ -16,7 +16,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
 
         public ChannelProbeForm()
         {
-            Text = "Virtual channel diagnostics";
+            Text = "Remote Desktop integration diagnostics";
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = MinimizeBox = false;
             ShowInTaskbar = false;
@@ -87,7 +87,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             catch (Exception e)
             {
                 Program.Log.Error(e.ToString());
-                report = $"Virtual channel diagnostics failed: {e.Message}";
+                report = $"Remote Desktop integration diagnostics failed: {e.Message}";
             }
 
             if (this.IsDisposed)

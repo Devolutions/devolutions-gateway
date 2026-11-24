@@ -8,6 +8,7 @@ description = "Devolutions PEDM AppInfo service hook"
 publish = false
 
 [lints]
+workspace = true
 
 [lib]
 crate-type = ["cdylib"]

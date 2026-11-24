@@ -15,13 +15,13 @@ use win_api_wrappers::rpc::RpcServerInterfacePointer;
 
 /// https://github.com/hfiref0x/UACME/blob/master/Source/Akagi/appinfo/appinfo.idl
 #[repr(C)]
-pub struct MONITOR_POINT {
+pub(crate) struct MONITOR_POINT {
     pub MonitorLeft: u32,
     pub MonitorRight: u32,
 }
 
 #[repr(C)]
-pub struct APP_STARTUP_INFO {
+pub(crate) struct APP_STARTUP_INFO {
     pub Title: PCWSTR,
     pub X: u32,
     pub Y: u32,
@@ -36,7 +36,7 @@ pub struct APP_STARTUP_INFO {
 }
 
 #[repr(C)]
-pub struct APP_PROCESS_INFORMATION {
+pub(crate) struct APP_PROCESS_INFORMATION {
     pub ProcessHandle: HANDLE,
     pub ThreadHandle: HANDLE,
     pub ProcessId: u32,
@@ -45,7 +45,7 @@ pub struct APP_PROCESS_INFORMATION {
 
 /// Built from https://github.com/hfiref0x/UACME/blob/master/Source/Akagi/appinfo/x64/appinfo64.h
 #[expect(dead_code, reason = "type definition for future use")]
-pub type RAiLaunchAdminProcess = extern "C" fn(
+pub(crate) type RAiLaunchAdminProcess = extern "C" fn(
     async_handle: *const RPC_ASYNC_STATE,
     binding: *const RPC_SERVER_INTERFACE,
     executable_path: PCWSTR,
@@ -72,7 +72,7 @@ type RpcServerRegisterIfExHook = unsafe extern "system" fn(
     ifcallback: RPC_IF_CALLBACK_FN,
 ) -> RPC_STATUS;
 
-pub fn rpc_server_register_if_ex_hook() -> &'static GenericDetour<RpcServerRegisterIfExHook> {
+pub(crate) fn rpc_server_register_if_ex_hook() -> &'static GenericDetour<RpcServerRegisterIfExHook> {
     static HOOK: OnceLock<GenericDetour<RpcServerRegisterIfExHook>> = OnceLock::new();
 
     HOOK.get_or_init(|| {
@@ -84,7 +84,11 @@ pub fn rpc_server_register_if_ex_hook() -> &'static GenericDetour<RpcServerRegis
         // SAFETY: We assume rpcrt4.dll's RpcServerRegisterIfEx has correct signature.
         let orig = unsafe { mem::transmute::<*const c_void, RpcServerRegisterIfExHook>(orig) };
 
-        unsafe { GenericDetour::new(orig, rpc_server_register_if_ex as _).expect("RpcServerRegisterIfEx hook failed") }
+        // SAFETY: `rpc_server_register_if_ex` has the same signature as `RpcServerRegisterIfEx`.
+        unsafe {
+            GenericDetour::new(orig, rpc_server_register_if_ex as RpcServerRegisterIfExHook)
+                .expect("RpcServerRegisterIfEx hook failed")
+        }
     })
 }
 
@@ -102,11 +106,12 @@ extern "system" fn rpc_server_register_if_ex(
         handles.push(RpcServerInterfacePointer { raw });
     }
 
+    // SAFETY: Forwards the caller's arguments unchanged to the original `RpcServerRegisterIfEx`.
     unsafe { rpc_server_register_if_ex_hook().call(ifspec, mgrtypeuuid, mgrepv, flags, maxcalls, ifcallback) }
 }
 
 type FnAiEnableDesktopRpcInterface = unsafe extern "system" fn() -> RPC_STATUS;
-pub fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
+pub(crate) fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
     static FUN: OnceLock<FnAiEnableDesktopRpcInterface> = OnceLock::new();
 
     let init = || {
@@ -124,7 +129,7 @@ pub fn ai_enable_desktop_rpc_interface() -> RPC_STATUS {
 }
 
 type FnAiDisableDesktopRpcInterface = unsafe extern "system" fn();
-pub fn ai_disable_desktop_rpc_interface() {
+pub(crate) fn ai_disable_desktop_rpc_interface() {
     static FUN: OnceLock<FnAiDisableDesktopRpcInterface> = OnceLock::new();
 
     let init = || {
@@ -141,7 +146,7 @@ pub fn ai_disable_desktop_rpc_interface() {
     unsafe { FUN.get_or_init(init)() }
 }
 
-pub fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
+pub(crate) fn dump_interfaces() -> Result<Box<[RpcServerInterfacePointer]>> {
     // TODO: This is not clean. Add another mutex to guard the actual handles
     {
         let mut handles = INTERFACE_HANDLES.lock();

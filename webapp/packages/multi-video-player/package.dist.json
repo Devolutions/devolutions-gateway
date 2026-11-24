@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/multi-video-player",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Multi-segment video player with live streaming support",
   "type": "module",
   "main": "./index.js",
