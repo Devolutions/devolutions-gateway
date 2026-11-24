@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use base64::Engine as _;
-use testsuite::cli::start_dgw;
 use testsuite::dgw_config::{AgentTunnelConfig, DgwConfig};
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -41,7 +40,7 @@ async fn kdc_proxy_never_dials_the_kdc_directly_for_a_missing_explicit_agent() {
         .build()
         .init()
         .expect("init gateway config");
-    let mut gateway = start_dgw(&config).await.expect("start gateway");
+    let mut gateway = config.start().await.expect("start gateway");
     let kdc = TcpListener::bind("127.0.0.1:0").await.expect("bind fake kdc");
     let kdc_addr = kdc.local_addr().expect("read fake kdc address");
 
