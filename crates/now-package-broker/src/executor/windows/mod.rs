@@ -639,7 +639,7 @@ fn prepare_winget_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (executable, args) = command.split_first().context("empty WinGet command")?;
     let (executable, exe_guard) = user_env.map_or_else(
@@ -710,7 +710,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (_executable, args) = command.split_first().context("empty Chocolatey command")?;
     let (executable, install_root, exe_guard) =
@@ -757,7 +757,7 @@ fn prepare_vcpkg_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (executable, args) = command.split_first().context("empty vcpkg command")?;
     let executable = user_env.map_or_else(
@@ -799,7 +799,7 @@ fn prepare_cargo_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (executable, args) = command.split_first().context("empty Cargo command")?;
     let executable = user_env.map_or_else(
@@ -908,7 +908,7 @@ fn prepare_user_batch_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
     append_batch_executable(&mut script, executable)?;
     for arg in args {
         script.push(' ');
@@ -981,7 +981,7 @@ fn prepare_bun_cmd_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\ncall ");
+    script.push_str("\r\nset \"ERRORLEVEL=\"\r\ncall ");
     // `call` expands the line a second time, so percent signs and carets would not survive literally.
     if executable.contains(['%', '^']) {
         bail!("bun.cmd path cannot contain percent signs or carets");
@@ -1571,6 +1571,120 @@ mod tests {
         assert!(script.contains("\r\nWrite-Output 'héllo'"));
     }
 
+    fn manager_exit_probe() -> Vec<String> {
+        vec![
+            super::trusted_windows_powershell_executable(),
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            "exit 7".to_owned(),
+        ]
+    }
+
+    fn assert_batch_preserves_manager_exit(command: &super::PreparedCommand) {
+        let run = |shadow_errorlevel: bool| {
+            let mut process = std::process::Command::new(&command.args()[0]);
+            process.args(&command.args()[1..]);
+            if shadow_errorlevel {
+                process.env("ERRORLEVEL", "0");
+            } else {
+                process.env_remove("ERRORLEVEL");
+            }
+            process.status().expect("run generated batch").code()
+        };
+        assert_eq!(run(false), Some(7), "the manager probe must exit with 7");
+        assert_eq!(run(true), Some(7), "an inherited ERRORLEVEL must not mask the exit");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn winget_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = super::prepare_winget_script(&manager_exit_probe(), Some(temp_dir.path()), None, false)
+            .expect("prepare WinGet batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn winget_batch_reports_failure_when_the_manager_cannot_start() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let missing = temp_dir.path().join("missing-winget.exe");
+        let command =
+            super::prepare_winget_script(&[missing.display().to_string()], Some(temp_dir.path()), None, false)
+                .expect("prepare WinGet batch");
+        let output = std::process::Command::new(&command.args()[0])
+            .args(&command.args()[1..])
+            .env("ERRORLEVEL", "0")
+            .output()
+            .expect("run generated batch");
+        assert_eq!(output.status.code(), Some(9009));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn cargo_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = super::prepare_cargo_script(&manager_exit_probe(), Some(temp_dir.path()), None)
+            .expect("prepare Cargo batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn vcpkg_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = super::prepare_vcpkg_script(&manager_exit_probe(), Some(temp_dir.path()), None)
+            .expect("prepare vcpkg batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn user_alias_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let probe = manager_exit_probe();
+        let command = super::prepare_user_batch_script(&probe[0], &probe[1..], Some(temp_dir.path()))
+            .expect("prepare user alias batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: mutant an inherited ERRORLEVEL masks a nonzero manager exit
+    #[test]
+    fn bun_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let probe = temp_dir.path().join("bun.cmd");
+        std::fs::write(&probe, "@exit /b 7\r\n").expect("write Bun probe");
+        let command = prepare_bun_cmd_script(&probe.display().to_string(), &[], Some(temp_dir.path()))
+            .expect("prepare Bun batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: mutant an inherited ERRORLEVEL masks a nonzero manager exit
+    #[test]
+    fn chocolatey_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let install_root = temp_dir.path().join("chocolatey");
+        let bin = install_root.join("bin");
+        std::fs::create_dir_all(&bin).expect("create fake Chocolatey bin");
+        std::fs::copy(super::trusted_windows_powershell_executable(), bin.join("choco.exe"))
+            .expect("create exit-code probe");
+        let command = vec![
+            "choco.exe".to_owned(),
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            "exit 7".to_owned(),
+        ];
+        let command = prepare_chocolatey_script_in_with_default_install_root(
+            &command,
+            Some(temp_dir.path()),
+            None,
+            &install_root,
+            false,
+        )
+        .expect("prepare Chocolatey batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
     #[test]
     fn winget_command_uses_batch_wrapper_for_utf8_output() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
@@ -1726,7 +1840,7 @@ mod tests {
         assert_eq!(command.args()[4], "/C");
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
-        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\ncall "));
+        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"ERRORLEVEL=\"\r\ncall "));
         assert!(script.contains(&format!(
             "\"{}\" \"add\" \"typescript@5.7.3\" \"--global\"",
             bun_path.display()

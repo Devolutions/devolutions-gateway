@@ -438,6 +438,9 @@ The grant client accepts output only after a valid `Hello` and `Finish` with no 
 The v1 event stream cannot establish completeness: another reader can consume whole frames without leaving a gap visible to the client.
 Output never establishes a package outcome; when the operation's verdict depends on output, the Agent reports `UNKNOWN`.
 When the Broker record shows that the process exited, its exit code establishes the outcome.
+This rule applies only when the Broker launches the manager directly or through a wrapper that returns exactly the manager's exit code when it starts and a nonzero code when it cannot start.
+Otherwise the Agent reports `UNKNOWN`.
+A nonzero code from such a wrapper may mean that the manager could not start, such as 9009 from `cmd.exe`, and is reported as a failure with the same text.
 Exit code 0 is a known success.
 Any other exit code is a known failure whose error is exactly `<manager> exited with code <N>`.
 `<manager>` is the request's `manager` string, unchanged.
@@ -454,7 +457,9 @@ After a grant has been made available to UniGetUI, the Agent reports an unverifi
 The in-memory Broker record need not survive a restart.
 The Agent waits up to 60 seconds from dispatch to observe a Broker record.
 When the first record observed within that wait is `Consumed`, the Agent waits up to 60 seconds from that observation for `Started` or `Exited`, without exceeding 30 minutes from dispatch.
-Once the Broker proves the process started, the Agent waits for it to exit while its record remains available, until the Agent stops or 30 minutes have elapsed since dispatch began.
+Once the Broker proves the process started, the Agent waits for it to exit while its record remains available and has not become `Unobservable`, until the Agent stops or 30 minutes have elapsed since dispatch began.
+When an execution fails or is cancelled without a recorded exit, the Broker marks its retained record `Unobservable`.
+The Agent reports `UNKNOWN` when it observes `Unobservable`.
 The Agent durably records observed start evidence before continuing to wait for termination.
 A wait that ends without evidence of exit reports `UNKNOWN`.
 
