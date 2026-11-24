@@ -157,12 +157,16 @@ mod tests {
                 description: "Listed files".to_owned(),
                 object: Some("/var/log".to_owned()),
                 parameters: BTreeMap::from([("Command".to_owned(), "ls".to_owned())]),
+                impact: None,
+                sensitive_data: false,
             },
             Action {
                 offset: Duration::from_secs(62),
                 description: "Closed the shell".to_owned(),
                 object: None,
                 parameters: BTreeMap::new(),
+                impact: None,
+                sensitive_data: false,
             },
         ];
 

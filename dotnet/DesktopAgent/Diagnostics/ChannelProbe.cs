@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
@@ -12,26 +13,31 @@ namespace Devolutions.Agent.Desktop.Diagnostics
     {
         Pass,
         Fail,
+        Warning,
         Skipped,
     }
 
     internal sealed class ProbeResult
     {
-        public ProbeResult(string channel, string expected, string actual, ProbeStatus status)
+        public ProbeResult(string name, string expected, string actual, ProbeStatus status, string problem = null)
         {
-            this.Channel = channel;
+            this.Name = name;
             this.Expected = expected;
             this.Actual = actual;
             this.Status = status;
+            this.Problem = problem;
         }
 
-        public string Channel { get; }
+        public string Name { get; }
 
         public string Expected { get; }
 
         public string Actual { get; }
 
         public ProbeStatus Status { get; }
+
+        // A short statement of what is wrong, for a notification; null when the check passed.
+        public string Problem { get; }
     }
 
     /// <summary>
@@ -87,7 +93,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             bool remote = IsRdpSession();
 
             StringBuilder report = new StringBuilder();
-            report.AppendLine("Virtual channel diagnostics");
+            report.AppendLine("Remote Desktop integration diagnostics");
             report.AppendLine($"Time:     {DateTime.Now:yyyy-MM-dd HH:mm:ss zzz}");
             report.AppendLine($"Session:  {sessionId} ({(remote ? "RDP" : "console")})");
             report.AppendLine($"User:     {WindowsIdentity.GetCurrent().Name}");
@@ -95,23 +101,23 @@ namespace Devolutions.Agent.Desktop.Diagnostics
             report.AppendLine($"OS:       {Environment.OSVersion.Version}");
             report.AppendLine();
 
-            if (!remote)
-            {
-                report.AppendLine("Not run: virtual channels are only available in a remote desktop session.");
+            List<ProbeResult> results = new List<ProbeResult>(DeviceRedirectorChecks.Run());
 
-                return report.ToString();
+            if (remote)
+            {
+                results.Add(Probe(BuiltInChannel, expectedError: 0));
+                results.Add(ProbeNow(sessionId));
+                results.Add(Probe(UnregisteredChannel, expectedError: ErrorGenFailure));
             }
-
-            ProbeResult[] results =
+            else
             {
-                Probe(BuiltInChannel, expectedError: 0),
-                ProbeNow(sessionId),
-                Probe(UnregisteredChannel, expectedError: ErrorGenFailure),
-            };
+                report.AppendLine("Channel checks not run: they are only available in a remote desktop session.");
+                report.AppendLine();
+            }
 
             foreach (ProbeResult result in results)
             {
-                report.AppendLine(result.Channel);
+                report.AppendLine(result.Name);
                 report.AppendLine($"  Expected: {result.Expected}");
                 report.AppendLine($"  Result:   {result.Actual}");
                 report.AppendLine($"  Status:   {result.Status.ToString().ToUpperInvariant()}");
@@ -126,7 +132,7 @@ namespace Devolutions.Agent.Desktop.Diagnostics
         }
 
         // The protocol type, unlike SM_REMOTESESSION, also identifies RDP sessions that use RemoteFX vGPU.
-        private static bool IsRdpSession()
+        internal static bool IsRdpSession()
         {
             if (!WTSQuerySessionInformationW(WtsCurrentServerHandle, WtsCurrentSession, WtsClientProtocolType, out IntPtr buffer, out _))
             {

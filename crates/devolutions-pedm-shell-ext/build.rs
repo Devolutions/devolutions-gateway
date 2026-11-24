@@ -1,5 +1,5 @@
 #[cfg(target_os = "windows")]
-fn generate_version_rc() -> String {
+fn generate_version_rc() -> Result<String, std::env::VarError> {
     use std::env;
 
     let output_name = "DevolutionsPedmShellExt";
@@ -7,7 +7,7 @@ fn generate_version_rc() -> String {
     let company_name = "Devolutions Inc.";
     let legal_copyright = format!("Copyright 2020-2024 {}", company_name);
 
-    let version_number = env::var("CARGO_PKG_VERSION").unwrap() + ".0";
+    let version_number = format!("{}.0", env::var("CARGO_PKG_VERSION")?);
     let version_commas = version_number.replace('.', ",");
     let file_description = output_name;
     let file_version = version_number.clone();
@@ -64,7 +64,7 @@ END"#,
         product_version = product_version
     );
 
-    version_rc
+    Ok(version_rc)
 }
 
 #[cfg(target_os = "windows")]
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
     use fs_extra::dir::CopyOptions;
 
     let target = target_dir()?;
-    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
 
     let options = CopyOptions {
         overwrite: true,
@@ -88,17 +88,13 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 
     fs::copy(crate_dir.join("AppxManifest.xml"), target.join("AppxManifest.xml"))?;
 
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR")?;
     let version_rc_file = format!("{}/version.rc", out_dir);
-    let version_rc_data = generate_version_rc();
-    fs::write(&version_rc_file, version_rc_data).unwrap();
+    let version_rc_data = generate_version_rc()?;
+    fs::write(&version_rc_file, version_rc_data)?;
 
-    embed_resource::compile(&version_rc_file, embed_resource::NONE)
-        .manifest_required()
-        .unwrap();
-    embed_resource::compile("resources.rc", embed_resource::NONE)
-        .manifest_required()
-        .unwrap();
+    embed_resource::compile(&version_rc_file, embed_resource::NONE).manifest_required()?;
+    embed_resource::compile("resources.rc", embed_resource::NONE).manifest_required()?;
 
     Ok(())
 }

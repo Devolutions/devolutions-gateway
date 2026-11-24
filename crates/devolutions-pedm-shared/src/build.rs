@@ -4,9 +4,12 @@ use std::io::{Error, ErrorKind, Result};
 use std::path::PathBuf;
 
 pub fn target_dir() -> Result<PathBuf> {
-    let mut dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let mut dir = PathBuf::from(env::var("OUT_DIR").map_err(Error::other)?);
 
-    let target_dirs = [OsString::from(env::var("TARGET").unwrap()), OsString::from("target")];
+    let target_dirs = [
+        OsString::from(env::var("TARGET").map_err(Error::other)?),
+        OsString::from("target"),
+    ];
 
     loop {
         if dir

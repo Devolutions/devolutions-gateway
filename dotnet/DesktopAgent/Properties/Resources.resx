@@ -159,4 +159,10 @@
   <data name="mnuServiceAvailable" xml:space="preserve">
     <value>Service running</value>
   </data>
+  <data name="msgRemoteDesktopIntegrationFailed" xml:space="preserve">
+    <value>Remote Desktop integration is not functional</value>
+  </data>
+  <data name="msgContactAdministrator" xml:space="preserve">
+    <value>Contact your administrator.</value>
+  </data>
 </root>

@@ -118,31 +118,48 @@ interface SourceMetadata {
 }
 ```
 
-Times use each clip's `SourceMetadata.duration`, not its reported media duration, and clips form a back-to-back timeline.
+The global timeline uses each clip's `SourceMetadata.duration` and places clips back to back.
+If video ends early, its final frame is held while recording time continues to the declared clip boundary.
+Pause freezes this clock; Play resumes it without restarting the exhausted video.
+Observed local time and finite media duration come from the loaded clip.
+The read-only `playing` getter reports logical playback, including held-frame intervals; do not infer recording playback from the native video's paused or ended state.
 Playlist metadata is fixed for each `play()` initialization; call `play()` again to apply changes.
 Durations must be finite and nonnegative.
 Source URLs must be nonempty strings, not whitespace.
-Before a playlist is initialized, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, and `seek()` and `resume()` resolve without loading a source.
+Before `play()` initializes a playlist, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, `playing` is `false`, and `seek()` and `resume()` resolve without loading a source.
+While the first source loads after `play()`, `currentClipIndex` remains `-1` until metadata arrives.
+Later source changes keep the previous index until new metadata arrives.
 After disposal, the getters return those same empty values and `seek()` and `resume()` reject with `InvalidStateError`.
 
 `seek(seconds): Promise<void>` clamps finite times to `[0, duration]` and rejects non-finite input with `RangeError`.
 An exact clip boundary selects the next nonempty clip; the playlist endpoint selects the end of the last clip.
-The promise resolves after the offset is applied and playback matches the latest Play/Pause command.
-The clock reports the requested target during loading; await the promise before treating the seek as complete.
+The local target is limited to the smaller of the declared and finite media durations.
+Seeking past the native endpoint retains the requested recording position while showing that endpoint's frame.
+The promise resolves after the current source reports the seek complete, current media data is available, and playback matches the latest Play/Pause command.
+While seeking, the clock reports the last observed position rather than the requested target.
 Calling `pause()` or using the built-in Play/Pause controls during loading updates the pending playback state.
 Loading or playback errors reject the promise, including seeking within a clip that has already failed to load.
 An unsupported initial source rejects `play()`; seeking to an unsupported clip rejects `seek()` without replacing the current source.
 A newer seek, a replacement playlist, or disposal rejects an unfinished seek with `AbortError`.
 
 `resume(): Promise<void>` starts the current playlist at its current position without reinitializing it.
+After natural completion, the last clip remains loaded on its final frame and `resume()` restarts the playlist from the beginning.
+A paused seek to the end does not count as natural completion.
+At a paused seek to the declared clip endpoint, `resume()` and the Play control leave the clip paused; seek elsewhere to play.
 For **Play from event**, await `seek(eventPosition)` and then await `resume()`.
 Calling `resume()` during a seek updates its pending playback intent.
-The promise resolves when the playback request succeeds; it does not wait for a pending seek's offset to be applied.
+The promise resolves when playback succeeds or remains paused at a seek endpoint; it does not wait for a pending seek's offset to be applied.
 A later Pause command, playlist replacement, or disposal rejects an unfinished resume with `AbortError`.
 Media loading and autoplay errors reject the promise.
 
-`timeupdate` is a `CustomEvent<{ currentTime: number; clipIndex: number }>` dispatched when the clock updates, including initialization and seeking.
-`clipchange` is a `CustomEvent<{ clipIndex: number }>` dispatched when a playlist is initialized or the active clip changes.
+`timeupdate` and `clipchange` carry the exported `PlaybackObservation` in their `CustomEvent.detail`.
+Its fields are `clipIndex`, `localTime`, optional finite native `clipDuration`, global `currentTime`, and `readiness`.
+Readiness is `loading`, `seeking`, `ready`, or `ended`.
+`ready` means current media data is available, not that a picture has been presented.
+`clipchange` is dispatched after metadata for the active source is available.
+`timeupdate` reports recording positions, including the final position before a source transition.
+During a held-frame interval, `currentTime` advances while `localTime` remains at the native endpoint, with `ready` readiness until the declared playlist end.
+While a source loads, the last coherent observation is retained with `loading` readiness; a failed load remains non-ready.
 Both events are dispatched on the custom element and do not bubble.
 Use non-capturing listeners to receive typed custom events; capturing `timeupdate` listeners can also receive native video events without `detail`.
 

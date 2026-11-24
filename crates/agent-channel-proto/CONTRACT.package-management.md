@@ -182,11 +182,15 @@ An unlisted command receives `UnsupportedCommand` without starting work.
 | `RescanInventory` | none | `{}` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
-`GetInventorySnapshot.managers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
-`executablePath` and `executableArguments` are empty strings.
-`health.state` is `unknown`, `health.needsAttention` is false, `health.failingListing` and `health.reason` are null, and `health.consecutiveFailures` is zero.
-Each of `health.search`, `health.installed` and `health.updates` has null `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason`; false `lastFailureWasTimeout`; zero `consecutiveFailures`; and an empty `recentDurationsMs` array.
-These redactions keep executable paths, arguments and captured health output from reaching the Agent.
+Each `GetInventorySnapshot.managers` item has exactly the members `name`, `displayName`, `enabled`, `ready`, `notificationsSuppressed`, `executablePath`, `executableArguments`, `capabilities` and `health`.
+`name` and `displayName` are strings, and `enabled`, `ready` and `notificationsSuppressed` are booleans.
+`executablePath` and `executableArguments` are always empty strings.
+`capabilities` has exactly the boolean members `canRunAsAdmin`, `canSkipIntegrityChecks`, `canRunInteractively`, `canRemoveDataOnUninstall`, `canDownloadInstaller`, `supportsCustomVersions`, `supportsCustomArchitectures`, `supportsCustomScopes`, `supportsPreRelease`, `supportsCustomLocations`, `supportsCustomSources` and `mustInstallSourcesAsAdmin`.
+`health` has exactly the members `state`, `needsAttention`, `failingListing`, `reason`, `consecutiveFailures`, `search`, `installed` and `updates`, always at their unknown defaults.
+`state` is `unknown`, `needsAttention` is false, `failingListing` and `reason` are null, and `consecutiveFailures` is zero.
+Each of `search`, `installed` and `updates` has exactly the members `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastFailureWasTimeout`, `consecutiveFailures`, `failureStreakStartUtc`, `lastPackageCount`, `lastFastRepairUtc`, `lastFastRepairReason` and `recentDurationsMs`.
+In each, `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `failureStreakStartUtc`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason` are null, `lastFailureWasTimeout` is false, `consecutiveFailures` is zero, and `recentDurationsMs` is an empty array.
+UniGetUI sends no other manager member, so executable paths, arguments and captured health output never reach the Agent.
 
 The `sources`, `installedPackages` and `updates` arrays use the item shapes of `GET /uniget/v1/sources`, `GET /uniget/v1/packages/installed` and `GET /uniget/v1/packages/updates`, respectively.
 The source-safety rules in `CONTRACT.package-management.md §inventory` apply.

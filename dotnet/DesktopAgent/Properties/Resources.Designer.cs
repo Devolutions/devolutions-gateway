@@ -185,5 +185,23 @@ namespace Devolutions.Agent.Desktop.Properties {
                 return ResourceManager.GetString("msgUnexpectedErrorDescription", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Remote Desktop integration is not functional.
+        /// </summary>
+        internal static string msgRemoteDesktopIntegrationFailed {
+            get {
+                return ResourceManager.GetString("msgRemoteDesktopIntegrationFailed", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Contact your administrator..
+        /// </summary>
+        internal static string msgContactAdministrator {
+            get {
+                return ResourceManager.GetString("msgContactAdministrator", resourceCulture);
+            }
+        }
     }
 }
