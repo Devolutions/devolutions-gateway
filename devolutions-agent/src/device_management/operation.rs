@@ -1694,6 +1694,24 @@ mod tests {
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn only_managers_with_reliable_launch_paths_trust_exit_codes() {
+        for manager in SUPPORTED_MANAGERS {
+            let trusted = matches!(
+                manager,
+                ManagerName::Winget | ManagerName::Cargo | ManagerName::Dotnet | ManagerName::Pip | ManagerName::Vcpkg
+            );
+            let name = manager.to_string();
+            let expected = if trusted {
+                Outcome::Succeeded
+            } else {
+                Outcome::Unknown
+            };
+            assert_eq!(outcome_for_exit(&name, 0), expected, "{name}");
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
     async fn started_operation_stops_at_operation_deadline() -> anyhow::Result<()> {
         let SentOperation {

@@ -439,6 +439,7 @@ The v1 event stream cannot establish completeness: another reader can consume wh
 Output never establishes a package outcome; when the operation's verdict depends on output, the Agent reports `UNKNOWN`.
 When the Broker record shows that the process exited, its exit code establishes the outcome.
 This rule applies only when the Broker launches the manager directly or through a wrapper that returns exactly the manager's exit code when it starts and a nonzero code when it cannot start.
+Because the record does not identify the launch path, the rule applies to a manager only when every Broker launch path for that manager meets this condition.
 Otherwise the Agent reports `UNKNOWN`.
 A nonzero code from such a wrapper may mean that the manager could not start, such as 9009 from `cmd.exe`, and is reported as a failure with the same text.
 Exit code 0 is a known success.
