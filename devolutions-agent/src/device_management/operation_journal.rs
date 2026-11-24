@@ -349,7 +349,7 @@ impl OperationJournal {
         operation_id.is_empty() || self.membership.load().names.contains(&record_name(operation_id))
     }
 
-    #[cfg(any(windows, test))]
+    #[cfg(windows)]
     pub(super) fn is_unavailable(&self) -> bool {
         self.unavailable.load(Ordering::Acquire)
     }
