@@ -6,6 +6,8 @@ mod operation;
 #[cfg(any(windows, test))]
 mod operation_journal;
 #[cfg(any(windows, test))]
+mod rescan;
+#[cfg(any(windows, test))]
 mod unigetui;
 #[cfg(any(windows, test))]
 mod user_registry;

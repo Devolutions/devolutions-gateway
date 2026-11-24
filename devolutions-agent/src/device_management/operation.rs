@@ -12,6 +12,7 @@ use agent_channel_proto::{
     PackageOperationRequest, PackageOperationResult, PackageOperationStatus, PackageOperationType,
 };
 use devolutions_gateway_task::ShutdownSignal;
+use futures::FutureExt as _;
 use now_package_broker::registration::RequestError;
 use now_package_broker::remote_grant::{GrantSpec, IssuedGrant, OutcomeSummary, RemoteGrantStore};
 use now_policy_api::{Elevation, ManagerName, Operation, PackageIdentifier, Scope, VersionString};
@@ -439,6 +440,9 @@ impl Coordinator {
         Fut: Future<Output = Settled> + Send + 'static,
     {
         let name = record_name(&request.operation_id);
+        // The operation gives the permit back once its completion write returned.
+        // Until then it stays here, so that the cleanup of an interrupted operation still runs with it.
+        let worker = WorkerSlot::new(Mutex::new(Some(worker)));
         let admission = Arc::clone(&self.admission)
             .acquire_owned()
             .await
@@ -475,6 +479,7 @@ impl Coordinator {
                     authority_id: authority_id.clone(),
                     request: request.clone(),
                     armed: true,
+                    worker: Arc::clone(&worker),
                 };
                 self.running(&name);
                 drop(admission);
@@ -591,12 +596,17 @@ struct Completion {
     durably_recorded: bool,
 }
 
+/// The worker permit of an admitted operation, shared by its admission and its task.
+type WorkerSlot = Arc<Mutex<Option<OwnedSemaphorePermit>>>;
+
 /// An admitted operation whose in-flight record must end, even when its task panics or is dropped.
 struct Pending {
     journal: Arc<OperationJournal>,
     authority_id: String,
     request: PackageOperationRequest,
     armed: bool,
+    /// Emptied once the completion write returned, so that what follows the record holds no operation worker.
+    worker: WorkerSlot,
 }
 
 impl Pending {
@@ -629,6 +639,7 @@ impl Pending {
     )]
     async fn finish_with_durability(mut self, outcome: Outcome, started: bool) -> Completion {
         let recorded = outcome.clone();
+        let worker = Arc::clone(&self.worker);
         let written = tokio::task::spawn_blocking(move || {
             let start_recorded = if started {
                 self.journal.mark_started(&self.authority_id, &self.request)
@@ -644,6 +655,20 @@ impl Pending {
             (start_recorded, result)
         })
         .await;
+        // INVARIANT: An operation task without its worker permit holds a waiting-rescan permit or awaits nothing
+        // until it returns.
+        // The permit is given back only here, once the completion write returned.
+        // The rescan wait, the only thing awaited afterwards, takes its permit first.
+        // UNTESTED: An operation task cancelled after this point, as when the runtime shuts down during the rescan
+        // wait, leaves its admission to clean up without a worker permit.
+        // The cleanup write is then refused, with an error log, because the record already has its outcome.
+        // The journal wait returns that outcome, or an unknown one when the runtime no longer runs blocking tasks.
+        // No permit bounds that journal I/O, which is acceptable only at shutdown.
+        // The recorded result must not be replaced by an unknown one.
+        // The tests interrupt a recorded operation only with a panic.
+        // Check that a cancellation still reports the recorded result, and that nothing else cancels the task while
+        // the Agent keeps running, when changing this.
+        drop(worker.lock().take());
         match written {
             Ok((start_recorded, result)) => {
                 let durably_recorded = result.is_ok();
@@ -745,23 +770,81 @@ async fn execute(context: DeviceManagementContext, pending: Pending) -> Settled 
     );
     // UNTESTED: Each operation ID reaches at most one endpoint, even on duplicate requests or delivery errors.
     // This prevents duplicate side effects; count dispatches for duplicates and failed delivery when changing this path.
-    let mut may_have_been_sent = false;
-    let completion = finish_sent(
+    // UNTESTED: The rescan is asked of the endpoint that carried the request, only while remote inventory is
+    // enabled, with the limits of the one dispatch instant.
+    // Another endpoint would rescan another user's instance, a disabled inventory must cause no scan, and a second
+    // clock would hold the result past its deadline.
+    // The tests cannot build a registered endpoint, so none reaches this call.
+    // Check that the request and the rescan name the same `endpoint`, that `enabled` is the context's
+    // remote-inventory setting, and that the instant is taken once, right before the request.
+    finish_dispatched(
         pending,
         &broker.remote_grants,
         &issued,
         context.shutdown(),
-        track_delivery(
-            &mut may_have_been_sent,
-            endpoint.request("ExecutePackageOperation", arguments),
-        ),
+        endpoint.request("ExecutePackageOperation", arguments),
+        WaitLimits::after_dispatch(Instant::now()),
+        RescanAfter {
+            enabled: context.remote_inventory_enabled(),
+            endpoint: &endpoint,
+            waiting: super::rescan::waiting_rescans(),
+        },
+    )
+    .await
+}
+
+/// Whether and where the rescan that follows a dispatched operation is requested.
+struct RescanAfter<'a, E> {
+    /// Tells whether remote inventory is enabled, without which no rescan is requested.
+    enabled: bool,
+    /// The connection that carried the operation.
+    endpoint: &'a E,
+    /// The permits of the operations that wait for a rescan.
+    waiting: &'a Semaphore,
+}
+
+/// Settles an operation whose request `delivery` dispatches, then waits for UniGetUI to rescan.
+///
+/// The rescan is requested only once the journal holds the final result, and only when the request may have been
+/// written.
+/// Its outcome never changes the result, which is returned as recorded.
+/// The wait holds no operation worker, because `pending` gives its permit back once the result is recorded.
+async fn finish_dispatched<E: super::rescan::RescanEndpoint>(
+    pending: Pending,
+    grants: &RemoteGrantStore,
+    issued: &IssuedGrant,
+    shutdown: Option<ShutdownSignal>,
+    delivery: impl Future<Output = anyhow::Result<serde_json::Value>>,
+    limits: WaitLimits,
+    rescan: RescanAfter<'_, E>,
+) -> Settled {
+    // The rescan wait ends at the operation's own deadline, so both are measured from the one dispatch instant.
+    let rescan_deadline = limits.operation_deadline;
+    let mut may_have_been_sent = false;
+    // The outcome wait consumes its own signal, so a shutdown that ended it is still seen below.
+    let completion = finish_sent_until(
+        pending,
+        grants,
+        issued,
+        shutdown.clone(),
+        track_delivery(&mut may_have_been_sent, delivery),
+        limits,
     )
     .await;
-    if completion.durably_recorded && may_have_been_sent {
-        // UNTESTED: This is the post-journal refresh seam for the selected operation endpoint.
-        // A refresh must not target another user or run after a failed journal write.
-        // Check the endpoint and both conditions when adding it.
-        let _endpoint = &endpoint;
+    if completion.durably_recorded && may_have_been_sent && rescan.enabled {
+        let stopping = async {
+            match shutdown {
+                Some(mut signal) => signal.wait().await,
+                None => std::future::pending().await,
+            }
+        };
+        let wait = super::rescan::after_operation(rescan.waiting, rescan.endpoint, rescan_deadline, stopping);
+        // The result is recorded, so a panic in the wait must not interrupt the operation's task.
+        // Its admission would otherwise clean up after it, with journal I/O that no permit bounds, and log a
+        // recorded operation as interrupted.
+        if std::panic::AssertUnwindSafe(wait).catch_unwind().await.is_err() {
+            error!("Waiting for the UniGetUI rescan panicked");
+        }
     }
     completion.settled
 }
@@ -780,33 +863,21 @@ async fn track_delivery(
     response
 }
 
-async fn finish_sent(
-    pending: Pending,
-    grants: &RemoteGrantStore,
-    issued: &IssuedGrant,
-    shutdown: Option<ShutdownSignal>,
-    delivery: impl Future<Output = anyhow::Result<serde_json::Value>>,
-) -> Completion {
-    let dispatched_at = Instant::now();
-    finish_sent_until(
-        pending,
-        grants,
-        issued,
-        shutdown,
-        delivery,
-        WaitLimits {
-            start_deadline: dispatched_at + START_WAIT,
-            operation_deadline: dispatched_at + OPERATION_WAIT,
-            consumed_grace: START_WAIT,
-        },
-    )
-    .await
-}
-
 struct WaitLimits {
     start_deadline: Instant,
     operation_deadline: Instant,
     consumed_grace: Duration,
+}
+
+impl WaitLimits {
+    /// Returns the limits of an operation whose request is dispatched at `dispatched_at`.
+    fn after_dispatch(dispatched_at: Instant) -> Self {
+        Self {
+            start_deadline: dispatched_at + START_WAIT,
+            operation_deadline: dispatched_at + OPERATION_WAIT,
+            consumed_grace: START_WAIT,
+        }
+    }
 }
 
 async fn finish_sent_until(
@@ -947,11 +1018,13 @@ pub(super) async fn run(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
     use now_package_broker::remote_grant::{ExecutionRecord, VerifiedCaller};
     use now_policy_api as api;
 
+    use super::super::rescan::RescanEndpoint;
     use super::super::test_tempdir;
     use super::*;
 
@@ -1001,6 +1074,7 @@ mod tests {
             authority_id: "authority".to_owned(),
             request: request.clone(),
             armed: true,
+            worker: WorkerSlot::default(),
         };
         let sid = Sid::from_well_known(windows::Win32::Security::WinWorldSid, None).expect("well-known SID exists");
         let plan = Plan::parse(&request).expect("request is valid");
@@ -1128,6 +1202,25 @@ mod tests {
         drop(root);
         assert!(!sent_root.exists(), "sent fixture retained {sent_root:?}");
         Ok(())
+    }
+
+    /// Settles a sent operation with the limits of a request dispatched now.
+    async fn finish_sent(
+        pending: Pending,
+        grants: &RemoteGrantStore,
+        issued: &IssuedGrant,
+        shutdown: Option<ShutdownSignal>,
+        delivery: impl Future<Output = anyhow::Result<serde_json::Value>>,
+    ) -> Completion {
+        finish_sent_until(
+            pending,
+            grants,
+            issued,
+            shutdown,
+            delivery,
+            WaitLimits::after_dispatch(Instant::now()),
+        )
+        .await
     }
 
     async fn tracked_delivery_result(
@@ -3213,6 +3306,7 @@ mod tests {
                             authority_id: "authority".to_owned(),
                             request: interrupted,
                             armed: true,
+                            worker: WorkerSlot::default(),
                         });
                         let _ = dropped.send(());
                     })
@@ -3474,6 +3568,7 @@ mod tests {
             authority_id: "authority".to_owned(),
             request: request.clone(),
             armed: true,
+            worker: WorkerSlot::default(),
         });
 
         let settled = journal
@@ -3534,6 +3629,7 @@ mod tests {
             authority_id: "authority".to_owned(),
             request,
             armed: true,
+            worker: WorkerSlot::default(),
         };
 
         let settled = pending.finish(failure("not dispatched"), false).await;
@@ -3541,5 +3637,618 @@ mod tests {
         assert_eq!(settled.outcome, Outcome::Unknown);
         drop(journal);
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// A rescan endpoint that runs `on_request` when a rescan is requested, then gives `answer` or never answers.
+    struct FakeRescan<F> {
+        requests: AtomicU32,
+        on_request: F,
+        answer: Option<Result<(), &'static str>>,
+    }
+
+    impl<F: Fn()> FakeRescan<F> {
+        fn new(answer: Option<Result<(), &'static str>>, on_request: F) -> Self {
+            Self {
+                requests: AtomicU32::new(0),
+                on_request,
+                answer,
+            }
+        }
+
+        fn requests(&self) -> u32 {
+            self.requests.load(Ordering::SeqCst)
+        }
+    }
+
+    impl<F: Fn()> RescanEndpoint for FakeRescan<F> {
+        async fn rescan(&self) -> anyhow::Result<()> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            (self.on_request)();
+            match self.answer {
+                Some(answer) => answer.map_err(anyhow::Error::msg),
+                None => std::future::pending().await,
+            }
+        }
+    }
+
+    /// The result of an operation whose Broker process exited with code 0.
+    fn succeeded() -> Settled {
+        Settled {
+            outcome: Outcome::Succeeded,
+            execution_started: Some(true),
+        }
+    }
+
+    /// Reports the Broker process exit with `exit_code` once the request is dispatched, then yields `response`.
+    async fn exiting_delivery_with(
+        record: ExecutionRecord,
+        exit_code: i32,
+        response: anyhow::Result<serde_json::Value>,
+    ) -> anyhow::Result<serde_json::Value> {
+        assert!(record.mark_started());
+        assert!(record.mark_exited(exit_code));
+        response
+    }
+
+    /// Reports a successful Broker process exit once the request is dispatched, then yields `response`.
+    async fn exiting_delivery(
+        record: ExecutionRecord,
+        response: anyhow::Result<serde_json::Value>,
+    ) -> anyhow::Result<serde_json::Value> {
+        exiting_delivery_with(record, 0, response).await
+    }
+
+    /// Settles a dispatched operation, giving up on a Broker record that does not advance after 300 milliseconds.
+    ///
+    /// A rescan may hold the result for three minutes, six times the guard, so only an answer or a shutdown ends
+    /// its wait in time.
+    async fn dispatched_result<E: RescanEndpoint>(
+        pending: Pending,
+        grants: &RemoteGrantStore,
+        issued: &IssuedGrant,
+        shutdown: Option<ShutdownSignal>,
+        delivery: impl Future<Output = anyhow::Result<serde_json::Value>>,
+        remote_inventory_enabled: bool,
+        endpoint: &E,
+    ) -> anyhow::Result<Settled> {
+        let now = Instant::now();
+        let waiting = Semaphore::new(1);
+        let settled = tokio::time::timeout(
+            SETTLE_GUARD,
+            finish_dispatched(
+                pending,
+                grants,
+                issued,
+                shutdown,
+                delivery,
+                WaitLimits {
+                    start_deadline: now + Duration::from_millis(300),
+                    operation_deadline: now + Duration::from_secs(30 * 60),
+                    consumed_grace: Duration::from_millis(300),
+                },
+                RescanAfter {
+                    enabled: remote_inventory_enabled,
+                    endpoint,
+                    waiting: &waiting,
+                },
+            ),
+        )
+        .await?;
+        Ok(settled)
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[rstest::rstest]
+    #[case::success_and_rescan_completed(0, Outcome::Succeeded, Ok(()))]
+    #[case::success_and_rescan_failed(0, Outcome::Succeeded, Err("rescan failed"))]
+    #[case::failure_and_rescan_completed(
+        1,
+        Outcome::Failed { error: "Winget exited with code 1".to_owned() },
+        Ok(())
+    )]
+    #[tokio::test]
+    async fn finalized_operation_requests_one_rescan_after_its_result_is_recorded(
+        #[case] exit_code: i32,
+        #[case] outcome: Outcome,
+        #[case] answer: Result<(), &'static str>,
+    ) -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        let recorded_at_request = std::cell::RefCell::new(Vec::new());
+        let endpoint = FakeRescan::new(Some(answer), || {
+            let admission = journal.admit("authority", &request).expect("journal is readable");
+            recorded_at_request.borrow_mut().push(admission);
+        });
+
+        let delivery = exiting_delivery_with(record, exit_code, Ok(serde_json::json!({"status": "Unknown"})));
+        let settled = dispatched_result(pending, &grants, &issued, None, delivery, true, &endpoint).await?;
+
+        let expected = Settled {
+            outcome,
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(recorded_at_request.into_inner(), [Admission::Recorded(expected)]);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn operation_that_was_not_sent_requests_no_rescan() -> anyhow::Result<()> {
+        let IssuedOperation {
+            _root,
+            pending,
+            grants,
+            issued,
+            ..
+        } = issued_operation()?;
+        let endpoint = FakeRescan::new(Some(Ok(())), || {});
+
+        let delivery = async {
+            tokio::task::yield_now().await;
+            Err(RequestError::NotSent("not sent").into())
+        };
+        let settled = dispatched_result(pending, &grants, &issued, None, delivery, true, &endpoint).await?;
+
+        assert_eq!(settled, unknown(false));
+        assert_eq!(endpoint.requests(), 0);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn operation_whose_result_was_not_recorded_requests_no_rescan() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        journal.fail_completion_writes(1);
+        let endpoint = FakeRescan::new(Some(Ok(())), || {});
+
+        let delivery = exiting_delivery(record, Ok(serde_json::json!({"status": "Unknown"})));
+        let settled = dispatched_result(pending, &grants, &issued, None, delivery, true, &endpoint).await?;
+
+        assert_eq!(settled, unknown(true));
+        assert_eq!(endpoint.requests(), 0);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn operation_requests_no_rescan_while_remote_inventory_is_disabled() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            pending,
+            grants,
+            issued,
+            record,
+            ..
+        } = sent_operation()?;
+        let endpoint = FakeRescan::new(Some(Ok(())), || {});
+
+        let delivery = exiting_delivery(record, Ok(serde_json::json!({"status": "Unknown"})));
+        let settled = dispatched_result(pending, &grants, &issued, None, delivery, false, &endpoint).await?;
+
+        assert_eq!(settled, succeeded());
+        assert_eq!(endpoint.requests(), 0);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn shutdown_signalled_before_the_rescan_wait_requests_no_rescan() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            pending,
+            grants,
+            issued,
+            record,
+            ..
+        } = sent_operation()?;
+        let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let endpoint = FakeRescan::new(None, || {});
+
+        let delivery = async {
+            let response = exiting_delivery(record, Ok(serde_json::json!({"status": "Unknown"}))).await;
+            shutdown.signal();
+            response
+        };
+        let settled = dispatched_result(pending, &grants, &issued, Some(signal), delivery, true, &endpoint).await?;
+
+        assert_eq!(settled, succeeded());
+        assert_eq!(endpoint.requests(), 0);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn shutdown_that_ends_the_outcome_wait_also_skips_the_rescan() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let endpoint = FakeRescan::new(None, || {});
+
+        let delivery = async {
+            shutdown.signal();
+            std::future::pending().await
+        };
+        let settled = dispatched_result(pending, &grants, &issued, Some(signal), delivery, true, &endpoint).await?;
+
+        assert_eq!(settled, unknown(true));
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(settled));
+        assert_eq!(endpoint.requests(), 0);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn shutdown_during_the_rescan_wait_ends_it_and_returns_the_result() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            pending,
+            grants,
+            issued,
+            record,
+            ..
+        } = sent_operation()?;
+        let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let endpoint = FakeRescan::new(None, || shutdown.signal());
+
+        let delivery = exiting_delivery(record, Ok(serde_json::json!({"status": "Unknown"})));
+        let settled = dispatched_result(pending, &grants, &issued, Some(signal), delivery, true, &endpoint).await?;
+
+        assert_eq!(settled, succeeded());
+        assert_eq!(endpoint.requests(), 1);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn rescan_is_not_awaited_past_the_operation_deadline() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            pending,
+            grants,
+            issued,
+            record: _record,
+            ..
+        } = sent_operation()?;
+        let endpoint = FakeRescan::new(None, || {});
+        let waiting = Semaphore::new(1);
+        let operation_deadline = Instant::now() + Duration::from_millis(300);
+
+        let settled = tokio::time::timeout(
+            SETTLE_GUARD,
+            finish_dispatched(
+                pending,
+                &grants,
+                &issued,
+                None,
+                std::future::pending(),
+                WaitLimits {
+                    start_deadline: operation_deadline,
+                    operation_deadline,
+                    consumed_grace: Duration::from_millis(300),
+                },
+                RescanAfter {
+                    enabled: true,
+                    endpoint: &endpoint,
+                    waiting: &waiting,
+                },
+            ),
+        )
+        .await?;
+
+        assert_eq!(settled, unknown(false));
+        assert!(
+            operation_deadline <= Instant::now(),
+            "the outcome wait lasts until the deadline"
+        );
+        assert_eq!(endpoint.requests(), 1);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[test]
+    fn operation_deadline_is_thirty_minutes_after_dispatch() {
+        let dispatched_at = Instant::now();
+
+        let limits = WaitLimits::after_dispatch(dispatched_at);
+
+        assert_eq!(limits.operation_deadline, dispatched_at + Duration::from_secs(30 * 60));
+    }
+
+    // oracle: mutant a panic in the rescan wait interrupts an operation whose result is recorded
+    #[tokio::test]
+    async fn panic_in_the_rescan_wait_returns_the_recorded_result() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        let endpoint = FakeRescan::new(None, || panic!("injected rescan panic"));
+        let waiting = Semaphore::new(1);
+
+        let delivery = exiting_delivery(record, Ok(serde_json::json!({"status": "Unknown"})));
+        let settled = tokio::time::timeout(
+            SETTLE_GUARD,
+            finish_dispatched(
+                pending,
+                &grants,
+                &issued,
+                None,
+                delivery,
+                WaitLimits::after_dispatch(Instant::now()),
+                RescanAfter {
+                    enabled: true,
+                    endpoint: &endpoint,
+                    waiting: &waiting,
+                },
+            ),
+        )
+        .await?;
+
+        assert_eq!(settled, succeeded());
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(succeeded()));
+        assert_eq!(endpoint.requests(), 1);
+        assert_eq!(waiting.available_permits(), 1);
+        Ok(())
+    }
+
+    /// A consumed grant and the Broker record of its operation.
+    struct ConsumedGrant {
+        grants: RemoteGrantStore,
+        issued: IssuedGrant,
+        record: ExecutionRecord,
+    }
+
+    /// Returns a consumed grant for an operation that a coordinator admits into a journal of its own.
+    fn consumed_grant() -> anyhow::Result<ConsumedGrant> {
+        let SentOperation {
+            _root,
+            journal,
+            mut pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        // Nothing reads the fixture's own journal entry, so its guard is dropped without the cleanup write.
+        pending.armed = false;
+        drop(pending);
+        drop(journal);
+        Ok(ConsumedGrant { grants, issued, record })
+    }
+
+    /// Runs an operation whose Broker process exits with code 0 once `exit` resolves and whose rescan is never answered.
+    ///
+    /// `dispatched` is told when the request is dispatched, and `asked` at each rescan request.
+    async fn operation_with_unanswered_rescan(
+        pending: Pending,
+        grant: ConsumedGrant,
+        signal: ShutdownSignal,
+        dispatched: tokio::sync::oneshot::Sender<()>,
+        exit: tokio::sync::oneshot::Receiver<()>,
+        asked: tokio::sync::mpsc::UnboundedSender<()>,
+    ) -> Settled {
+        let ConsumedGrant { grants, issued, record } = grant;
+        let endpoint = FakeRescan::new(None, move || asked.send(()).expect("rescan observer is alive"));
+        let waiting = Semaphore::new(1);
+        let delivery = async move {
+            dispatched.send(()).expect("dispatch observer is alive");
+            exit.await.expect("exit sender is alive");
+            exiting_delivery(record, Ok(serde_json::json!({"status": "Unknown"}))).await
+        };
+        finish_dispatched(
+            pending,
+            &grants,
+            &issued,
+            Some(signal),
+            delivery,
+            WaitLimits::after_dispatch(Instant::now()),
+            RescanAfter {
+                enabled: true,
+                endpoint: &endpoint,
+                waiting: &waiting,
+            },
+        )
+        .await
+    }
+
+    /// Counts the worker permits of `coordinator` that are free.
+    fn free_workers(coordinator: &Coordinator) -> usize {
+        let mut free = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            free.push(permit);
+        }
+        free.len()
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    #[tokio::test]
+    async fn operation_waiting_for_its_rescan_holds_no_operation_worker() -> anyhow::Result<()> {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let grant = consumed_grant()?;
+        let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let (dispatched, waiting_for_broker) = tokio::sync::oneshot::channel();
+        let (exit, exited) = tokio::sync::oneshot::channel();
+        let (asked, mut rescans) = tokio::sync::mpsc::unbounded_channel();
+        let (reply, result) = response();
+        coordinator.submit(
+            journal,
+            "authority".to_owned(),
+            request(PackageOperationType::Install, "Winget", "winget", "user"),
+            reply,
+            move |pending| operation_with_unanswered_rescan(pending, grant, signal, dispatched, exited, asked),
+        );
+
+        tokio::time::timeout(SETTLE_GUARD, waiting_for_broker).await??;
+        // oracle: mutant the worker permit is given back before the result is recorded
+        assert_eq!(free_workers(&coordinator), super::super::MAX_CONCURRENT_REQUESTS - 1);
+
+        exit.send(()).expect("operation waits for the Broker");
+        tokio::time::timeout(SETTLE_GUARD, rescans.recv())
+            .await?
+            .expect("a rescan is requested");
+        assert_eq!(free_workers(&coordinator), super::super::MAX_CONCURRENT_REQUESTS);
+
+        shutdown.signal();
+        assert!(tokio::time::timeout(SETTLE_GUARD, result).await??.success);
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §inventory-rescan
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn delivery_repeated_during_the_rescan_wait_receives_the_result_without_another_rescan() -> anyhow::Result<()>
+    {
+        let (_root, journal) = test_journal()?;
+        let coordinator = Arc::new(Coordinator::default());
+        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let grant = consumed_grant()?;
+        let (shutdown, signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let (dispatched, waiting_for_broker) = tokio::sync::oneshot::channel();
+        let (exit, exited) = tokio::sync::oneshot::channel();
+        let (asked, mut rescans) = tokio::sync::mpsc::unbounded_channel();
+        let (first_reply, _first_result) = response();
+        coordinator.submit(
+            Arc::clone(&journal),
+            "authority".to_owned(),
+            request.clone(),
+            first_reply,
+            move |pending| operation_with_unanswered_rescan(pending, grant, signal, dispatched, exited, asked),
+        );
+        tokio::time::timeout(SETTLE_GUARD, waiting_for_broker).await??;
+        exit.send(()).expect("operation waits for the Broker");
+        tokio::time::timeout(SETTLE_GUARD, rescans.recv())
+            .await?
+            .expect("a rescan is requested");
+
+        let (repeated_reply, mut repeated_result) = response();
+        coordinator.submit(journal, "authority".to_owned(), request, repeated_reply, |_| async {
+            panic!("a repeated delivery must not execute again")
+        });
+        assert!(matches!(
+            repeated_result.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        shutdown.signal();
+        let result = tokio::time::timeout(SETTLE_GUARD, repeated_result).await??;
+        assert!(result.success);
+        assert_eq!(result.execution_started, Some(true));
+        // The operation dropped its endpoint, so the channel yields every request made of it.
+        assert_eq!(tokio::time::timeout(SETTLE_GUARD, rescans.recv()).await?, None);
+        Ok(())
+    }
+
+    /// Builds a runtime whose blocking tasks, journal writes among them, run one at a time.
+    fn runtime_with_one_blocking_thread() -> std::io::Result<tokio::runtime::Runtime> {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+    }
+
+    /// Occupies the only blocking thread of the runtime until the returned sender is used or dropped.
+    async fn occupy_the_blocking_thread() -> std::sync::mpsc::Sender<()> {
+        let (entered, occupied) = tokio::sync::oneshot::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        tokio::task::spawn_blocking(move || {
+            entered.send(()).expect("blocking-thread observer is alive");
+            let _ = resume.recv();
+        });
+        occupied.await.expect("blocking thread starts");
+        release
+    }
+
+    // oracle: mutant the worker permit is given back before the completion write returned
+    #[test]
+    fn operation_keeps_its_worker_until_its_completion_write_returned() -> anyhow::Result<()> {
+        runtime_with_one_blocking_thread()?.block_on(async {
+            let (_root, journal) = test_journal()?;
+            let coordinator = Arc::new(Coordinator::default());
+            let (stalled, writing) = tokio::sync::oneshot::channel();
+            let (reply, result) = response();
+            coordinator.submit(
+                journal,
+                "authority".to_owned(),
+                request(PackageOperationType::Install, "Winget", "winget", "user"),
+                reply,
+                move |pending| async move {
+                    let release = occupy_the_blocking_thread().await;
+                    stalled.send(release).expect("write observer is alive");
+                    pending.finish(Outcome::Succeeded, false).await
+                },
+            );
+
+            // The runtime has one thread, so the operation is awaiting its queued write once this resolves.
+            let release = tokio::time::timeout(SETTLE_GUARD, writing).await??;
+            assert_eq!(free_workers(&coordinator), super::super::MAX_CONCURRENT_REQUESTS - 1);
+
+            release.send(())?;
+            assert!(tokio::time::timeout(SETTLE_GUARD, result).await??.success);
+            assert_eq!(free_workers(&coordinator), super::super::MAX_CONCURRENT_REQUESTS);
+            Ok(())
+        })
+    }
+
+    // oracle: mutant an operation interrupted before its completion write frees its worker before its cleanup ended
+    #[test]
+    fn interrupted_operation_keeps_its_worker_until_its_cleanup_ended() -> anyhow::Result<()> {
+        runtime_with_one_blocking_thread()?.block_on(async {
+            let (_root, journal) = test_journal()?;
+            let coordinator = Arc::new(Coordinator::default());
+            let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+            let (interrupted, cleaning_up) = tokio::sync::oneshot::channel();
+            let (reply, result) = response();
+            coordinator.submit(
+                Arc::clone(&journal),
+                "authority".to_owned(),
+                request.clone(),
+                reply,
+                move |pending| async move {
+                    let release = occupy_the_blocking_thread().await;
+                    interrupted.send(release).expect("interruption observer is alive");
+                    drop(pending);
+                    panic!("injected interruption before the completion write");
+                },
+            );
+
+            // The cleanup write of the admission is queued behind the occupied thread.
+            let release = tokio::time::timeout(SETTLE_GUARD, cleaning_up).await??;
+            assert_eq!(free_workers(&coordinator), super::super::MAX_CONCURRENT_REQUESTS - 1);
+
+            release.send(())?;
+            let result = tokio::time::timeout(SETTLE_GUARD, result).await??;
+            assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+            assert_eq!(free_workers(&coordinator), super::super::MAX_CONCURRENT_REQUESTS);
+            drop(coordinator);
+            wait_for_detached_cleanup(journal, &request).await?;
+            Ok(())
+        })
     }
 }
