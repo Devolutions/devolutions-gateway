@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use win_api_wrappers::identity::sid::Sid;
 
-use super::dispatch::{Command, ConnectionHandle};
+use super::dispatch::{Command, ConnectionHandle, RequestError};
 
 /// Connections accepted for one user SID.
 pub(super) const MAX_CONNECTIONS_PER_USER: usize = 4;
@@ -54,8 +54,20 @@ impl RegisteredEndpoint {
     /// The request is never sent on another connection, even when this one is closed.
     /// The error is a [`RequestError`](super::RequestError), which tells whether the request may have reached UniGetUI.
     /// Neither the arguments nor the response are logged.
+    /// `RescanInventory` goes through [`Self::rescan_inventory`], which keeps at most one outstanding on the connection.
     pub async fn request(&self, command: &str, arguments: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         Ok(self.connection.request(command, arguments).await?)
+    }
+
+    /// Asks UniGetUI to reload its installed-package and available-update lists and waits for its answer.
+    ///
+    /// `Ok` means that both scans completed.
+    /// The answer comes from a `RescanInventory` written to this endpoint's connection after this call, never from an earlier one.
+    /// The connection has at most one such request outstanding, so the call may first wait for that one to end.
+    /// Dropping the returned future abandons only the wait: a written request stays outstanding, and one held behind it is still sent.
+    /// The only bound on the wait is the connection's own deadline for the request, so a caller that needs a shorter one applies it.
+    pub async fn rescan_inventory(&self) -> Result<(), RequestError> {
+        self.connection.rescan_inventory().await
     }
 }
 
