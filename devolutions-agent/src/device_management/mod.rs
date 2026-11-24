@@ -62,7 +62,12 @@ pub(crate) fn has_unrecorded_malformed_operation_id(
     };
     let id = operation.operation_id.as_str();
     #[cfg(windows)]
-    if !id.is_empty() && context.journal().is_none_or(|journal| journal.may_contain(id)) {
+    // A refused journal cannot prove that an ID was never recorded.
+    if !id.is_empty()
+        && context
+            .journal()
+            .is_none_or(|journal| journal.is_unavailable() || journal.may_contain(id))
+    {
         return false;
     }
     #[cfg(not(windows))]

@@ -392,6 +392,37 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn legacy_operation_id_is_not_ignored_while_the_journal_is_refused() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        // oracle: regression #2197 a refused journal let the malformed-ID check drop a possibly recorded ID
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let root = tempfile::Builder::new().prefix("operation-").tempdir_in(parent)?;
+        let data = Utf8Path::from_path(root.path()).expect("data path is UTF-8");
+        drop(OperationJournal::open(data)?);
+        std::fs::write(
+            data.join("package-operations").join("records").join("journal.json"),
+            b"{",
+        )?;
+        let context = DeviceManagementContext {
+            journal: Some(Arc::new(OperationJournal::open(data)?)),
+            ..Default::default()
+        };
+        let request = agent_channel_proto::DeviceManagementRequest {
+            request: Some(
+                agent_channel_proto::device_management_request::Request::PackageOperation(PackageOperationRequest {
+                    operation_id: "legacy-id".to_owned(),
+                    ..Default::default()
+                }),
+            ),
+        };
+
+        assert!(!super::super::has_unrecorded_malformed_operation_id(&context, &request));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn changed_payload_for_recorded_operation_is_unknown() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
