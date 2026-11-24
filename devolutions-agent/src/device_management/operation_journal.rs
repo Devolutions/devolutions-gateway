@@ -1242,8 +1242,9 @@ mod tests {
             journal.lookup("authority", &DeliveryKey::new(&orphan))?,
             Some(Admission::Recorded(settled(Outcome::Unknown)))
         );
+        // The unindexed record refuses the journal, so absence of the differently cased name is unproven.
         #[cfg(unix)]
-        assert_eq!(journal.lookup("authority", &DeliveryKey::new(&orphan))?, None);
+        assert!(journal.lookup("authority", &DeliveryKey::new(&orphan)).is_err());
         assert!(journal.admit("authority", &request("new", "pkg")).is_err());
         assert!(journal.may_contain("orphan"));
         Ok(())
