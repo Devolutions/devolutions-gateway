@@ -560,9 +560,99 @@ async fn run_package_operation(
     }
 }
 
+/// The system temporary directory can be writable by other accounts, which fails the journal's check.
+/// Use the user's local application data directory when available.
+#[cfg(all(test, windows))]
+fn test_tempdir() -> std::io::Result<tempfile::TempDir> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    tempfile::Builder::new().prefix("operation-").tempdir_in(base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // oracle: mutant package operations reserve a shared non-operation request permit
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn package_dispatch_does_not_take_a_shared_request_permit() -> anyhow::Result<()> {
+        use agent_channel_client::{ChannelClient, HelloFields, Settings, Target};
+
+        let root = test_tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        let recorded = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let (context, _entered, resume) = DeviceManagementContext::default()
+            .with_remote_features(true, false)
+            .with_recorded_operation_for_test(data, &recorded)?;
+        let coordinator = Arc::clone(context.operations());
+        let request = PackageOperationRequest {
+            operation_id: Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let key = device_key::generate(
+            &device_key::KeyBackend::File { dir: data.join("keys") },
+            &device_key::new_key_name("test"),
+        )?;
+        let client = ChannelClient::new(http_client_proxy::ProxyConfig::Off, &[], Settings::default())?;
+        let channel = client.connect(Target {
+            url: url::Url::parse("https://127.0.0.1:1")?,
+            key: Arc::from(key),
+            leaf_certificate_der: Vec::new(),
+            hello: Arc::new(|| HelloFields {
+                metadata: Default::default(),
+                config_revision: 0,
+                capabilities: Vec::new(),
+            }),
+        })?;
+        let request_permits = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            let mut permits = Vec::new();
+            while permits.len() < MAX_CONCURRENT_REQUESTS {
+                match request_permit() {
+                    Some(permit) => permits.push(permit),
+                    None => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                }
+            }
+            permits
+        })
+        .await?;
+        let (_shutdown, shutdown) = watch::channel(false);
+        handle(
+            context.clone(),
+            Uuid::nil(),
+            Uuid::nil(),
+            Uuid::new_v4().to_string(),
+            DeviceManagementRequest {
+                request: Some(Request::PackageOperation(request.clone())),
+            },
+            ChannelReporter {
+                reporter: channel.reporter(),
+                journal_full_warned: Arc::new(AtomicBool::new(false)),
+            },
+            shutdown,
+        );
+
+        let mut other_workers = Vec::new();
+        while let Some(permit) = coordinator.try_worker() {
+            other_workers.push(permit);
+        }
+        assert_eq!(other_workers.len() + 1, MAX_CONCURRENT_REQUESTS);
+
+        drop(other_workers);
+        drop(request_permits);
+        resume.send(())?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            context.submit_operation_for_test(request),
+        )
+        .await?;
+        Ok(())
+    }
 
     fn inventory(
         packages: Vec<InstalledPackage>,

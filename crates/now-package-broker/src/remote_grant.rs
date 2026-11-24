@@ -139,7 +139,7 @@ struct Entry {
 ///
 /// The states are ordered: a record only moves forward.
 /// There is deliberately no "not started" or "failed" state, because the Broker cannot prove either.
-/// An exit code alone does not establish a package outcome.
+/// An exit code alone does not establish the package's installed state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutcomeSummary {
     /// No matching record exists: never consumed, evicted, lost in a restart or bound to another request.
