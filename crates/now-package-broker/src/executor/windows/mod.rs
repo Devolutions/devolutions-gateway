@@ -497,6 +497,8 @@ fn prepare_main_command(
     prepare_main_command_in(command, None, Some(&user_env), requires_elevation)
 }
 
+// The Agent trusts recorded exit codes only for managers whose every launch path here preserves them
+// (`outcome_for_exit` in devolutions-agent's device_management/operation.rs); re-check that list when a launch path changes.
 fn prepare_main_command_in(
     command: &[String],
     temp_dir: Option<&Path>,
@@ -1840,6 +1842,7 @@ mod tests {
         assert_eq!(command.args()[4], "/C");
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        // oracle: mutant layout change that drops the inherited ERRORLEVEL reset before `call`
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"ERRORLEVEL=\"\r\ncall "));
         assert!(script.contains(&format!(
             "\"{}\" \"add\" \"typescript@5.7.3\" \"--global\"",

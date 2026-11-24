@@ -440,8 +440,9 @@ Output never establishes a package outcome; when the operation's verdict depends
 When the Broker record shows that the process exited, its exit code establishes the outcome.
 This rule applies only when the Broker launches the manager directly or through a wrapper that returns exactly the manager's exit code when it starts and a nonzero code when it cannot start.
 Because the record does not identify the launch path, the rule applies to a manager only when every Broker launch path for that manager meets this condition.
+The managers that meet it are `Winget`, `Cargo`, `Dotnet`, `Pip` and `Vcpkg`, named as in `CONTRACT.package-management.md §operations`'s manager mapping.
 Otherwise the Agent reports `UNKNOWN`.
-A nonzero code from such a wrapper may mean that the manager could not start, such as 9009 from `cmd.exe`, and is reported as a failure with the same text.
+A nonzero code from such a wrapper may mean that the manager could not start, such as 9009 from `cmd.exe`, and is a known failure in the format below.
 Exit code 0 is a known success.
 Any other exit code is a known failure whose error is exactly `<manager> exited with code <N>`.
 `<manager>` is the request's `manager` string, unchanged.
@@ -461,6 +462,7 @@ When the first record observed within that wait is `Consumed`, the Agent waits u
 Once the Broker proves the process started, the Agent waits for it to exit while its record remains available and has not become `Unobservable`, until the Agent stops or 30 minutes have elapsed since dispatch began.
 When an execution fails or is cancelled without a recorded exit, the Broker marks its retained record `Unobservable`.
 The Agent reports `UNKNOWN` when it observes `Unobservable`.
+When the Agent proves that it did not send `ExecutePackageOperation` to UniGetUI, it withdraws the grant, takes one more Broker sample and stops waiting, keeping any start evidence or exit that sample shows.
 The Agent durably records observed start evidence before continuing to wait for termination.
 A wait that ends without evidence of exit reports `UNKNOWN`.
 

@@ -301,6 +301,15 @@ impl RemoteGrantStore {
         self.consume_at(Instant::now(), grant, caller, request)
     }
 
+    /// Withdraws `grant` if it is still unconsumed, so it can no longer be used and no longer counts against the pending limit.
+    ///
+    /// A record created by an earlier consumption is unaffected.
+    pub fn revoke(&self, grant: &RemoteGrant) {
+        if let Ok(secret) = hex::decode(grant.expose_secret()) {
+            self.state.lock().grants.remove(&digest(&secret));
+        }
+    }
+
     /// Reads the non-secret outcome summary for an issued grant without changing it.
     ///
     /// Anything other than a record for this exact grant and Broker request ID is [`OutcomeSummary::Unknown`].
@@ -818,6 +827,31 @@ mod tests {
             .issue_at(start + GRANT_LIFETIME, spec())
             .expect("expired grants make room");
         assert_eq!(store.state.lock().grants.len(), 1);
+    }
+
+    // oracle: mutant revocation that leaves the grant usable, counted, or erases a consumed record
+    #[test]
+    fn revoking_withdraws_only_an_unconsumed_grant() {
+        let (store, unsent, request) = issued();
+        store.revoke(&unsent.grant);
+        assert!(store.state.lock().grants.is_empty());
+        assert_eq!(
+            store
+                .consume(unsent.grant.expose_secret(), &caller(), &request)
+                .map(drop),
+            Err(GrantDenied)
+        );
+
+        let (store, consumed, request) = issued();
+        let record = store
+            .consume(consumed.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+        assert!(record.mark_started());
+        store.revoke(&consumed.grant);
+        assert_eq!(
+            store.outcome(&consumed.grant, &consumed.request_id),
+            OutcomeSummary::Started
+        );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations

@@ -948,6 +948,8 @@ async fn finish_sent_until(
                         .downcast_ref::<RequestError>()
                         .is_some_and(|error| !error.may_have_been_sent())
                     {
+                        // Nobody received the grant, so withdrawing it frees its slot without affecting any execution.
+                        grants.revoke(&issued.grant);
                         stopping = true;
                     }
                 }
@@ -1400,8 +1402,14 @@ mod tests {
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[rstest::rstest]
+    #[case::started(true, Some(true))]
+    #[case::not_started(false, None)]
     #[tokio::test]
-    async fn unobservable_execution_settles_without_waiting_for_the_deadline() -> anyhow::Result<()> {
+    async fn unobservable_execution_settles_without_waiting_for_the_deadline(
+        #[case] started: bool,
+        #[case] execution_started: Option<bool>,
+    ) -> anyhow::Result<()> {
         let SentOperation {
             _root,
             journal,
@@ -1411,7 +1419,9 @@ mod tests {
             record,
         } = sent_operation()?;
         let request = pending.request.clone();
-        assert!(record.mark_started());
+        if started {
+            assert!(record.mark_started());
+        }
         assert!(record.mark_unobservable());
         let completion = tokio::time::timeout(
             Duration::from_secs(3),
@@ -1421,7 +1431,7 @@ mod tests {
 
         let expected = Settled {
             outcome: Outcome::Unknown,
-            execution_started: Some(true),
+            execution_started,
         };
         assert_eq!(completion.settled, expected);
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
@@ -1702,12 +1712,18 @@ mod tests {
                 ManagerName::Winget | ManagerName::Cargo | ManagerName::Dotnet | ManagerName::Pip | ManagerName::Vcpkg
             );
             let name = manager.to_string();
-            let expected = if trusted {
-                Outcome::Succeeded
+            let (success, failure) = if trusted {
+                (
+                    Outcome::Succeeded,
+                    Outcome::Failed {
+                        error: format!("{name} exited with code 7"),
+                    },
+                )
             } else {
-                Outcome::Unknown
+                (Outcome::Unknown, Outcome::Unknown)
             };
-            assert_eq!(outcome_for_exit(&name, 0), expected, "{name}");
+            assert_eq!(outcome_for_exit(&name, 0), success, "{name}");
+            assert_eq!(outcome_for_exit(&name, 7), failure, "{name}");
         }
     }
 
@@ -2020,7 +2036,8 @@ mod tests {
             pending,
             grants,
             issued,
-            ..
+            caller,
+            broker_request,
         } = issued_operation()?;
         let request = pending.request.clone();
         let now = Instant::now();
@@ -2047,6 +2064,12 @@ mod tests {
         };
         assert_eq!(completion.settled, expected);
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
+        assert!(
+            grants
+                .consume(issued.grant.expose_secret(), &caller, &broker_request)
+                .is_err(),
+            "an unsent grant is revoked"
+        );
         Ok(())
     }
 
