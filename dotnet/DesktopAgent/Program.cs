@@ -13,6 +13,7 @@ using System.Reflection;
 using System.Security.Principal;
 using Devolutions.Agent.Desktop.SingleInstance;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Application = System.Windows.Forms.Application;
 
@@ -159,6 +160,63 @@ namespace Devolutions.Agent.Desktop
                 Text = $"{StaticResources.DevolutionsAgent} v{version.Major}.{version.Minor}.{version.Build}",
                 Visible = true,
             };
+
+            this.NotifyIfDeviceRedirectorBroken();
+        }
+
+        // Remote Desktop starts the device redirector driver when it starts, so a driver that is still stopped
+        // some time after logon is not coming up. The check runs again before notifying, to ignore a slow start.
+        private void NotifyIfDeviceRedirectorBroken()
+        {
+            if (!(config?.Session?.Enabled ?? false))
+            {
+                return;
+            }
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    if (!ChannelProbe.IsRdpSession())
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(10));
+
+                    ProbeResult[] results = DeviceRedirectorChecks.Run();
+
+                    if (!DeviceRedirectorChecks.IsBroken(results))
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(20));
+
+                    results = DeviceRedirectorChecks.Run();
+
+                    if (!DeviceRedirectorChecks.IsBroken(results))
+                    {
+                        return;
+                    }
+
+                    string details = string.Join(" ", results.Where(r => r.Problem != null).Select(r => r.Problem));
+
+                    Program.Log.Warn($"Remote Desktop integration is not functional: {details}");
+
+                    this.synchronizationContext.Post(_ =>
+                    {
+                        new ToastContentBuilder()
+                            .AddText(Resources.msgRemoteDesktopIntegrationFailed, hintMaxLines: 1)
+                            .AddText(Resources.msgContactAdministrator)
+                            .Show();
+                    }, null);
+                }
+                catch (Exception e)
+                {
+                    Program.Log.Error(e.ToString());
+                }
+            });
         }
 
         private void ContextMenuOnPopup(object sender, EventArgs e)
@@ -183,7 +241,7 @@ namespace Devolutions.Agent.Desktop
                 this.contextMenu.MenuItems.Add(new MenuItem("Session") { Enabled = false, Checked = config?.Session?.Enabled ?? false });
                 this.contextMenu.MenuItems.Add(new MenuItem("PEDM") { Enabled = false, Checked = config?.Pedm?.Enabled ?? false });
                 this.contextMenu.MenuItems.Add(new MenuItem("-"));
-                this.contextMenu.MenuItems.Add(new MenuItem("Test virtual channels...", (_, _) =>
+                this.contextMenu.MenuItems.Add(new MenuItem("Test Remote Desktop integration...", (_, _) =>
                 {
                     using ChannelProbeForm probeWindow = new();
                     probeWindow.ShowDialog();

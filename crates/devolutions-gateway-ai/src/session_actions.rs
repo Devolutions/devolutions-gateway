@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-use serde::Deserialize;
-use tracing::warn;
+use serde::{Deserialize, Serialize};
+use tracing::{trace, warn};
 
 use crate::client::{AiClient, Input, Prompt, prompt_version, with_language};
 use crate::{Error, Language, Response};
@@ -26,9 +26,11 @@ Each object has these fields:
 - "description": string. A short past-tense sentence naming the action, like "Listed directory contents".
 - "object": string, optional. The main thing acted on, like a file path, host, service, or account.
 - "parameters": object, optional. Every value is a string. Important details, like the exact command.
+- "impact": string. What the action did to the system, or tried to do when it failed, always one of these English words: "low" if it changed nothing, like viewing or reading; "medium" for a change that is easy to undo, like editing a file or a setting; "high" for a change that is hard to undo or affects security, like deleting something, restarting a system, resetting a password, or unlocking an account.
+- "sensitiveData": boolean, optional. true only when the action showed or touched secrets, credentials, or personal data; otherwise leave it out.
 
 Example output line:
-{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"}}
+{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"},"impact":"low"}
 
 Rules:
 - Write one line per meaningful user action, in time order. Merge the keystrokes of one command into one action.
@@ -37,7 +39,7 @@ Rules:
 - If the user did nothing, write only this line: {"noActions":true}"#;
 
 /// Last rule of the prompt, naming the language of the descriptions.
-pub(crate) const LANGUAGE_RULE: &str = r#"- Write every description in the language `{language}`; keep the JSON field names and "[redacted]" as they are."#;
+pub(crate) const LANGUAGE_RULE: &str = r#"- Write every description in the language `{language}`; keep the JSON field names, the "impact" words, and "[redacted]" as they are."#;
 
 /// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
@@ -53,6 +55,23 @@ pub struct Action {
     pub object: Option<String>,
     /// Important details, such as the exact command, keyed by name.
     pub parameters: BTreeMap<String, String>,
+    /// What the action did, or tried to do when it failed, to the system, as the model judged it; `None` when the model
+    /// gave no valid level.
+    pub impact: Option<Impact>,
+    /// Whether the action showed or touched secrets, credentials, or personal data, as the model judged it.
+    pub sensitive_data: bool,
+}
+
+/// What a user action did, or tried to do when it failed, to the system, so a reviewer can find the risky ones first.
+///
+/// Changing nothing is low, a change that is easy to undo is medium, and a change that is hard to undo or affects
+/// security is high.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Impact {
+    Low,
+    Medium,
+    High,
 }
 
 impl AiClient {
@@ -245,6 +264,18 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
         .ok_or_else(|| format!("missing {citation}"))?;
     let offset = time(cited.trim()).ok_or_else(|| format!("{citation} is not in the input"))?;
 
+    // An invalid impact or sensitiveData is dropped alone, because the action itself is still worth listing.
+    // Only a string is a rating: serde would also read `{"low":null}` as `low`.
+    let impact = value
+        .get("impact")
+        .filter(|impact| impact.is_string())
+        .and_then(|impact| {
+            Impact::deserialize(impact)
+                .inspect_err(|_| trace!("Dropped the invalid impact of an AI action line"))
+                .ok()
+        });
+    let sensitive_data = value.get("sensitiveData").and_then(serde_json::Value::as_bool) == Some(true);
+
     let parsed: ActionLine = serde_json::from_value(value).map_err(|_| "invalid action fields".to_owned())?;
 
     let description = parsed.description.trim();
@@ -260,6 +291,8 @@ fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<
             .map(|object| object.trim().to_owned())
             .filter(|object| !object.is_empty()),
         parameters: parsed.parameters,
+        impact,
+        sensitive_data,
     })
 }
 #[cfg(test)]
@@ -292,12 +325,16 @@ mod tests {
                     description: "Listed files".to_owned(),
                     object: Some("/var/log".to_owned()),
                     parameters: BTreeMap::from([("Command".to_owned(), "ls".to_owned())]),
+                    impact: None,
+                    sensitive_data: false,
                 },
                 Action {
                     offset: Duration::from_secs(3),
                     description: "Opened a shell".to_owned(),
                     object: None,
                     parameters: BTreeMap::new(),
+                    impact: None,
+                    sensitive_data: false,
                 },
             ]
         );
@@ -320,6 +357,53 @@ mod tests {
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].description, "Listed files");
+    }
+
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
+    #[test]
+    fn reads_the_impact_of_each_action() {
+        let answer = concat!(
+            "{\"line\":\"L1\",\"description\":\"Listed files\",\"impact\":\"low\"}\n",
+            "{\"line\":\"L2\",\"description\":\"Edited a config file\",\"impact\":\"medium\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Deleted a database\",\"impact\":\"high\"}\n",
+        );
+
+        let actions = parse(answer).expect("valid answer");
+
+        let impacts: Vec<_> = actions.iter().map(|action| action.impact).collect();
+        assert_eq!(impacts, [Some(Impact::Low), Some(Impact::Medium), Some(Impact::High)]);
+    }
+
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
+    #[test]
+    fn an_action_without_a_valid_impact_is_kept_without_one() {
+        let answer = concat!(
+            "{\"line\":\"L1\",\"description\":\"No impact\"}\n",
+            "{\"line\":\"L2\",\"description\":\"Unknown impact\",\"impact\":\"Mod\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Not a string\",\"impact\":3}\n",
+            "{\"line\":\"L4\",\"description\":\"An object\",\"impact\":{\"low\":null}}\n",
+        );
+
+        let actions = parse(answer).expect("valid answer");
+
+        assert_eq!(actions.len(), 4);
+        assert!(actions.iter().all(|action| action.impact.is_none()));
+    }
+
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
+    #[test]
+    fn only_a_true_boolean_marks_sensitive_data() {
+        let answer = concat!(
+            "{\"line\":\"L1\",\"description\":\"Read a key file\",\"sensitiveData\":true}\n",
+            "{\"line\":\"L2\",\"description\":\"Listed files\",\"sensitiveData\":false}\n",
+            "{\"line\":\"L3\",\"description\":\"Opened a shell\"}\n",
+            "{\"line\":\"L4\",\"description\":\"Not a boolean\",\"sensitiveData\":\"true\"}\n",
+        );
+
+        let actions = parse(answer).expect("valid answer");
+
+        let sensitive: Vec<_> = actions.iter().map(|action| action.sensitive_data).collect();
+        assert_eq!(sensitive, [true, false, false, false]);
     }
 
     #[test]
@@ -414,6 +498,8 @@ mod tests {
             "description",
             "object",
             "parameters",
+            "\"impact\"",
+            "\"sensitiveData\"",
             "JSON Lines",
             "noActions",
         ] {

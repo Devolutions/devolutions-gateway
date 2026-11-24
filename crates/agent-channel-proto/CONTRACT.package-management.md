@@ -181,11 +181,15 @@ An unlisted command receives `UnsupportedCommand` without starting work.
 | `GetInventorySnapshot` | none | `{ "completedAt": string, "updateCompletedAt": string or null, "managers": array, "sources": array, "installedPackages": array, "updates": array }` |
 | `ExecutePackageOperation` | `operationId`, `brokerRequestId`, `operation`, `manager`, `sourceName`, `packageId`, `version`, `scope`, `reportedScope`, `grant` | `{ "status": "Succeeded" \| "Failed" \| "Unknown", "error": string }` |
 
-`GetInventorySnapshot.managers` uses the item shape of `GET /uniget/v1/managers`, preserving `name`, `enabled`, `ready` and all other fields except the following.
-`executablePath` and `executableArguments` are empty strings.
-`health.state` is `unknown`, `health.needsAttention` is false, `health.failingListing` and `health.reason` are null, and `health.consecutiveFailures` is zero.
-Each of `health.search`, `health.installed` and `health.updates` has null `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason`; false `lastFailureWasTimeout`; zero `consecutiveFailures`; and an empty `recentDurationsMs` array.
-These redactions keep executable paths, arguments and captured health output from reaching the Agent.
+Each `GetInventorySnapshot.managers` item has exactly the members `name`, `displayName`, `enabled`, `ready`, `notificationsSuppressed`, `executablePath`, `executableArguments`, `capabilities` and `health`.
+`name` and `displayName` are strings, and `enabled`, `ready` and `notificationsSuppressed` are booleans.
+`executablePath` and `executableArguments` are always empty strings.
+`capabilities` has exactly the boolean members `canRunAsAdmin`, `canSkipIntegrityChecks`, `canRunInteractively`, `canRemoveDataOnUninstall`, `canDownloadInstaller`, `supportsCustomVersions`, `supportsCustomArchitectures`, `supportsCustomScopes`, `supportsPreRelease`, `supportsCustomLocations`, `supportsCustomSources` and `mustInstallSourcesAsAdmin`.
+`health` has exactly the members `state`, `needsAttention`, `failingListing`, `reason`, `consecutiveFailures`, `search`, `installed` and `updates`, always at their unknown defaults.
+`state` is `unknown`, `needsAttention` is false, `failingListing` and `reason` are null, and `consecutiveFailures` is zero.
+Each of `search`, `installed` and `updates` has exactly the members `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `lastFailureWasTimeout`, `consecutiveFailures`, `failureStreakStartUtc`, `lastPackageCount`, `lastFastRepairUtc`, `lastFastRepairReason` and `recentDurationsMs`.
+In each, `lastSuccessUtc`, `lastFailureUtc`, `lastFailureReason`, `failureStreakStartUtc`, `lastPackageCount`, `lastFastRepairUtc` and `lastFastRepairReason` are null, `lastFailureWasTimeout` is false, `consecutiveFailures` is zero, and `recentDurationsMs` is an empty array.
+UniGetUI sends no other manager member, so executable paths, arguments and captured health output never reach the Agent.
 
 The `sources`, `installedPackages` and `updates` arrays use the item shapes of `GET /uniget/v1/sources`, `GET /uniget/v1/packages/installed` and `GET /uniget/v1/packages/updates`, respectively.
 The source-safety rules in `CONTRACT.package-management.md §inventory` apply.
@@ -421,8 +425,38 @@ The Authority ignores `success` when the status is `UNKNOWN`.
 Agent and Authority versions must both understand `UNKNOWN` when they exchange operation results, including queued results after reconnect or rollback.
 Mixed versions that do not satisfy this requirement are unsupported.
 The Agent durably records an operation before making a grant for it available and does not submit another operation for the same operation ID.
-Repeated deliveries with the same operation ID and payload return the recorded result or wait for the active operation to finish.
-A repeated operation ID with a different payload is rejected without submission and reports `UNKNOWN`.
+The Authority's new operation ID is a UUID in 36-character lowercase 8-4-4-4-12 hexadecimal form.
+The Agent compares and echoes the ID exactly as sent.
+A recorded operation retains its replay rules even when its ID is outside that form.
+An ID proven not to be recorded and outside that form is malformed.
+The Agent neither starts nor journals a malformed request, logs a warning once per connection, and sends no report for it.
+Correlated-report and capacity-failure guarantees do not apply to malformed requests.
+A recorded ID too long to fit in a channel report cannot be answered.
+For a repeated delivery with the same operation ID and payload, the Agent returns the recorded result or attaches it to the active operation.
+The Agent checks for a recorded operation before applying operation capacity limits.
+While a journal lookup or operation is in flight, the Agent retains only the most recent response attachment for that operation ID.
+When the journal's deduplication index budget cannot fit another operation, an ID proven not to be recorded or in flight receives the known failure `agent journal full: nothing was started`.
+Otherwise, when operation or journal-admission capacity is full, an ID proven not to be recorded or in flight receives the known failure `agent busy: nothing was started`.
+The budget counts orphan record names as well as indexed names.
+The Agent logs a warning about the full journal once per connection.
+The Agent does not record either failure.
+Either answer means this Agent process had not admitted or started an operation with that ID when it decided to refuse the delivery.
+After any Authority receives a known result for an operation ID, including either capacity failure, no Authority sends that ID again.
+An administrator's retry is a new operation with a new ID.
+An operation ID identifies one operation across all of an Agent's Authorities.
+Authorities that send the same ID coordinate its deliveries and results.
+Because the Agent does not record either failure, a later delivery of that ID is treated as new unless the ID has since been recorded, even if the Authority violates that rule by sending it after receiving the failure.
+If an ID has been sent to the Agent more than once and the Authority cannot prove that at most one delivery reached the Agent, it treats either capacity failure as provisional.
+It does not record or display a provisional capacity failure as the operation's outcome.
+Any result for that ID other than these two capacity failures, including `UNKNOWN`, takes precedence over a provisional capacity failure regardless of arrival order.
+The Authority ignores either capacity failure after a result that is not one of those two failures.
+If the Authority knows that at most one delivery reached the Agent, either capacity failure is a final known result.
+DVLS does not redeliver an operation ID, so either failure is final for DVLS.
+Saturated journal admission does not itself block the Agent from processing channel traffic.
+The Agent imposes no package-operation rate limit on the Authority.
+The journal assumes that, while the Agent holds it open, this Agent process is its only writer.
+The in-memory membership does not see records another process creates under a privileged account until the next Agent start.
+A delivery whose operation ID matches a recorded or in-flight operation but has a different payload is rejected without submission and reports `UNKNOWN`.
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
 When the Agent detects a missing, corrupt or unindexed record in an existing journal, it refuses new remote package writes on that device and reports `UNKNOWN`.
 The same refusal applies when the journal's records directory or index is missing, or the index is corrupt or inconsistent with its records.

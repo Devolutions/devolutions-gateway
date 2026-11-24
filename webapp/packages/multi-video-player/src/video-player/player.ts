@@ -11,9 +11,17 @@ export interface SourceMetadata {
   type: string;
 }
 
+export interface PlaybackObservation {
+  clipIndex: number;
+  localTime: number;
+  clipDuration?: number;
+  currentTime: number;
+  readiness: 'loading' | 'seeking' | 'ready' | 'ended';
+}
+
 export interface MultiVideoPlayerEventMap extends HTMLElementEventMap {
-  timeupdate: CustomEvent<{ currentTime: number; clipIndex: number }>;
-  clipchange: CustomEvent<{ clipIndex: number }>;
+  timeupdate: CustomEvent<PlaybackObservation>;
+  clipchange: CustomEvent<PlaybackObservation>;
 }
 
 // Define Web Component
@@ -52,8 +60,12 @@ export class MultiVideoPlayer extends HTMLElement {
     return this.progressManager?.duration ?? 0;
   }
 
+  get playing(): boolean {
+    return this.progressManager?.playing ?? false;
+  }
+
   get currentClipIndex(): number {
-    return this.progressManager?.currentPlayingHandle()?.index ?? -1;
+    return this.progressManager?.observation?.clipIndex ?? -1;
   }
 
   async seek(seconds: number): Promise<void> {
@@ -171,16 +183,16 @@ export class MultiVideoPlayer extends HTMLElement {
     this.progressManager = new ProgressManager(
       this.player,
       playList,
-      () =>
+      (observation) =>
         this.dispatchEvent(
           new CustomEvent('timeupdate', {
-            detail: { currentTime: this.currentTime, clipIndex: this.currentClipIndex },
+            detail: { ...observation },
           }),
         ),
-      () =>
+      (observation) =>
         this.dispatchEvent(
           new CustomEvent('clipchange', {
-            detail: { clipIndex: this.currentClipIndex },
+            detail: { ...observation },
           }),
         ),
     );

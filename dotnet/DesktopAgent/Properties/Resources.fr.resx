@@ -159,4 +159,10 @@
   <data name="mnuServiceAvailable" xml:space="preserve">
     <value>Service en cours d’exécution</value>
   </data>
+  <data name="msgRemoteDesktopIntegrationFailed" xml:space="preserve">
+    <value>L’intégration de Bureau à distance ne fonctionne pas</value>
+  </data>
+  <data name="msgContactAdministrator" xml:space="preserve">
+    <value>Contactez votre administrateur.</value>
+  </data>
 </root>

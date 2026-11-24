@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::session_actions::Action;
+use crate::session_actions::{Action, Impact};
 
 /// One line of the AI `.slog`.
 ///
@@ -29,13 +29,17 @@ enum Event<'a> {
         prompt_version: &'a str,
         language: &'a str,
     },
-    #[serde(rename = "session.action")]
+    #[serde(rename = "session.action", rename_all = "camelCase")]
     Action {
         description: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
         object: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         parameters: Option<&'a BTreeMap<String, String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        impact: Option<Impact>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        sensitive_data: bool,
     },
     #[serde(rename = "session.end")]
     End {
@@ -99,6 +103,8 @@ impl<W: std::io::Write> SlogWriter<W> {
                 description: &action.description,
                 object: action.object.as_deref(),
                 parameters: Some(&action.parameters).filter(|parameters| !parameters.is_empty()),
+                impact: action.impact,
+                sensitive_data: action.sensitive_data,
             },
         )
     }
@@ -177,6 +183,8 @@ mod tests {
                 .iter()
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                 .collect(),
+            impact: None,
+            sensitive_data: false,
         }
     }
 
@@ -203,6 +211,28 @@ mod tests {
                 .collect()
         };
         assert_eq!(lines(&slog), lines(&expected.join("\n")));
+    }
+
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §action-rating
+    #[test]
+    fn an_action_line_has_impact_only_when_rated_and_sensitive_data_only_when_true() {
+        let rated = Action {
+            impact: Some(Impact::High),
+            sensitive_data: true,
+            ..action(1000, "Deleted a key file", Some("id_rsa"), &[])
+        };
+        let unrated = action(2000, "Closed the shell", None, &[]);
+
+        let slog = write(0, 5, &[rated, unrated], None);
+
+        let events: Vec<serde_json::Value> = slog
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON line"))
+            .collect();
+        assert_eq!(events[1]["impact"], "high");
+        assert_eq!(events[1]["sensitiveData"], true);
+        assert_eq!(events[2].get("impact"), None);
+        assert_eq!(events[2].get("sensitiveData"), None);
     }
 
     #[test]
