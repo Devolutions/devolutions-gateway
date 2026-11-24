@@ -25,7 +25,7 @@ const MAX_COMMAND_CHARS: usize = 128;
 /// Time UniGetUI has to answer a request that does not change the system.
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Time UniGetUI has to answer `ExecutePackageOperation`, which answers when the outcome is known.
+/// Time UniGetUI has to answer `ExecutePackageOperation`.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Why a request produced no result.
