@@ -462,7 +462,7 @@ When the first record observed within that wait is `Consumed`, the Agent waits u
 Once the Broker proves the process started, the Agent waits for it to exit while its record remains available and has not become `Unobservable`, until the Agent stops or 30 minutes have elapsed since dispatch began.
 When an execution fails or is cancelled without a recorded exit, the Broker marks its retained record `Unobservable`.
 The Agent reports `UNKNOWN` when it observes `Unobservable`.
-When the Agent proves that it did not send `ExecutePackageOperation` to UniGetUI, it withdraws the grant, takes one more Broker sample and stops waiting, keeping any start evidence or exit that sample shows.
+When the Agent proves that it did not send `ExecutePackageOperation` to UniGetUI, it withdraws the grant and stops waiting once it has recorded the current state of the Broker record, keeping any start evidence or exit that record shows.
 The Agent durably records observed start evidence before continuing to wait for termination.
 A wait that ends without evidence of exit reports `UNKNOWN`.
 
