@@ -971,11 +971,10 @@ async fn finish_sent_until(
 
 fn outcome_for_exit(manager: &str, exit_code: i32) -> Outcome {
     // UNTESTED: Installed managers and the Python app alias are not exercised by these tests.
-    // Their launch paths must preserve exit codes to avoid false success; verify each when changing the trusted set.
-    if !matches!(
-        parse_manager(manager),
-        Some(ManagerName::Winget | ManagerName::Cargo | ManagerName::Dotnet | ManagerName::Pip | ManagerName::Vcpkg)
-    ) {
+    // Every launch path of a trusted manager must return the manager's exit code, or nonzero when it cannot start,
+    // to avoid false success; verify each when adding a manager or changing a Broker launch path.
+    // Chocolatey stays untrusted: its batch maps reboot-pending exit codes to 0.
+    if !parse_manager(manager).is_some_and(|manager| SUPPORTED_MANAGERS.contains(&manager)) {
         return Outcome::Unknown;
     }
 
@@ -1320,60 +1319,6 @@ mod tests {
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[tokio::test]
-    async fn wrapper_exit_zero_is_unknown_with_start_evidence() -> anyhow::Result<()> {
-        let SentOperation {
-            _root,
-            journal,
-            pending,
-            grants,
-            issued,
-            record,
-        } = sent_operation_for("PowerShell", "PSGallery")?;
-        let request = pending.request.clone();
-        assert!(record.mark_started());
-        assert!(record.mark_exited(0));
-
-        let settled = finish_sent(pending, &grants, &issued, None, std::future::pending())
-            .await
-            .settled;
-        let expected = Settled {
-            outcome: Outcome::Unknown,
-            execution_started: Some(true),
-        };
-        assert_eq!(settled, expected);
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
-        Ok(())
-    }
-
-    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
-    #[tokio::test]
-    async fn wrapper_nonzero_exit_is_unknown_with_start_evidence() -> anyhow::Result<()> {
-        let SentOperation {
-            _root,
-            journal,
-            pending,
-            grants,
-            issued,
-            record,
-        } = sent_operation_for("Scoop", "main")?;
-        let request = pending.request.clone();
-        assert!(record.mark_started());
-        assert!(record.mark_exited(7));
-
-        let settled = finish_sent(pending, &grants, &issued, None, std::future::pending())
-            .await
-            .settled;
-        let expected = Settled {
-            outcome: Outcome::Unknown,
-            execution_started: Some(true),
-        };
-        assert_eq!(settled, expected);
-        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
-        Ok(())
-    }
-
-    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
-    #[tokio::test]
     async fn trusted_wrapper_launch_failure_is_a_known_failure() -> anyhow::Result<()> {
         let SentOperation {
             _root,
@@ -1707,23 +1652,19 @@ mod tests {
     #[test]
     fn only_managers_with_reliable_launch_paths_trust_exit_codes() {
         for manager in SUPPORTED_MANAGERS {
-            let trusted = matches!(
-                manager,
-                ManagerName::Winget | ManagerName::Cargo | ManagerName::Dotnet | ManagerName::Pip | ManagerName::Vcpkg
-            );
             let name = manager.to_string();
-            let (success, failure) = if trusted {
-                (
-                    Outcome::Succeeded,
-                    Outcome::Failed {
-                        error: format!("{name} exited with code 7"),
-                    },
-                )
-            } else {
-                (Outcome::Unknown, Outcome::Unknown)
-            };
-            assert_eq!(outcome_for_exit(&name, 0), success, "{name}");
-            assert_eq!(outcome_for_exit(&name, 7), failure, "{name}");
+            assert_eq!(outcome_for_exit(&name, 0), Outcome::Succeeded, "{name}");
+            assert_eq!(
+                outcome_for_exit(&name, 7),
+                Outcome::Failed {
+                    error: format!("{name} exited with code 7"),
+                },
+                "{name}"
+            );
+        }
+        for name in [ManagerName::Chocolatey.to_string(), "unknown-manager".to_owned()] {
+            assert_eq!(outcome_for_exit(&name, 0), Outcome::Unknown, "{name}");
+            assert_eq!(outcome_for_exit(&name, 7), Outcome::Unknown, "{name}");
         }
     }
 

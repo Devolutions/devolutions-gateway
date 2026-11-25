@@ -623,9 +623,22 @@ fn prepare_powershell_script(
         executable.display().to_string()
     };
     prepared.push("-Command".to_owned());
-    prepared.push(format!("& {}", quote_powershell_literal(&temp_script.path_string())));
+    prepared.push(powershell_script_invocation(&temp_script.path_string()));
 
     Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
+}
+
+/// Returns the `-Command` text that runs `path` and exits with the script's own exit code.
+///
+/// A bare `& 'path'` makes the host exit with 0 or 1 only, whatever the script passed to `exit`.
+/// `exit $LASTEXITCODE` forwards the code, and the sentinel makes a script that sets no exit code,
+/// because it runs no native command and never calls `exit`, report failure rather than success.
+/// The generated manager scripts therefore always end with an explicit `exit`.
+fn powershell_script_invocation(path: &str) -> String {
+    format!(
+        "$global:LASTEXITCODE = 1; & {}; exit $LASTEXITCODE",
+        quote_powershell_literal(path)
+    )
 }
 
 fn powershell_script_with_utf8_preamble(script: &str) -> String {
@@ -938,6 +951,28 @@ fn prepare_user_batch_script(
     Ok(PreparedCommand::with_script(prepared, temp_script))
 }
 
+/// Runs a manager command as the executor prepares it and returns the process exit code.
+///
+/// `path_prefix`, when set, is searched first for the manager, so tests can substitute a fake one.
+#[cfg(test)]
+pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> Option<i32> {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let prepared =
+        prepare_main_command_in(command, Some(temp_dir.path()), None, false).expect("prepare manager command");
+    let mut process = std::process::Command::new(&prepared.args()[0]);
+    process
+        .args(&prepared.args()[1..])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Some(prefix) = path_prefix {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let paths = std::iter::once(prefix.to_path_buf()).chain(std::env::split_paths(&path));
+        process.env("PATH", std::env::join_paths(paths).expect("join PATH"));
+    }
+    process.output().expect("run manager command").status.code()
+}
+
 fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
     if !(executable_is(command, "powershell.exe") || executable_is(command, "pwsh.exe")) {
         return None;
@@ -993,7 +1028,9 @@ fn prepare_bun_cmd_script(
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
     }
-    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+    // A shim can leave an `ERRORLEVEL` variable set, which would shadow the real exit code below.
+    // In a `.bat` script, `set` does not change the errorlevel itself.
+    script.push_str("\r\nset \"ERRORLEVEL=\"\r\nexit /b %ERRORLEVEL%\r\n");
 
     let temp_script = broker_temp_script("bat", temp_dir)?;
     temp_script.write_content(&script).with_context(|| {
@@ -1518,9 +1555,8 @@ mod tests {
         assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
         assert_eq!(command.args()[2], "-Command");
-        assert!(command.args()[3].starts_with("& '"));
 
-        let script = std::fs::read(&command.args()[3][3..command.args()[3].len() - 1]).expect("read temp script");
+        let script = std::fs::read(script_path_of(&command.args()[3])).expect("read temp script");
         assert!(script.starts_with(b"\xEF\xBB\xBF"));
         let script = String::from_utf8_lossy(&script);
         assert!(script.contains(POWERSHELL_UTF8_ENCODING_PREAMBLE));
@@ -1546,7 +1582,7 @@ mod tests {
         assert_eq!(command.args()[2], "-ExecutionPolicy");
         assert_eq!(command.args()[3], "Bypass");
         assert_eq!(command.args()[4], "-Command");
-        assert!(command.args()[5].starts_with("& '"));
+        script_path_of(&command.args()[5]);
     }
 
     #[test]
@@ -1564,13 +1600,94 @@ mod tests {
         assert!(command.args()[0].ends_with(r"\PowerShell\7\pwsh.exe"));
         assert_eq!(command.args()[1], "-NoProfile");
         assert_eq!(command.args()[2], "-Command");
-        assert!(command.args()[3].starts_with("& '"));
 
-        let script = std::fs::read(&command.args()[3][3..command.args()[3].len() - 1]).expect("read temp script");
+        let script = std::fs::read(script_path_of(&command.args()[3])).expect("read temp script");
         assert!(!script.starts_with(b"\xEF\xBB\xBF"));
         let script = String::from_utf8(script).expect("script is UTF-8");
         assert!(script.starts_with(POWERSHELL_UTF8_ENCODING_PREAMBLE));
         assert!(script.contains("\r\nWrite-Output 'héllo'"));
+    }
+
+    fn script_path_of(command_arg: &str) -> &str {
+        command_arg
+            .strip_prefix("$global:LASTEXITCODE = 1; & '")
+            .and_then(|rest| rest.strip_suffix("'; exit $LASTEXITCODE"))
+            .unwrap_or_else(|| panic!("unexpected PowerShell invocation: {command_arg}"))
+    }
+
+    fn run_powershell_script(host: &str, script: &str) -> Option<i32> {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = vec![
+            host.to_owned(),
+            "-NoProfile".to_owned(),
+            "-NonInteractive".to_owned(),
+            "-ExecutionPolicy".to_owned(),
+            "Bypass".to_owned(),
+            "-Command".to_owned(),
+            script.to_owned(),
+        ];
+        let command =
+            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
+        std::process::Command::new(&command.args()[0])
+            .args(&command.args()[1..])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .expect("run PowerShell host")
+            .status
+            .code()
+    }
+
+    fn assert_powershell_host_reports_script_exit(host: &str) {
+        assert_eq!(
+            run_powershell_script(host, "exit 7"),
+            Some(7),
+            "{host}: exact exit code"
+        );
+        assert_eq!(run_powershell_script(host, "exit 0"), Some(0), "{host}: success");
+        assert_eq!(
+            run_powershell_script(
+                host,
+                "$ErrorActionPreference = 'Stop'; [Console]::Error.WriteLine('note'); exit 0"
+            ),
+            Some(0),
+            "{host}: stderr output alone is not a failure"
+        );
+        assert_ne!(
+            run_powershell_script(
+                host,
+                "$ErrorActionPreference = 'Stop'; Get-Item 'Z:\\no\\such\\item'; exit 0"
+            ),
+            Some(0),
+            "{host}: a terminating error is a failure"
+        );
+        assert_ne!(
+            run_powershell_script(host, "$ErrorActionPreference = 'Stop'; no-such-command-xyz; exit 0"),
+            Some(0),
+            "{host}: a missing command is a failure"
+        );
+        assert_ne!(
+            run_powershell_script(host, "Write-Output 'done'"),
+            Some(0),
+            "{host}: a script that ends without `exit` or a native command is a failure"
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn windows_powershell_host_reports_the_script_exit_code() {
+        assert_powershell_host_reports_script_exit("powershell.exe");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn powershell7_host_reports_the_script_exit_code() {
+        if !Path::new(&super::trusted_powershell7_executable()).exists() {
+            // PowerShell 7 is optional on Windows; nothing to check without it.
+            return;
+        }
+        assert_powershell_host_reports_script_exit("pwsh.exe");
     }
 
     fn manager_exit_probe() -> Vec<String> {
@@ -1659,6 +1776,47 @@ mod tests {
         let command = prepare_bun_cmd_script(&probe.display().to_string(), &[], Some(temp_dir.path()))
             .expect("prepare Bun batch");
         assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: mutant a shim that leaves an ERRORLEVEL variable set masks its exit code
+    #[test]
+    fn bun_batch_preserves_exit_when_the_shim_sets_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let shims = [
+            ("sets", "@set \"ERRORLEVEL=0\"\r\n@cmd /d /c exit 7\r\n"),
+            (
+                "leaks",
+                "@cmd /d /c exit 7\r\n@set \"ERRORLEVEL=0\"\r\n@cmd /d /c exit 7\r\n",
+            ),
+        ];
+        for (name, shim) in shims {
+            let probe = temp_dir.path().join(format!("{name}-bun.cmd"));
+            std::fs::write(&probe, shim).expect("write Bun probe");
+            let command = prepare_bun_cmd_script(&probe.display().to_string(), &[], Some(temp_dir.path()))
+                .expect("prepare Bun batch");
+            assert_batch_preserves_manager_exit(&command);
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn bun_batch_reports_success_and_a_missing_shim_as_failure() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let run = |shim: &Path| {
+            let command = prepare_bun_cmd_script(&shim.display().to_string(), &[], Some(temp_dir.path()))
+                .expect("prepare Bun batch");
+            std::process::Command::new(&command.args()[0])
+                .args(&command.args()[1..])
+                .env("ERRORLEVEL", "0")
+                .output()
+                .expect("run generated batch")
+                .status
+                .code()
+        };
+        let success = temp_dir.path().join("bun.cmd");
+        std::fs::write(&success, "@set \"ERRORLEVEL=7\"\r\n@exit /b 0\r\n").expect("write Bun probe");
+        assert_eq!(run(&success), Some(0));
+        assert_ne!(run(&temp_dir.path().join("missing-bun.cmd")), Some(0));
     }
 
     // oracle: mutant an inherited ERRORLEVEL masks a nonzero manager exit

@@ -19,7 +19,7 @@ const NPM_VERSION_EXTRA_CHARACTERS: &[char] = &['~', '*'];
 pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_npm_request(request)?;
 
-    let mut script = String::from("npm");
+    let mut script = String::from("$ErrorActionPreference = 'Stop'; npm");
 
     match request.operation {
         Operation::Install | Operation::Update => {
@@ -33,6 +33,8 @@ pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>
             append_raw(&mut script, "--global");
         }
     }
+    // The executor reports the script's exit code, so the script must forward npm's own.
+    script.push_str("; exit $LASTEXITCODE");
 
     Ok(vec![
         "powershell.exe".to_owned(),
@@ -230,7 +232,10 @@ mod tests {
         assert_eq!(cmd[0], "powershell.exe");
         assert_eq!(cmd[1], "-NoProfile");
         assert_eq!(cmd[2], "-Command");
-        &cmd[3]
+        cmd[3]
+            .strip_prefix("$ErrorActionPreference = 'Stop'; ")
+            .and_then(|script| script.strip_suffix("; exit $LASTEXITCODE"))
+            .expect("npm script fails closed and forwards npm's exit code")
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -450,5 +455,47 @@ mod tests {
         let cmd = build_npm_command(&request).expect("build command");
 
         assert_eq!(script_of(&cmd), "npm install '@contoso/tool' --global");
+    }
+
+    /// Lets the generated script run whatever the machine's execution policy is.
+    #[cfg(windows)]
+    fn bypassing_execution_policy(mut cmd: Vec<String>) -> Vec<String> {
+        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Bypass".to_owned()]);
+        cmd
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn generated_script_exits_with_npm_exit_code() {
+        let fake_npm = tempfile::tempdir().expect("create temp dir");
+        for operation in [Operation::Install, Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            let cmd = bypassing_execution_policy(build_npm_command(&request).expect("build command"));
+            for code in [7, 0] {
+                std::fs::write(fake_npm.path().join("npm.cmd"), format!("@exit /b {code}\r\n"))
+                    .expect("write fake npm");
+                assert_eq!(
+                    crate::executor::run_prepared_for_test(&cmd, Some(fake_npm.path())),
+                    Some(code),
+                    "{operation:?}"
+                );
+            }
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn generated_script_fails_when_npm_cannot_be_found() {
+        let empty_path = tempfile::tempdir().expect("create temp dir");
+        let mut cmd = bypassing_execution_policy(build_npm_command(&make_request()).expect("build command"));
+        let script = cmd.last_mut().expect("script");
+        *script = script.replacen("npm ", "no-such-npm-xyz ", 1);
+        assert_ne!(
+            crate::executor::run_prepared_for_test(&cmd, Some(empty_path.path())),
+            Some(0)
+        );
     }
 }

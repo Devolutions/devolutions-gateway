@@ -440,7 +440,8 @@ Output never establishes a package outcome; when the operation's verdict depends
 When the Broker record shows that the process exited, its exit code establishes the outcome.
 This rule applies only when the Broker launches the manager directly or through a wrapper that returns exactly the manager's exit code when it starts and a nonzero code when it cannot start.
 Because the record does not identify the launch path, the rule applies to a manager only when every Broker launch path for that manager meets this condition.
-The managers that meet it are `Winget`, `Cargo`, `Dotnet`, `Pip` and `Vcpkg`, named as in `CONTRACT.package-management.md §operations`'s manager mapping.
+The managers that meet it are `Winget`, `PowerShell`, `PowerShell7`, `Bun`, `Cargo`, `Dotnet`, `Npm`, `Pip`, `Scoop` and `Vcpkg`, named as in `CONTRACT.package-management.md §operations`'s manager mapping.
+`PowerShell` and `PowerShell7` run PowerShell commands rather than a manager process, so for them the manager's exit code is 0 when every command completes without error and nonzero otherwise.
 Otherwise the Agent reports `UNKNOWN`.
 A nonzero code from such a wrapper may mean that the manager could not start, such as 9009 from `cmd.exe`, and is a known failure in the format below.
 Exit code 0 is a known success.

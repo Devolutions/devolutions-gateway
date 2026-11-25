@@ -528,4 +528,25 @@ mod tests {
                 .contains("skip-hash-check")
         );
     }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn generated_script_exits_with_scoop_exit_code() {
+        let fake_scoop = tempfile::tempdir().expect("create temp dir");
+        for operation in [Operation::Install, Operation::Update, Operation::Uninstall] {
+            let mut request = make_request();
+            request.operation = operation;
+            let cmd = build_scoop_command(&request).expect("build command");
+            for code in [7, 0] {
+                std::fs::write(fake_scoop.path().join("scoop.ps1"), format!("exit {code}\r\n"))
+                    .expect("write fake Scoop");
+                assert_eq!(
+                    crate::executor::run_prepared_for_test(&cmd, Some(fake_scoop.path())),
+                    Some(code),
+                    "{operation:?}"
+                );
+            }
+        }
+    }
 }
