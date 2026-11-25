@@ -1616,27 +1616,17 @@ mod tests {
     }
 
     fn run_powershell_script(host: &str, script: &str) -> Option<i32> {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            host.to_owned(),
-            "-NoProfile".to_owned(),
-            "-NonInteractive".to_owned(),
-            "-ExecutionPolicy".to_owned(),
-            "Bypass".to_owned(),
-            "-Command".to_owned(),
-            script.to_owned(),
-        ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
-        std::process::Command::new(&command.args()[0])
-            .args(&command.args()[1..])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .expect("run PowerShell host")
-            .status
-            .code()
+        let command = [
+            host,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ]
+        .map(str::to_owned);
+        super::run_prepared_for_test(&command, None)
     }
 
     fn assert_powershell_host_reports_script_exit(host: &str) {

@@ -28,7 +28,10 @@ const POWERSHELL7_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',',
 /// Makes every error terminate the script with a nonzero exit, and pins culture-sensitive
 /// lookups, including `-Repository` name matching, to the invariant culture instead of the
 /// host locale.
-const SCRIPT_PREFIX: &str = "$ErrorActionPreference = 'Stop'; [System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture;";
+///
+/// The preference is global because script-module functions such as PowerShellGet's
+/// `Install-Module` read it from the global scope, not from the calling script.
+const SCRIPT_PREFIX: &str = "$global:ErrorActionPreference = 'Stop'; [System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture;";
 
 /// The executor reports the script's exit code, and a script that reaches its end without an
 /// error has succeeded.
@@ -786,11 +789,33 @@ mod tests {
                 .expect("build command");
                 let script = script_of(&cmd);
                 assert!(
-                    script.starts_with("$ErrorActionPreference = 'Stop';"),
+                    script.starts_with("$global:ErrorActionPreference = 'Stop';"),
                     "{manager:?} {operation:?}"
                 );
                 assert!(script.ends_with("; exit 0"), "{manager:?} {operation:?}");
             }
         }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn script_fails_on_a_non_terminating_error_inside_a_module_function() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let module = temp_dir.path().join("Fails.psm1");
+        std::fs::write(
+            &module,
+            "function Test-Fails { [CmdletBinding()] param() Write-Error 'failed'; 'continued' }",
+        )
+        .expect("write module");
+
+        let mut cmd = build_powershell5_command(&make_request(ManagerName::PowerShell)).expect("build command");
+        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Bypass".to_owned()]);
+        *cmd.last_mut().expect("script argument") = format!(
+            "{SCRIPT_PREFIX} Import-Module '{}'; Test-Fails{SCRIPT_SUFFIX}",
+            module.display()
+        );
+
+        assert_ne!(crate::executor::run_prepared_for_test(&cmd, None), Some(0));
     }
 }
