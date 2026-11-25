@@ -971,8 +971,7 @@ async fn finish_sent_until(
 
 fn outcome_for_exit(manager: &str, exit_code: i32) -> Outcome {
     // UNTESTED: Installed managers and the Python app alias are not exercised by these tests.
-    // Every launch path of a trusted manager must return the manager's exit code, or nonzero when it cannot start,
-    // to avoid false success; verify each when adding a manager or changing a Broker launch path.
+    // Every launch path of a trusted manager must return the manager's exit code, or nonzero when it cannot start, to avoid false success; verify each when adding a manager or changing a Broker launch path.
     // Chocolatey stays untrusted: its batch maps reboot-pending exit codes to 0.
     if !parse_manager(manager).is_some_and(|manager| SUPPORTED_MANAGERS.contains(&manager)) {
         return Outcome::Unknown;

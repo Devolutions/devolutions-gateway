@@ -497,8 +497,7 @@ fn prepare_main_command(
     prepare_main_command_in(command, None, Some(&user_env), requires_elevation)
 }
 
-// The Agent trusts recorded exit codes only for managers whose every launch path here preserves them
-// (`outcome_for_exit` in devolutions-agent's device_management/operation.rs); re-check that list when a launch path changes.
+// The Agent trusts recorded exit codes only for managers whose every launch path here preserves them (`outcome_for_exit` in devolutions-agent's device_management/operation.rs); re-check that list when a launch path changes.
 fn prepare_main_command_in(
     command: &[String],
     temp_dir: Option<&Path>,
@@ -631,8 +630,7 @@ fn prepare_powershell_script(
 /// Returns the `-Command` text that runs `path` and exits with the script's own exit code.
 ///
 /// A bare `& 'path'` makes the host exit with 0 or 1 only, whatever the script passed to `exit`.
-/// `exit $LASTEXITCODE` forwards the code, and the sentinel makes a script that sets no exit code,
-/// because it runs no native command and never calls `exit`, report failure rather than success.
+/// `exit $LASTEXITCODE` forwards the code, and the sentinel makes a script that sets no exit code, because it runs no native command and never calls `exit`, report failure rather than success.
 /// The generated manager scripts therefore always end with an explicit `exit`.
 fn powershell_script_invocation(path: &str) -> String {
     format!(
@@ -949,28 +947,6 @@ fn prepare_user_batch_script(
     ];
 
     Ok(PreparedCommand::with_script(prepared, temp_script))
-}
-
-/// Runs a manager command as the executor prepares it and returns the process exit code.
-///
-/// `path_prefix`, when set, is searched first for the manager, so tests can substitute a fake one.
-#[cfg(test)]
-pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> Option<i32> {
-    let temp_dir = tempfile::tempdir().expect("create temp dir");
-    let prepared =
-        prepare_main_command_in(command, Some(temp_dir.path()), None, false).expect("prepare manager command");
-    let mut process = std::process::Command::new(&prepared.args()[0]);
-    process
-        .args(&prepared.args()[1..])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    if let Some(prefix) = path_prefix {
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let paths = std::iter::once(prefix.to_path_buf()).chain(std::env::split_paths(&path));
-        process.env("PATH", std::env::join_paths(paths).expect("join PATH"));
-    }
-    process.output().expect("run manager command").status.code()
 }
 
 fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
@@ -1478,6 +1454,28 @@ impl PreparedCommand {
     }
 }
 
+/// Runs a manager command as the executor prepares it and returns the process exit code.
+///
+/// `path_prefix`, when set, is searched first for the manager, so tests can substitute a fake one.
+#[cfg(test)]
+pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> Option<i32> {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let prepared =
+        prepare_main_command_in(command, Some(temp_dir.path()), None, false).expect("prepare manager command");
+    let mut process = std::process::Command::new(&prepared.args()[0]);
+    process
+        .args(&prepared.args()[1..])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Some(prefix) = path_prefix {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let paths = std::iter::once(prefix.to_path_buf()).chain(std::env::split_paths(&path));
+        process.env("PATH", std::env::join_paths(paths).expect("join PATH"));
+    }
+    process.output().expect("run manager command").status.code()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1651,6 +1649,14 @@ mod tests {
             ),
             Some(0),
             "{host}: a terminating error is a failure"
+        );
+        assert_ne!(
+            run_powershell_script(
+                host,
+                "$ErrorActionPreference = 'Stop'; cmd /c exit 0; Get-Item 'Z:\\no\\such\\item'; exit 0"
+            ),
+            Some(0),
+            "{host}: a terminating error after a successful native command is a failure"
         );
         assert_ne!(
             run_powershell_script(host, "$ErrorActionPreference = 'Stop'; no-such-command-xyz; exit 0"),
