@@ -596,8 +596,13 @@ impl OperationJournal {
         let completed = record.and_then(|record| {
             let mut record = record.context("no package operation record to complete")?;
             match &record.outcome {
-                Some(recorded) if *recorded == outcome && (!started || record.execution_started) => Ok(()),
-                Some(_) => bail!("package operation already has a different recorded outcome"),
+                Some(recorded) if *recorded != outcome => {
+                    bail!("package operation already has a different recorded outcome")
+                }
+                Some(_) if started && !record.execution_started => {
+                    bail!("package operation was recorded without start evidence")
+                }
+                Some(_) => Ok(()),
                 None => {
                     record.execution_started |= started;
                     record.outcome = Some(outcome);

@@ -150,6 +150,10 @@ pub enum OutcomeSummary {
     Started,
     /// The Broker observed the started process exit with this code.
     Exited { exit_code: i32 },
+    /// The execution ended without an observable exit, preserving whether the process was started.
+    ///
+    /// This does not prove that the process stopped.
+    Unobservable { started: bool },
 }
 
 struct Record {
@@ -176,7 +180,15 @@ impl State {
             let victim = self
                 .records
                 .iter()
-                .min_by_key(|(_, record)| (!matches!(record.state, OutcomeSummary::Exited { .. }), record.sequence))
+                .min_by_key(|(_, record)| {
+                    (
+                        !matches!(
+                            record.state,
+                            OutcomeSummary::Exited { .. } | OutcomeSummary::Unobservable { .. }
+                        ),
+                        record.sequence,
+                    )
+                })
                 .map(|(key, _)| *key);
 
             if let Some(victim) = victim {
@@ -218,6 +230,21 @@ impl ExecutionRecord {
     /// Records that the started process exited with `exit_code`; returns whether the record advanced.
     pub fn mark_exited(&self, exit_code: i32) -> bool {
         self.advance(OutcomeSummary::Started, OutcomeSummary::Exited { exit_code })
+    }
+
+    /// Records that no exit can be observed, without discarding any start evidence.
+    pub fn mark_unobservable(&self) -> bool {
+        let mut state = self.store.state.lock();
+        let Some(record) = state.records.get_mut(&self.key) else {
+            return false;
+        };
+        let started = match record.state {
+            OutcomeSummary::Consumed => false,
+            OutcomeSummary::Started => true,
+            _ => return false,
+        };
+        record.state = OutcomeSummary::Unobservable { started };
+        true
     }
 
     fn advance(&self, from: OutcomeSummary, to: OutcomeSummary) -> bool {
@@ -272,6 +299,15 @@ impl RemoteGrantStore {
         request: &PackageRequest,
     ) -> Result<ExecutionRecord, GrantDenied> {
         self.consume_at(Instant::now(), grant, caller, request)
+    }
+
+    /// Withdraws `grant` if it is still unconsumed, so it can no longer be used and no longer counts against the pending limit.
+    ///
+    /// A record created by an earlier consumption is unaffected.
+    pub fn revoke(&self, grant: &RemoteGrant) {
+        if let Ok(secret) = hex::decode(grant.expose_secret()) {
+            self.state.lock().grants.remove(&digest(&secret));
+        }
     }
 
     /// Reads the non-secret outcome summary for an issued grant without changing it.
@@ -793,6 +829,31 @@ mod tests {
         assert_eq!(store.state.lock().grants.len(), 1);
     }
 
+    // oracle: mutant revocation that leaves the grant usable, counted, or erases a consumed record
+    #[test]
+    fn revoking_withdraws_only_an_unconsumed_grant() {
+        let (store, unsent, request) = issued();
+        store.revoke(&unsent.grant);
+        assert!(store.state.lock().grants.is_empty());
+        assert_eq!(
+            store
+                .consume(unsent.grant.expose_secret(), &caller(), &request)
+                .map(drop),
+            Err(GrantDenied)
+        );
+
+        let (store, consumed, request) = issued();
+        let record = store
+            .consume(consumed.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+        assert!(record.mark_started());
+        store.revoke(&consumed.grant);
+        assert_eq!(
+            store.outcome(&consumed.grant, &consumed.request_id),
+            OutcomeSummary::Started
+        );
+    }
+
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[test]
     fn concurrent_consumption_succeeds_exactly_once() {
@@ -1019,6 +1080,26 @@ mod tests {
         assert!(!record.mark_exited(0));
         assert!(!record.mark_started());
         assert_eq!(read(), OutcomeSummary::Exited { exit_code: 3 });
+        assert!(!record.mark_unobservable());
+        assert_eq!(read(), OutcomeSummary::Exited { exit_code: 3 });
+    }
+
+    // oracle: mutant a terminal unobservable record gains a later, unreliable exit
+    #[test]
+    fn unobservable_outcome_keeps_start_evidence_and_is_terminal() {
+        let (store, issued, request) = issued();
+        let record = store
+            .consume(issued.grant.expose_secret(), &caller(), &request)
+            .expect("consume");
+        assert!(record.mark_started());
+        assert!(record.mark_unobservable());
+        assert!(!record.mark_started());
+        assert!(!record.mark_exited(0));
+        assert!(!record.mark_unobservable());
+        assert_eq!(
+            store.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unobservable { started: true }
+        );
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations

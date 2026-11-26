@@ -22,7 +22,7 @@ use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
     ProcessStartedCallback, TokenElevationCheck, is_canceled_error,
 };
-use crate::command_builder::{BATCH_METACHARACTERS, quote_powershell_literal};
+use crate::command_builder::BATCH_METACHARACTERS;
 use crate::policy_security;
 
 mod privileges;
@@ -497,6 +497,7 @@ fn prepare_main_command(
     prepare_main_command_in(command, None, Some(&user_env), requires_elevation)
 }
 
+// The Agent trusts recorded exit codes only for managers whose every launch path here preserves them (`outcome_for_exit` in devolutions-agent's device_management/operation.rs); re-check that list when a launch path changes.
 fn prepare_main_command_in(
     command: &[String],
     temp_dir: Option<&Path>,
@@ -504,14 +505,7 @@ fn prepare_main_command_in(
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     if let Some((script, command_arg_index)) = powershell_inline_script(command) {
-        return prepare_powershell_script(
-            command,
-            command_arg_index,
-            script,
-            temp_dir,
-            user_env,
-            requires_elevation,
-        );
+        return prepare_powershell_script(command, command_arg_index, script, user_env, requires_elevation);
     }
 
     if executable_is(command, "winget.exe") {
@@ -584,29 +578,11 @@ fn prepare_powershell_script(
     command: &[String],
     command_arg_index: usize,
     script: &str,
-    temp_dir: Option<&Path>,
     user_env: Option<&UserEnv<'_>>,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     command.first().context("empty PowerShell command")?;
     let is_windows_powershell = executable_is(command, "powershell.exe");
-    let script = powershell_script_with_utf8_preamble(script);
-    let temp_script = broker_temp_script("ps1", temp_dir)?;
-    if is_windows_powershell {
-        temp_script.write_content_utf8_bom(&script).with_context(|| {
-            format!(
-                "failed to write broker temporary script at {}",
-                temp_script.path().display()
-            )
-        })?;
-    } else {
-        temp_script.write_content(&script).with_context(|| {
-            format!(
-                "failed to write broker temporary script at {}",
-                temp_script.path().display()
-            )
-        })?;
-    }
 
     let mut prepared = command[..command_arg_index].to_vec();
     let mut exe_guard = None;
@@ -621,13 +597,20 @@ fn prepare_powershell_script(
         executable.display().to_string()
     };
     prepared.push("-Command".to_owned());
-    prepared.push(format!("& {}", quote_powershell_literal(&temp_script.path_string())));
+    prepared.push(powershell_inline_command(script));
 
-    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
+    Ok(PreparedCommand::raw(&prepared).with_exe_guard(exe_guard))
 }
 
-fn powershell_script_with_utf8_preamble(script: &str) -> String {
-    format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n{script}")
+/// Returns the `-Command` text that runs `script` inline and exits with the script's own exit code.
+///
+/// Execution policy governs script files, not `-Command` text, so the script itself also runs under the default `Restricted` policy.
+/// Modules the script loads remain subject to the policy: under `Restricted`, Windows PowerShell loads only catalog-signed modules such as the inbox PowerShellGet, so a PowerShellGet updated from the Gallery fails to load and the operation fails.
+/// `-EncodedCommand` is avoided because Windows PowerShell then writes redirected error output as CLIXML.
+/// The sentinel makes a script that sets no exit code, because it runs no native command and never calls `exit`, report failure rather than success.
+/// The generated manager scripts therefore always end with an explicit `exit`.
+fn powershell_inline_command(script: &str) -> String {
+    format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n$global:LASTEXITCODE = 1\r\n{script}\r\nexit $LASTEXITCODE")
 }
 
 fn prepare_winget_script(
@@ -639,7 +622,7 @@ fn prepare_winget_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (executable, args) = command.split_first().context("empty WinGet command")?;
     let (executable, exe_guard) = user_env.map_or_else(
@@ -710,7 +693,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (_executable, args) = command.split_first().context("empty Chocolatey command")?;
     let (executable, install_root, exe_guard) =
@@ -757,7 +740,7 @@ fn prepare_vcpkg_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (executable, args) = command.split_first().context("empty vcpkg command")?;
     let executable = user_env.map_or_else(
@@ -799,7 +782,7 @@ fn prepare_cargo_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
 
     let (executable, args) = command.split_first().context("empty Cargo command")?;
     let executable = user_env.map_or_else(
@@ -908,7 +891,7 @@ fn prepare_user_batch_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\nset \"ERRORLEVEL=\"\r\n");
     append_batch_executable(&mut script, executable)?;
     for arg in args {
         script.push(' ');
@@ -981,7 +964,7 @@ fn prepare_bun_cmd_script(
     let mut script = String::new();
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
-    script.push_str("\r\ncall ");
+    script.push_str("\r\nset \"ERRORLEVEL=\"\r\ncall ");
     // `call` expands the line a second time, so percent signs and carets would not survive literally.
     if executable.contains(['%', '^']) {
         bail!("bun.cmd path cannot contain percent signs or carets");
@@ -991,7 +974,9 @@ fn prepare_bun_cmd_script(
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
     }
-    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+    // A shim can leave an `ERRORLEVEL` variable set, which would shadow the real exit code below.
+    // In a `.bat` script, `set` does not change the errorlevel itself.
+    script.push_str("\r\nset \"ERRORLEVEL=\"\r\nexit /b %ERRORLEVEL%\r\n");
 
     let temp_script = broker_temp_script("bat", temp_dir)?;
     temp_script.write_content(&script).with_context(|| {
@@ -1439,6 +1424,43 @@ impl PreparedCommand {
     }
 }
 
+/// Runs a manager command as the executor prepares it and returns the process exit code.
+///
+/// `path_prefix`, when set, is searched first for the manager, so tests can substitute a fake one.
+#[cfg(test)]
+pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> Option<i32> {
+    output_of_prepared_for_test(command, path_prefix, &[]).status.code()
+}
+
+/// Runs a manager command as [`run_prepared_for_test`] does, with `env` added to its environment, and returns its output.
+///
+/// The arguments are encoded with the same `CommandLine` encoder the executor uses.
+#[cfg(test)]
+pub(crate) fn output_of_prepared_for_test(
+    command: &[String],
+    path_prefix: Option<&Path>,
+    env: &[(&str, &str)],
+) -> std::process::Output {
+    use std::os::windows::process::CommandExt as _;
+
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let prepared =
+        prepare_main_command_in(command, Some(temp_dir.path()), None, false).expect("prepare manager command");
+    let mut process = std::process::Command::new(&prepared.args()[0]);
+    process
+        .raw_arg(win_api_wrappers::utils::CommandLine::new(prepared.args()[1..].to_vec()).to_command_line())
+        .envs(env.iter().copied())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Some(prefix) = path_prefix {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let paths = std::iter::once(prefix.to_path_buf()).chain(std::env::split_paths(&path));
+        process.env("PATH", std::env::join_paths(paths).expect("join PATH"));
+    }
+    process.output().expect("run manager command")
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1456,10 +1478,10 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, TOKEN_ALL_ACCESS, WinWorldSid};
 
     use super::{
-        BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, UserEnv, WindowsExecutor, append_batch_executable,
-        execute_as_current_user, prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root,
-        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
-        resolve_trusted_chocolatey_executable, resolve_winget_executable, run_plan, verify_token_elevation,
+        BATCH_METACHARACTERS, UserEnv, WindowsExecutor, append_batch_executable, execute_as_current_user,
+        prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in,
+        prepare_shell_command_in, reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable,
+        resolve_winget_executable, run_plan, verify_token_elevation,
     };
     use crate::executor::{CommandExecutor as _, ExecutionContext, TokenElevationCheck};
 
@@ -1501,74 +1523,319 @@ mod tests {
         assert_eq!(script, "@chcp 65001 > nul\r\necho héllo");
     }
 
+    // oracle: mutant writing the script to a temporary `.ps1` file, which a `Restricted` execution policy refuses to run
     #[test]
-    fn powershell_command_uses_temp_script_file() {
+    fn powershell_command_runs_its_script_inline() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            "powershell.exe".to_owned(),
-            "-NoProfile".to_owned(),
-            "-Command".to_owned(),
-            "Write-Output 'héllo'".to_owned(),
-        ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
+        for (host, trusted_suffix) in [
+            ("powershell.exe", r"\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            ("pwsh.exe", r"\PowerShell\7\pwsh.exe"),
+        ] {
+            let command = [
+                host,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Write-Output 'héllo'; exit 0",
+            ]
+            .map(str::to_owned);
+            let command = prepare_main_command_in(&command, Some(temp_dir.path()), None, false)
+                .expect("prepare PowerShell command");
 
-        assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
-        assert_eq!(command.args()[1], "-NoProfile");
-        assert_eq!(command.args()[2], "-Command");
-        assert!(command.args()[3].starts_with("& '"));
-
-        let script = std::fs::read(&command.args()[3][3..command.args()[3].len() - 1]).expect("read temp script");
-        assert!(script.starts_with(b"\xEF\xBB\xBF"));
-        let script = String::from_utf8_lossy(&script);
-        assert!(script.contains(POWERSHELL_UTF8_ENCODING_PREAMBLE));
-        assert!(script.contains("\r\nWrite-Output 'héllo'"));
+            assert!(command.args()[0].ends_with(trusted_suffix), "{host}");
+            assert_eq!(
+                command.args()[1..4],
+                ["-NoProfile", "-NonInteractive", "-Command"],
+                "{host}"
+            );
+            assert_eq!(command.args().len(), 5, "{host}");
+            assert!(command.args()[4].contains("Write-Output 'héllo'; exit 0"), "{host}");
+        }
+        assert_eq!(
+            std::fs::read_dir(temp_dir.path()).expect("read temp dir").count(),
+            0,
+            "no script file is written"
+        );
     }
 
-    #[test]
-    fn powershell_command_preserves_host_flags_before_command() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            "powershell.exe".to_owned(),
-            "-NoProfile".to_owned(),
-            "-ExecutionPolicy".to_owned(),
-            "Bypass".to_owned(),
-            "-Command".to_owned(),
-            "Write-Output 'héllo'".to_owned(),
-        ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
-
-        assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
-        assert_eq!(command.args()[1], "-NoProfile");
-        assert_eq!(command.args()[2], "-ExecutionPolicy");
-        assert_eq!(command.args()[3], "Bypass");
-        assert_eq!(command.args()[4], "-Command");
-        assert!(command.args()[5].starts_with("& '"));
+    fn powershell_under_restricted_policy(host: &str, script: &str) -> [String; 7] {
+        [
+            host,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Restricted",
+            "-Command",
+            script,
+        ]
+        .map(str::to_owned)
     }
 
+    fn powershell_hosts() -> Vec<&'static str> {
+        let mut hosts = vec!["powershell.exe"];
+        // PowerShell 7 is optional on Windows; skip it when absent.
+        if Path::new(&super::trusted_powershell7_executable()).exists() {
+            hosts.push("pwsh.exe");
+        }
+        hosts
+    }
+
+    // oracle: spec PowerShell about_Quoting_Rules §Single-quoted strings
     #[test]
-    fn powershell7_command_uses_bomless_utf8_temp_script_file() {
+    fn quoted_values_reach_the_inline_script_unchanged() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            "pwsh.exe".to_owned(),
+        let marker = temp_dir.path().join("escaped");
+        let create = format!("New-Item -ItemType File -Path '{}'", marker.display());
+        let values = [
+            "héllo".to_owned(),
+            format!("x'; {create}; '"),
+            format!("x\u{2019}; {create}; \u{2019}"),
+            format!("x\"; {create}; \""),
+            format!("x\\\"; {create}; \\\""),
+            "x\\".to_owned(),
+            format!("$({create})"),
+            format!("x`'; {create}; `'"),
+            format!("x\n{create}\n"),
+            format!("x\r\n{create}\r\n"),
+            format!("x # {create}"),
+        ];
+        for host in powershell_hosts() {
+            for value in &values {
+                let script = format!(
+                    "Write-Output {}; exit 0",
+                    crate::command_builder::quote_powershell_literal(value)
+                );
+                let output =
+                    super::output_of_prepared_for_test(&powershell_under_restricted_policy(host, &script), None, &[]);
+
+                assert_eq!(output.status.code(), Some(0), "{host}: {value:?}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout).strip_suffix("\r\n"),
+                    Some(value.as_str()),
+                    "{host}"
+                );
+                assert!(!marker.exists(), "{host}: {value:?} escaped its literal");
+            }
+        }
+    }
+
+    /// Runs `script` as the executor prepares it, under a `Restricted` execution policy for this process only, as on a default Windows client.
+    fn run_powershell_script(host: &str, script: &str) -> Option<i32> {
+        super::run_prepared_for_test(&powershell_under_restricted_policy(host, script), None)
+    }
+
+    fn assert_powershell_host_reports_script_exit(host: &str) {
+        assert_eq!(
+            run_powershell_script(host, "exit 7"),
+            Some(7),
+            "{host}: exact exit code"
+        );
+        assert_eq!(run_powershell_script(host, "exit 0"), Some(0), "{host}: success");
+        assert_eq!(
+            run_powershell_script(
+                host,
+                "$ErrorActionPreference = 'Stop'; [Console]::Error.WriteLine('note'); exit 0"
+            ),
+            Some(0),
+            "{host}: stderr output alone is not a failure"
+        );
+        assert_ne!(
+            run_powershell_script(
+                host,
+                "$ErrorActionPreference = 'Stop'; Get-Item 'Z:\\no\\such\\item'; exit 0"
+            ),
+            Some(0),
+            "{host}: a terminating error is a failure"
+        );
+        assert_ne!(
+            run_powershell_script(
+                host,
+                "$ErrorActionPreference = 'Stop'; cmd /c exit 0; Get-Item 'Z:\\no\\such\\item'; exit 0"
+            ),
+            Some(0),
+            "{host}: a terminating error after a successful native command is a failure"
+        );
+        assert_ne!(
+            run_powershell_script(host, "$ErrorActionPreference = 'Stop'; no-such-command-xyz; exit 0"),
+            Some(0),
+            "{host}: a missing command is a failure"
+        );
+        assert_ne!(
+            run_powershell_script(host, "Write-Output 'done'"),
+            Some(0),
+            "{host}: a script that ends without `exit` or a native command is a failure"
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn windows_powershell_host_reports_the_script_exit_code() {
+        assert_powershell_host_reports_script_exit("powershell.exe");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn powershell7_host_reports_the_script_exit_code() {
+        if !Path::new(&super::trusted_powershell7_executable()).exists() {
+            // PowerShell 7 is optional on Windows; nothing to check without it.
+            return;
+        }
+        assert_powershell_host_reports_script_exit("pwsh.exe");
+    }
+
+    fn manager_exit_probe() -> Vec<String> {
+        vec![
+            super::trusted_windows_powershell_executable(),
             "-NoProfile".to_owned(),
             "-Command".to_owned(),
-            "Write-Output 'héllo'".to_owned(),
-        ];
+            "exit 7".to_owned(),
+        ]
+    }
+
+    fn assert_batch_preserves_manager_exit(command: &super::PreparedCommand) {
+        let run = |shadow_errorlevel: bool| {
+            let mut process = std::process::Command::new(&command.args()[0]);
+            process.args(&command.args()[1..]);
+            if shadow_errorlevel {
+                process.env("ERRORLEVEL", "0");
+            } else {
+                process.env_remove("ERRORLEVEL");
+            }
+            process.status().expect("run generated batch").code()
+        };
+        assert_eq!(run(false), Some(7), "the manager probe must exit with 7");
+        assert_eq!(run(true), Some(7), "an inherited ERRORLEVEL must not mask the exit");
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn winget_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = super::prepare_winget_script(&manager_exit_probe(), Some(temp_dir.path()), None, false)
+            .expect("prepare WinGet batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn winget_batch_reports_failure_when_the_manager_cannot_start() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let missing = temp_dir.path().join("missing-winget.exe");
         let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
+            super::prepare_winget_script(&[missing.display().to_string()], Some(temp_dir.path()), None, false)
+                .expect("prepare WinGet batch");
+        let output = std::process::Command::new(&command.args()[0])
+            .args(&command.args()[1..])
+            .env("ERRORLEVEL", "0")
+            .output()
+            .expect("run generated batch");
+        assert_eq!(output.status.code(), Some(9009));
+    }
 
-        assert!(command.args()[0].ends_with(r"\PowerShell\7\pwsh.exe"));
-        assert_eq!(command.args()[1], "-NoProfile");
-        assert_eq!(command.args()[2], "-Command");
-        assert!(command.args()[3].starts_with("& '"));
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn cargo_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = super::prepare_cargo_script(&manager_exit_probe(), Some(temp_dir.path()), None)
+            .expect("prepare Cargo batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
 
-        let script = std::fs::read(&command.args()[3][3..command.args()[3].len() - 1]).expect("read temp script");
-        assert!(!script.starts_with(b"\xEF\xBB\xBF"));
-        let script = String::from_utf8(script).expect("script is UTF-8");
-        assert!(script.starts_with(POWERSHELL_UTF8_ENCODING_PREAMBLE));
-        assert!(script.contains("\r\nWrite-Output 'héllo'"));
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn vcpkg_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let command = super::prepare_vcpkg_script(&manager_exit_probe(), Some(temp_dir.path()), None)
+            .expect("prepare vcpkg batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn user_alias_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let probe = manager_exit_probe();
+        let command = super::prepare_user_batch_script(&probe[0], &probe[1..], Some(temp_dir.path()))
+            .expect("prepare user alias batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: mutant an inherited ERRORLEVEL masks a nonzero manager exit
+    #[test]
+    fn bun_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let probe = temp_dir.path().join("bun.cmd");
+        std::fs::write(&probe, "@exit /b 7\r\n").expect("write Bun probe");
+        let command = prepare_bun_cmd_script(&probe.display().to_string(), &[], Some(temp_dir.path()))
+            .expect("prepare Bun batch");
+        assert_batch_preserves_manager_exit(&command);
+    }
+
+    // oracle: mutant a shim that leaves an ERRORLEVEL variable set masks its exit code
+    #[test]
+    fn bun_batch_preserves_exit_when_the_shim_sets_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let shims = [
+            ("sets", "@set \"ERRORLEVEL=0\"\r\n@cmd /d /c exit 7\r\n"),
+            (
+                "leaks",
+                "@cmd /d /c exit 7\r\n@set \"ERRORLEVEL=0\"\r\n@cmd /d /c exit 7\r\n",
+            ),
+        ];
+        for (name, shim) in shims {
+            let probe = temp_dir.path().join(format!("{name}-bun.cmd"));
+            std::fs::write(&probe, shim).expect("write Bun probe");
+            let command = prepare_bun_cmd_script(&probe.display().to_string(), &[], Some(temp_dir.path()))
+                .expect("prepare Bun batch");
+            assert_batch_preserves_manager_exit(&command);
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn bun_batch_reports_success_and_a_missing_shim_as_failure() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let run = |shim: &Path| {
+            let command = prepare_bun_cmd_script(&shim.display().to_string(), &[], Some(temp_dir.path()))
+                .expect("prepare Bun batch");
+            std::process::Command::new(&command.args()[0])
+                .args(&command.args()[1..])
+                .env("ERRORLEVEL", "0")
+                .output()
+                .expect("run generated batch")
+                .status
+                .code()
+        };
+        let success = temp_dir.path().join("bun.cmd");
+        std::fs::write(&success, "@set \"ERRORLEVEL=7\"\r\n@exit /b 0\r\n").expect("write Bun probe");
+        assert_eq!(run(&success), Some(0));
+        assert_ne!(run(&temp_dir.path().join("missing-bun.cmd")), Some(0));
+    }
+
+    // oracle: mutant an inherited ERRORLEVEL masks a nonzero manager exit
+    #[test]
+    fn chocolatey_batch_preserves_exit_with_inherited_errorlevel() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let install_root = temp_dir.path().join("chocolatey");
+        let bin = install_root.join("bin");
+        std::fs::create_dir_all(&bin).expect("create fake Chocolatey bin");
+        std::fs::copy(super::trusted_windows_powershell_executable(), bin.join("choco.exe"))
+            .expect("create exit-code probe");
+        let command = vec![
+            "choco.exe".to_owned(),
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            "exit 7".to_owned(),
+        ];
+        let command = prepare_chocolatey_script_in_with_default_install_root(
+            &command,
+            Some(temp_dir.path()),
+            None,
+            &install_root,
+            false,
+        )
+        .expect("prepare Chocolatey batch");
+        assert_batch_preserves_manager_exit(&command);
     }
 
     #[test]
@@ -1726,7 +1993,8 @@ mod tests {
         assert_eq!(command.args()[4], "/C");
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
-        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\ncall "));
+        // oracle: mutant layout change that drops the inherited ERRORLEVEL reset before `call`
+        assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"ERRORLEVEL=\"\r\ncall "));
         assert!(script.contains(&format!(
             "\"{}\" \"add\" \"typescript@5.7.3\" \"--global\"",
             bun_path.display()

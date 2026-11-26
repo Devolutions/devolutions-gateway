@@ -25,16 +25,23 @@ use super::{quote_powershell_literal, uses_default_source, validate_package_vers
 /// Version range syntax accepted by PSResourceGet, such as `[1.0, 2.0)` or `1.*`.
 const POWERSHELL7_VERSION_RANGE_CHARACTERS: &[char] = &['[', ']', '(', ')', ',', '*', ' '];
 
-/// Pins culture-sensitive lookups, including `-Repository` name matching, to the
-/// invariant culture instead of the host locale.
-const INVARIANT_CULTURE_PREFIX: &str =
-    "[System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture;";
+/// Makes every error terminate the script with a nonzero exit, and pins culture-sensitive
+/// lookups, including `-Repository` name matching, to the invariant culture instead of the
+/// host locale.
+///
+/// The preference is global because script-module functions such as PowerShellGet's
+/// `Install-Module` read it from the global scope, not from the calling script.
+const SCRIPT_PREFIX: &str = "$global:ErrorActionPreference = 'Stop'; [System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture;";
+
+/// The executor reports the script's exit code, and a script that reaches its end without an
+/// error has succeeded.
+const SCRIPT_SUFFIX: &str = "; exit 0";
 
 /// Build a Windows PowerShell 5.x (PowerShellGet) command from a validated request.
 pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_powershell_request(request, false)?;
 
-    let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
+    let mut script = SCRIPT_PREFIX.to_owned();
 
     if request.operation != Operation::Install {
         // PowerShellGet 1.x has no `-AllowPrerelease`; 2.x lists prerelease versions only with it.
@@ -83,6 +90,8 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
         }
     }
 
+    script.push_str(SCRIPT_SUFFIX);
+
     Ok(vec![
         "powershell.exe".to_owned(),
         "-NoProfile".to_owned(),
@@ -108,7 +117,7 @@ pub(super) fn build_powershell7_remote_grant_command(request: &PackageRequest) -
 fn build_powershell7(request: &PackageRequest, remote_grant: bool) -> anyhow::Result<Vec<String>> {
     validate_powershell_request(request, remote_grant)?;
 
-    let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
+    let mut script = SCRIPT_PREFIX.to_owned();
 
     if request.operation == Operation::Uninstall {
         let lookup = format!(
@@ -165,6 +174,8 @@ fn build_powershell7(request: &PackageRequest, remote_grant: bool) -> anyhow::Re
             None => {}
         }
     }
+
+    script.push_str(SCRIPT_SUFFIX);
 
     Ok(vec![
         "pwsh.exe".to_owned(),
@@ -440,7 +451,7 @@ mod tests {
         assert_eq!(cmd[0], "powershell.exe");
         // verb, then -Name <id>, -Confirm:$false, -Force.
         assert!(script.starts_with(&format!(
-            "{INVARIANT_CULTURE_PREFIX} Install-Module -Name 'Pester' -Repository 'PSGallery' -Confirm:$false -Force"
+            "{SCRIPT_PREFIX} Install-Module -Name 'Pester' -Repository 'PSGallery' -Confirm:$false -Force"
         )));
         assert!(script.contains("-Scope CurrentUser"));
         assert!(script.contains("-RequiredVersion '5.6.0'"));
@@ -576,7 +587,7 @@ mod tests {
         let script = script_of(&cmd);
         assert_eq!(cmd[0], "pwsh.exe");
         assert!(script.starts_with(&format!(
-            "{INVARIANT_CULTURE_PREFIX} Install-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"
+            "{SCRIPT_PREFIX} Install-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"
         )));
         assert!(script.contains("-Version '5.6.0'"));
         assert!(script.contains("-TrustRepository"));
@@ -678,6 +689,10 @@ mod tests {
             "1.0\u{201B}",
             "1.0;x",
             "$x",
+            "$(calc)",
+            "1.0`x",
+            "1.0\"",
+            "1.0\nx",
             "-1.0",
         ] {
             let mut request = make_request(ManagerName::PowerShell);
@@ -691,6 +706,10 @@ mod tests {
             "PS\u{2019}Gallery",
             "PS;Gallery",
             "$Gallery",
+            "PS$(calc)",
+            "PS`Gallery",
+            "PS\"Gallery",
+            "PS\nGallery",
             "-Gallery",
         ] {
             let mut request = make_request(ManagerName::PowerShell7);
@@ -709,5 +728,93 @@ mod tests {
         let mut request = make_request(ManagerName::PowerShell);
         request.package.version = Some(VersionString("[1.0.0, 2.0.0)".to_owned()));
         build_powershell5_command(&request).expect_err("PowerShellGet -RequiredVersion only accepts exact versions");
+    }
+
+    /// Runs the generated script for a module that is not installed, under a `Restricted` execution policy for this process only.
+    #[cfg(windows)]
+    fn run_for_missing_module(manager: ManagerName, operation: Operation, source: &str) -> Option<i32> {
+        let mut request = make_request(manager);
+        request.operation = operation;
+        request.source.name = source.to_owned();
+        request.package.id = PackageIdentifier::from("Devolutions-NoSuchModule-7f3c".to_owned());
+        let build = if manager == ManagerName::PowerShell7 {
+            build_powershell7_command
+        } else {
+            build_powershell5_command
+        };
+        let mut cmd = build(&request).expect("build command");
+        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Restricted".to_owned()]);
+        crate::executor::run_prepared_for_test(&cmd, None)
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn powershell5_script_fails_for_a_module_that_is_not_installed() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            for source in ["PSGallery", ""] {
+                assert_ne!(
+                    run_for_missing_module(ManagerName::PowerShell, operation, source),
+                    Some(0),
+                    "{operation:?} from {source:?}"
+                );
+            }
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn powershell7_script_fails_for_a_resource_that_is_not_installed() {
+        let pwsh =
+            std::path::Path::new(&std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned()))
+                .join(r"PowerShell\7\pwsh.exe");
+        if !pwsh.exists() {
+            // PowerShell 7 is optional on Windows; nothing to check without it.
+            return;
+        }
+        for source in ["PSGallery", ""] {
+            assert_ne!(
+                run_for_missing_module(ManagerName::PowerShell7, Operation::Uninstall, source),
+                Some(0),
+                "uninstall from {source:?}"
+            );
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn scripts_fail_closed_and_exit_explicitly() {
+        for manager in [ManagerName::PowerShell, ManagerName::PowerShell7] {
+            for operation in [Operation::Install, Operation::Update, Operation::Uninstall] {
+                let mut request = make_request(manager);
+                request.operation = operation;
+                let cmd = if manager == ManagerName::PowerShell7 {
+                    build_powershell7_command(&request)
+                } else {
+                    build_powershell5_command(&request)
+                }
+                .expect("build command");
+                let script = script_of(&cmd);
+                assert!(
+                    script.starts_with("$global:ErrorActionPreference = 'Stop';"),
+                    "{manager:?} {operation:?}"
+                );
+                assert!(script.ends_with("; exit 0"), "{manager:?} {operation:?}");
+            }
+        }
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn script_fails_on_a_non_terminating_error_inside_a_module_function() {
+        let mut cmd = build_powershell5_command(&make_request(ManagerName::PowerShell)).expect("build command");
+        // A dynamic module has its own session state, like PowerShellGet's script module.
+        *cmd.last_mut().expect("script argument") = format!(
+            "{SCRIPT_PREFIX} New-Module -ScriptBlock {{ function Test-Fails {{ [CmdletBinding()] param() Write-Error 'failed'; 'continued' }} }} | Import-Module; Test-Fails{SCRIPT_SUFFIX}"
+        );
+
+        assert_ne!(crate::executor::run_prepared_for_test(&cmd, None), Some(0));
     }
 }

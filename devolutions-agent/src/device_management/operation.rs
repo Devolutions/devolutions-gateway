@@ -68,19 +68,7 @@ impl Plan {
             Err(_) => return Err("unsupported operation type"),
         };
 
-        let manager = SUPPORTED_MANAGERS
-            .into_iter()
-            .find(|manager| manager.to_string().eq_ignore_ascii_case(&request.manager))
-            .or_else(|| {
-                [
-                    ("winps", ManagerName::PowerShell),
-                    ("pwsh", ManagerName::PowerShell7),
-                    ("dotnet-tool", ManagerName::Dotnet),
-                ]
-                .into_iter()
-                .find_map(|(id, manager)| id.eq_ignore_ascii_case(&request.manager).then_some(manager))
-            })
-            .ok_or("unsupported package manager")?;
+        let manager = parse_manager(&request.manager).ok_or("unsupported package manager")?;
 
         let (scope, requested_elevation) = if request.scope.eq_ignore_ascii_case("user") {
             (Scope::User, Elevation::Standard)
@@ -176,6 +164,21 @@ impl Plan {
         }
         arguments
     }
+}
+
+fn parse_manager(name: &str) -> Option<ManagerName> {
+    SUPPORTED_MANAGERS
+        .into_iter()
+        .find(|manager| manager.to_string().eq_ignore_ascii_case(name))
+        .or_else(|| {
+            [
+                ("winps", ManagerName::PowerShell),
+                ("pwsh", ManagerName::PowerShell7),
+                ("dotnet-tool", ManagerName::Dotnet),
+            ]
+            .into_iter()
+            .find_map(|(id, manager)| id.eq_ignore_ascii_case(name).then_some(manager))
+        })
 }
 
 type Reply = Box<dyn FnOnce(PackageOperationResult) + Send>;
@@ -919,6 +922,12 @@ async fn finish_sent_until(
                 outcome = outcome_for_exit(&pending.request.manager, exit_code);
                 break;
             }
+            OutcomeSummary::Unobservable {
+                started: observed_start,
+            } => {
+                started |= observed_start;
+                break;
+            }
         }
 
         let deadline = if started {
@@ -933,8 +942,16 @@ async fn finish_sent_until(
         tokio::select! {
             response = &mut delivery, if !delivery_done => {
                 delivery_done = true;
-                if response.is_err() {
+                if let Err(error) = response {
                     debug!("ExecutePackageOperation produced no usable response");
+                    if error
+                        .downcast_ref::<RequestError>()
+                        .is_some_and(|error| !error.may_have_been_sent())
+                    {
+                        // Nobody received the grant, so withdrawing it frees its slot without affecting any execution.
+                        grants.revoke(&issued.grant);
+                        stopping = true;
+                    }
                 }
             }
             () = tokio::time::sleep_until((Instant::now() + OUTCOME_POLL_INTERVAL).min(deadline)) => {}
@@ -953,6 +970,13 @@ async fn finish_sent_until(
 }
 
 fn outcome_for_exit(manager: &str, exit_code: i32) -> Outcome {
+    // UNTESTED: Installed managers and the Python app alias are not exercised by these tests.
+    // Every launch path of a trusted manager must return the manager's exit code, or nonzero when it cannot start, to avoid false success; verify each when adding a manager or changing a Broker launch path.
+    // Chocolatey stays untrusted: its batch maps reboot-pending exit codes to 0.
+    if !parse_manager(manager).is_some_and(|manager| SUPPORTED_MANAGERS.contains(&manager)) {
+        return Outcome::Unknown;
+    }
+
     match exit_code {
         0 => Outcome::Succeeded,
         // Windows exit codes are DWORDs; the Authority parses the unsigned decimal value.
@@ -1057,10 +1081,14 @@ mod tests {
     }
 
     fn issued_operation() -> anyhow::Result<IssuedOperation> {
+        issued_operation_for("Winget", "winget")
+    }
+
+    fn issued_operation_for(manager: &str, source: &str) -> anyhow::Result<IssuedOperation> {
         let root = test_tempdir()?;
         let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
         let journal = Arc::new(OperationJournal::open(data)?);
-        let request = request(PackageOperationType::Install, "Winget", "winget", "user");
+        let request = request(PackageOperationType::Install, manager, source, "user");
         assert_eq!(journal.admit("authority", &request)?, Admission::Admitted);
         let pending = Pending {
             journal: Arc::clone(&journal),
@@ -1126,6 +1154,10 @@ mod tests {
     }
 
     fn sent_operation() -> anyhow::Result<SentOperation> {
+        sent_operation_for("Winget", "winget")
+    }
+
+    fn sent_operation_for(manager: &str, source: &str) -> anyhow::Result<SentOperation> {
         let IssuedOperation {
             _root,
             journal,
@@ -1134,7 +1166,7 @@ mod tests {
             issued,
             caller,
             broker_request,
-        } = issued_operation()?;
+        } = issued_operation_for(manager, source)?;
         let record = grants.consume(issued.grant.expose_secret(), &caller, &broker_request)?;
         Ok(SentOperation {
             journal,
@@ -1280,6 +1312,72 @@ mod tests {
             execution_started: Some(true),
         };
         assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn trusted_wrapper_launch_failure_is_a_known_failure() -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        assert!(record.mark_started());
+        assert!(record.mark_exited(9009));
+
+        let settled = finish_sent(pending, &grants, &issued, None, std::future::pending())
+            .await
+            .settled;
+        let expected = Settled {
+            outcome: Outcome::Failed {
+                error: "Winget exited with code 9009".to_owned(),
+            },
+            execution_started: Some(true),
+        };
+        assert_eq!(settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[rstest::rstest]
+    #[case::started(true, Some(true))]
+    #[case::not_started(false, None)]
+    #[tokio::test]
+    async fn unobservable_execution_settles_without_waiting_for_the_deadline(
+        #[case] started: bool,
+        #[case] execution_started: Option<bool>,
+    ) -> anyhow::Result<()> {
+        let SentOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            record,
+        } = sent_operation()?;
+        let request = pending.request.clone();
+        if started {
+            assert!(record.mark_started());
+        }
+        assert!(record.mark_unobservable());
+        let completion = tokio::time::timeout(
+            Duration::from_secs(3),
+            finish_sent(pending, &grants, &issued, None, std::future::pending()),
+        )
+        .await?;
+
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started,
+        };
+        assert_eq!(completion.settled, expected);
         assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
@@ -1542,11 +1640,31 @@ mod tests {
             }
         );
         assert_eq!(
-            outcome_for_exit(".NET Tool", -1),
+            outcome_for_exit("dotnet-tool", -1),
             Outcome::Failed {
-                error: ".NET Tool exited with code 4294967295".to_owned()
+                error: "dotnet-tool exited with code 4294967295".to_owned()
             }
         );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[test]
+    fn only_managers_with_reliable_launch_paths_trust_exit_codes() {
+        for manager in SUPPORTED_MANAGERS {
+            let name = manager.to_string();
+            assert_eq!(outcome_for_exit(&name, 0), Outcome::Succeeded, "{name}");
+            assert_eq!(
+                outcome_for_exit(&name, 7),
+                Outcome::Failed {
+                    error: format!("{name} exited with code 7"),
+                },
+                "{name}"
+            );
+        }
+        for name in [ManagerName::Chocolatey.to_string(), "unknown-manager".to_owned()] {
+            assert_eq!(outcome_for_exit(&name, 0), Outcome::Unknown, "{name}");
+            assert_eq!(outcome_for_exit(&name, 7), Outcome::Unknown, "{name}");
+        }
     }
 
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -1846,6 +1964,89 @@ mod tests {
             }
         );
         assert!(may_have_been_sent);
+        Ok(())
+    }
+
+    // oracle: mutant waiting for start after delivery is proven not sent
+    #[tokio::test]
+    async fn not_sent_settles_without_waiting_for_start() -> anyhow::Result<()> {
+        let IssuedOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            caller,
+            broker_request,
+        } = issued_operation()?;
+        let request = pending.request.clone();
+        let now = Instant::now();
+        let completion = tokio::time::timeout(
+            Duration::from_secs(3),
+            finish_sent_until(
+                pending,
+                &grants,
+                &issued,
+                None,
+                async { Err(RequestError::NotSent("connection closed").into()) },
+                WaitLimits {
+                    start_deadline: now + Duration::from_secs(60),
+                    operation_deadline: now + Duration::from_secs(120),
+                    consumed_grace: Duration::from_secs(60),
+                },
+            ),
+        )
+        .await?;
+
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: None,
+        };
+        assert_eq!(completion.settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
+        assert!(
+            grants
+                .consume(issued.grant.expose_secret(), &caller, &broker_request)
+                .is_err(),
+            "an unsent grant is revoked"
+        );
+        Ok(())
+    }
+
+    // oracle: mutant NotSent discards start evidence observed during delivery
+    #[tokio::test]
+    async fn not_sent_takes_a_final_broker_sample() -> anyhow::Result<()> {
+        let IssuedOperation {
+            _root,
+            journal,
+            pending,
+            grants,
+            issued,
+            caller,
+            broker_request,
+        } = issued_operation()?;
+        let request = pending.request.clone();
+        let grant = issued.grant.expose_secret().to_owned();
+        let delivery_grants = grants.clone();
+        let delivery = async move {
+            let record = delivery_grants
+                .consume(&grant, &caller, &broker_request)
+                .expect("consume grant");
+            assert!(record.mark_started());
+            Err(RequestError::NotSent("connection closed").into())
+        };
+        let completion = tokio::time::timeout(
+            Duration::from_secs(3),
+            finish_sent(pending, &grants, &issued, None, delivery),
+        )
+        .await?;
+
+        let expected = Settled {
+            outcome: Outcome::Unknown,
+            execution_started: Some(true),
+        };
+        assert_eq!(completion.settled, expected);
+        assert_eq!(journal.admit("authority", &request)?, Admission::Recorded(expected));
         Ok(())
     }
 

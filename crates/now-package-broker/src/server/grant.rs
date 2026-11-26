@@ -249,7 +249,7 @@ mod tests {
     use win_api_wrappers::identity::sid::Sid;
 
     use super::*;
-    use crate::executor::{CommandExecutor, ExecutionOutput, ProcessStartedCallback};
+    use crate::executor::{CommandExecutor, ExecutionOutput, OperationCanceled, ProcessStartedCallback};
     use crate::operation_tracker::OperationTracker;
     use crate::policy_store::PolicyStore;
     use crate::remote_grant::{GrantSpec, IssuedGrant, OutcomeSummary, RemoteGrantStore};
@@ -279,6 +279,31 @@ mod tests {
                 stdout: String::new(),
                 started_at: None,
             })
+        }
+    }
+
+    struct FailingExecutor {
+        reports_start: bool,
+        canceled: bool,
+    }
+
+    #[async_trait]
+    impl CommandExecutor for FailingExecutor {
+        async fn execute(
+            &self,
+            _ctx: &ExecutionContext,
+            process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            if self.reports_start
+                && let Some(process_started) = process_started
+            {
+                process_started(Utc::now());
+            }
+            if self.canceled {
+                Err(OperationCanceled.into())
+            } else {
+                anyhow::bail!("injected executor failure")
+            }
         }
     }
 
@@ -531,6 +556,66 @@ mod tests {
         assert_eq!(
             silent.remote_grants.outcome(&issued.grant, &issued.request_id),
             OutcomeSummary::Consumed
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn executor_failure_ends_the_broker_wait() {
+        let mut state = state(true, 0);
+        Arc::get_mut(&mut state).expect("state is not shared").executor = Arc::new(FailingExecutor {
+            reports_start: true,
+            canceled: false,
+        });
+        let client = client();
+        let spec = spec(&client);
+        let issued = state.remote_grants.issue(spec.clone()).expect("issue");
+        let (_, response) = execute(&state, &client, &spec, &issued).await;
+        wait_until_finished(&state, &response).await;
+
+        assert_eq!(
+            state.remote_grants.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unobservable { started: true }
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn canceled_execution_ends_the_broker_wait_with_start_evidence() {
+        let mut state = state(true, 0);
+        Arc::get_mut(&mut state).expect("state is not shared").executor = Arc::new(FailingExecutor {
+            reports_start: true,
+            canceled: true,
+        });
+        let client = client();
+        let spec = spec(&client);
+        let issued = state.remote_grants.issue(spec.clone()).expect("issue");
+        let (_, response) = execute(&state, &client, &spec, &issued).await;
+        wait_until_finished(&state, &response).await;
+
+        assert_eq!(
+            state.remote_grants.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unobservable { started: true }
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[tokio::test]
+    async fn executor_failure_before_start_does_not_claim_a_start() {
+        let mut state = state(true, 0);
+        Arc::get_mut(&mut state).expect("state is not shared").executor = Arc::new(FailingExecutor {
+            reports_start: false,
+            canceled: false,
+        });
+        let client = client();
+        let spec = spec(&client);
+        let issued = state.remote_grants.issue(spec.clone()).expect("issue");
+        let (_, response) = execute(&state, &client, &spec, &issued).await;
+        wait_until_finished(&state, &response).await;
+
+        assert_eq!(
+            state.remote_grants.outcome(&issued.grant, &issued.request_id),
+            OutcomeSummary::Unobservable { started: false }
         );
     }
 

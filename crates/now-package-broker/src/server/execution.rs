@@ -24,6 +24,8 @@ pub(super) fn spawn_execution(
         let started_tracker = tracker.clone();
         let started_operation_id = operation_id_string.clone();
         let started_outcome = outcome.clone();
+        // UNTESTED: The Windows executor calls the start callback before returning an error.
+        // A late callback would lose start evidence; verify the ordering if execution becomes detached.
         // The executor calls this only once the operation's process exists, which is the evidence the record needs.
         let process_started: ProcessStartedCallback = Arc::new(move |started_at| {
             if let Some(outcome) = &started_outcome {
@@ -58,6 +60,9 @@ pub(super) fn spawn_execution(
                 tracker.mark_completed(&operation_id_string, output.exit_code, note, output.started_at);
             }
             Err(error) if is_canceled_error(&error) => {
+                if let Some(outcome) = &outcome {
+                    outcome.mark_unobservable();
+                }
                 info!(operation_id = %operation_id_string, "Background execution canceled");
                 tracker.mark_canceled(
                     &operation_id_string,
@@ -65,6 +70,9 @@ pub(super) fn spawn_execution(
                 );
             }
             Err(error) => {
+                if let Some(outcome) = &outcome {
+                    outcome.mark_unobservable();
+                }
                 let note = format!("{error:#}");
                 error!(operation_id = %operation_id_string, %error, "Background execution failed");
                 tracker.mark_failed(&operation_id_string, note);
