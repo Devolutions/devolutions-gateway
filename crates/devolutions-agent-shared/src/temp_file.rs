@@ -1,5 +1,6 @@
+use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
 use tracing::error;
 
@@ -64,6 +65,13 @@ impl TmpFileGuard {
 
     pub fn write_bytes(&self, content: &[u8]) -> io::Result<()> {
         fs::write(&self.path, content)
+    }
+
+    /// Write content as UTF-8 with a BOM prefix for Windows PowerShell 5.x script files.
+    pub fn write_content_utf8_bom(&self, content: &str) -> io::Result<()> {
+        let mut file = fs::File::create(&self.path)?;
+        file.write_all(b"\xEF\xBB\xBF")?;
+        file.write_all(content.as_bytes())
     }
 
     pub fn path(&self) -> &Path {
