@@ -17,6 +17,8 @@ import { CustomHttpParameterCodec }                          from '../encoder';
 import { Observable }                                        from 'rxjs';
 
 // @ts-ignore
+import { ApiError } from '../model/apiError';
+// @ts-ignore
 import { PreflightOperation } from '../model/preflightOperation';
 // @ts-ignore
 import { PreflightOutput } from '../model/preflightOutput';
@@ -98,10 +100,10 @@ export class PreflightService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public postPreflight(preflightOperation: Array<PreflightOperation>, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<Array<PreflightOutput>>;
-    public postPreflight(preflightOperation: Array<PreflightOperation>, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<PreflightOutput>>>;
-    public postPreflight(preflightOperation: Array<PreflightOperation>, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<PreflightOutput>>>;
-    public postPreflight(preflightOperation: Array<PreflightOperation>, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public postPreflight(preflightOperation: Array<PreflightOperation>, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<Array<PreflightOutput>>;
+    public postPreflight(preflightOperation: Array<PreflightOperation>, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<PreflightOutput>>>;
+    public postPreflight(preflightOperation: Array<PreflightOperation>, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<PreflightOutput>>>;
+    public postPreflight(preflightOperation: Array<PreflightOperation>, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (preflightOperation === null || preflightOperation === undefined) {
             throw new Error('Required parameter preflightOperation was null or undefined when calling postPreflight.');
         }
@@ -119,7 +121,8 @@ export class PreflightService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }

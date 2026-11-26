@@ -14,7 +14,7 @@
  */
 export interface RecordingSearchHit { 
     /**
-     * Name of the `.slog` artifact holding the line, as listed in `recording.json`.
+     * Name of the `.slog` file holding the line, as listed in `recording.json`.
      */
     fileName: string;
     /**
@@ -30,7 +30,7 @@ export interface RecordingSearchHit {
      */
     offset: number;
     /**
-     * The recording whose artifact holds the line.
+     * The recording whose log holds the line.
      */
     recordingId: string;
     /**

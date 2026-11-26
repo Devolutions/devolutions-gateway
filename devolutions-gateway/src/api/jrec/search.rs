@@ -185,9 +185,9 @@ pub(crate) struct RecordingSearchHit {
     request_body(content = RecordingSearchRequest, description = "JSON-encoded search request", content_type = "application/json"),
     responses(
         (status = 200, description = "Matching log lines", body = RecordingSearchResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.recordings.search"])),
 ))]

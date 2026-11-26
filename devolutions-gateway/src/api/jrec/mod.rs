@@ -226,11 +226,11 @@ const RECORDING_ENDED_CLOSE_CODE: u16 = 4011;
     ),
     responses(
         (status = 200, description = "Recording matching the ID in the path has been deleted"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "The specified recording was not found"),
-        (status = 409, description = "The recording is still ongoing and can't be deleted yet"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 404, description = "The specified recording was not found", body = ApiError, content_type = "application/problem+json"),
+        (status = 409, description = "The recording is still ongoing and can't be deleted yet", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.recording.delete"])),
 ))]
@@ -296,11 +296,11 @@ pub(crate) struct DeleteManyResult {
     request_body(content = Vec<Uuid>, description = "JSON-encoded list of session IDs", content_type = "application/json"),
     responses(
         (status = 200, description = "Mass recording deletion task was successfully started", body = DeleteManyResult),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 409, description = "A recording is still ongoing and can't be deleted yet (nothing is deleted)"),
-        (status = 413, description = "Request payload is too large"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 409, description = "A recording is still ongoing and can't be deleted yet (nothing is deleted)", body = ApiError, content_type = "application/problem+json"),
+        (status = 413, description = "Request payload is too large", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.recording.delete"])),
 ))]
@@ -455,9 +455,9 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
     ),
     responses(
         (status = 200, description = "List of recordings on this Gateway instance", body = [Uuid]),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.recordings.read"])),
 ))]
@@ -521,6 +521,7 @@ pub(crate) async fn list_recordings(
     ),
     responses(
         (status = 200, description = "ZIP archive containing the recording session", body = Vec<u8>, content_type = "application/zip"),
+        // No error body declared: generated clients pick the first JSON media type of all responses, and would expect JSON on success.
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "Recording not found"),
@@ -594,10 +595,10 @@ pub(crate) async fn pull_recording_session(
                 "application/octet-stream",
             ],
         ),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 404, description = "File not found"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 404, description = "File not found", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("jrec_token" = ["pull"])),
 ))]

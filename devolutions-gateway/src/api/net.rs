@@ -48,10 +48,11 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     params(NetworkScanQueryParams),
     responses(
         (status = 101, description = "WebSocket upgrade; subsequent text frames carry NetworkScanResultEvent or LegacyScanEvent JSON"),
+        // Query validation errors carry their own JSON body, not ApiError.
         (status = 400, description = "Invalid query, mixed target/range, oversized range, or selected interface error"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("netscan_token" = [])),
 ))]
@@ -646,10 +647,10 @@ impl TryFrom<NetworkScanQueryParams> for (NetworkScannerParams, ScanEventFilter)
     path = "/jet/net/config",
     responses(
         (status = 200, description = "Network interfaces", body = [HashMap<String, Vec<InterfaceInfo>>]),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("netscan_token" = [])),
 ))]
@@ -710,10 +711,10 @@ pub(crate) async fn get_net_config(_token: crate::extract::NetScanToken) -> Resu
     path = "/jet/net/interfaces",
     responses(
         (status = 200, description = "Gateway network scan sources", body = NetworkInterfacesResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("netscan_token" = [])),
 ))]

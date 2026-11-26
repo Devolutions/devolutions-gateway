@@ -17,6 +17,8 @@ import { CustomHttpParameterCodec }                          from '../encoder';
 import { Observable }                                        from 'rxjs';
 
 // @ts-ignore
+import { ApiError } from '../model/apiError';
+// @ts-ignore
 import { DeleteManyResult } from '../model/deleteManyResult';
 // @ts-ignore
 import { RecordingSearchRequest } from '../model/recordingSearchRequest';
@@ -101,10 +103,10 @@ export class JrecService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public deleteManyRecordings(requestBody: Array<string>, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<DeleteManyResult>;
-    public deleteManyRecordings(requestBody: Array<string>, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<DeleteManyResult>>;
-    public deleteManyRecordings(requestBody: Array<string>, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<DeleteManyResult>>;
-    public deleteManyRecordings(requestBody: Array<string>, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public deleteManyRecordings(requestBody: Array<string>, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<DeleteManyResult>;
+    public deleteManyRecordings(requestBody: Array<string>, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<DeleteManyResult>>;
+    public deleteManyRecordings(requestBody: Array<string>, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<DeleteManyResult>>;
+    public deleteManyRecordings(requestBody: Array<string>, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (requestBody === null || requestBody === undefined) {
             throw new Error('Required parameter requestBody was null or undefined when calling deleteManyRecordings.');
         }
@@ -122,7 +124,8 @@ export class JrecService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -182,10 +185,10 @@ export class JrecService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public deleteRecording(id: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any>;
-    public deleteRecording(id: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<any>>;
-    public deleteRecording(id: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<any>>;
-    public deleteRecording(id: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: undefined, context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public deleteRecording(id: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any>;
+    public deleteRecording(id: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<any>>;
+    public deleteRecording(id: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<any>>;
+    public deleteRecording(id: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (id === null || id === undefined) {
             throw new Error('Required parameter id was null or undefined when calling deleteRecording.');
         }
@@ -203,6 +206,7 @@ export class JrecService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -252,10 +256,10 @@ export class JrecService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public listRecordings(active: boolean, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<Array<string>>;
-    public listRecordings(active: boolean, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<string>>>;
-    public listRecordings(active: boolean, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<string>>>;
-    public listRecordings(active: boolean, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public listRecordings(active: boolean, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<Array<string>>;
+    public listRecordings(active: boolean, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Array<string>>>;
+    public listRecordings(active: boolean, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Array<string>>>;
+    public listRecordings(active: boolean, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (active === null || active === undefined) {
             throw new Error('Required parameter active was null or undefined when calling listRecordings.');
         }
@@ -279,7 +283,8 @@ export class JrecService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -331,10 +336,10 @@ export class JrecService {
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public pullRecordingFile(id: string, filename: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<Blob>;
-    public pullRecordingFile(id: string, filename: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Blob>>;
-    public pullRecordingFile(id: string, filename: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Blob>>;
-    public pullRecordingFile(id: string, filename: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/octet-stream', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public pullRecordingFile(id: string, filename: string, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<Blob>;
+    public pullRecordingFile(id: string, filename: string, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<Blob>>;
+    public pullRecordingFile(id: string, filename: string, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<Blob>>;
+    public pullRecordingFile(id: string, filename: string, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'video/webm' | 'application/x-asciicast' | 'application/x-ndjson' | 'application/json' | 'application/octet-stream' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (id === null || id === undefined) {
             throw new Error('Required parameter id was null or undefined when calling pullRecordingFile.');
         }
@@ -355,7 +360,12 @@ export class JrecService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/octet-stream'
+                'video/webm',
+                'application/x-asciicast',
+                'application/x-ndjson',
+                'application/json',
+                'application/octet-stream',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }
@@ -450,16 +460,16 @@ export class JrecService {
     }
 
     /**
-     * Searches the &#x60;.slog&#x60; artifacts, such as AI analysis logs, of recordings stored on this instance
-     * The query is a case-insensitive substring, and an empty query matches every line. In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read once unescaped, so field names, numbers, booleans and null never match. Any other line, such as one still being written, is matched as raw text. A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually matched as raw text. Only the files listed under &#x60;artifacts&#x60; in &#x60;recording.json&#x60; with the &#x60;slog&#x60; type are searched. Recordings without a readable &#x60;recording.json&#x60; and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same &#x60;query&#x60;, &#x60;recordings&#x60; and &#x60;startTime&#x60; again, with the &#x60;nextCursor&#x60; of the previous page as &#x60;cursor&#x60;. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
+     * Searches the &#x60;.slog&#x60; files of recordings stored on this instance, such as Active Directory Console logs
+     * The query is a case-insensitive substring, and an empty query matches every line. In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read once unescaped, so field names, numbers, booleans and null never match. Any other line, such as one still being written, is matched as raw text. A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually matched as raw text. Only the files listed in &#x60;recording.json&#x60; with the &#x60;slog&#x60; type are searched, under &#x60;files&#x60; and under &#x60;artifacts&#x60;. Recordings without a readable &#x60;recording.json&#x60; and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same &#x60;query&#x60;, &#x60;recordings&#x60; and &#x60;startTime&#x60; again, with the &#x60;nextCursor&#x60; of the previous page as &#x60;cursor&#x60;. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
      * @param recordingSearchRequest JSON-encoded search request
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
-    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<RecordingSearchResponse>;
-    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<RecordingSearchResponse>>;
-    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<RecordingSearchResponse>>;
-    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
+    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe?: 'body', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<RecordingSearchResponse>;
+    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe?: 'response', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpResponse<RecordingSearchResponse>>;
+    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe?: 'events', reportProgress?: boolean, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<HttpEvent<RecordingSearchResponse>>;
+    public searchRecordings(recordingSearchRequest: RecordingSearchRequest, observe: any = 'body', reportProgress: boolean = false, options?: {httpHeaderAccept?: 'application/json' | 'application/problem+json', context?: HttpContext, transferCache?: boolean}): Observable<any> {
         if (recordingSearchRequest === null || recordingSearchRequest === undefined) {
             throw new Error('Required parameter recordingSearchRequest was null or undefined when calling searchRecordings.');
         }
@@ -477,7 +487,8 @@ export class JrecService {
         if (localVarHttpHeaderAcceptSelected === undefined) {
             // to determine the Accept header
             const httpHeaderAccepts: string[] = [
-                'application/json'
+                'application/json',
+                'application/problem+json'
             ];
             localVarHttpHeaderAcceptSelected = this.configuration.selectHeaderAccept(httpHeaderAccepts);
         }

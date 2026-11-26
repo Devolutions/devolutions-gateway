@@ -116,6 +116,7 @@ impl ClockDiagnostic {
     path = "/jet/diagnostics/logs",
     responses(
         (status = 200, description = "Latest logs", body = String),
+        // No error body declared: generated clients pick the first JSON media type of all responses, and would expect JSON on success.
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -157,9 +158,9 @@ pub(crate) struct LogFileInfo {
     path = "/jet/diagnostics/logs/files",
     responses(
         (status = 200, description = "Retained log files", body = [LogFileInfo]),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Failed to list log files"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Failed to list log files", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
@@ -196,6 +197,7 @@ async fn list_log_files(
     params(("name" = String, Path, description = "Name returned by ListLogFiles")),
     responses(
         (status = 200, description = "Log file contents", body = String, content_type = "text/plain"),
+        // No error body declared: generated clients pick the first JSON media type of all responses, and would expect JSON on success.
         (status = 400, description = "Invalid log file name"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -290,9 +292,9 @@ async fn open_regular_log_file(path: &FsPath) -> io::Result<File> {
     path = "/jet/diagnostics/configuration",
     responses(
         (status = 200, description = "Service configuration diagnostic (including version)", body = ConfigDiagnostic),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
