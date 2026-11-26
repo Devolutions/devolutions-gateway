@@ -1,7 +1,7 @@
 # INTENT.md: Durable Human Intent for AI-Assisted Codebases
 
 `INTENT.md` records the parts of a software design that humans have deliberately made durable.
-Agents may read it and implement it, but they must not create, modify, delete, or rename it.
+Agents may read and implement it; they change it only to apply wording a human approved verbatim.
 
 `INTENT.md` is optional.
 Its absence does not block AI-assisted contributions.
@@ -78,11 +78,11 @@ A specific helper, file layout, or internal abstraction belongs in `INTENT.md` o
 
 `INTENT.md` must remain human-owned.
 
-An agent does not write intent from code or a brief.
-It may interview the human and record the commitments the human states in their own words, so that the presence of `INTENT.md` still shows that a human decided.
+An agent may write intent derived from code or a brief only after a human approves the exact wording and its placement.
+It may interview the human and propose wording for approval; it applies that wording only after the human approves the exact text and its placement.
 
 This rule does not mean that intent can never change.
-It means that changing intent is a human design action, not an implementation action delegated to an agent.
+It means that deciding intent remains a human design action; applying the approved text may be delegated to an agent.
 
 `INTENT.md` is therefore:
 
@@ -103,7 +103,8 @@ For example:
 ```md
 Read all applicable `INTENT*.md` and `*.intent*.md` files before modifying code.
 
-Do not create, modify, delete, or rename intent files.
+Change intent files only to apply the exact text and placement approved by a human.
+Any deletion or rename also requires explicit approval of the exact result.
 
 If a requested change conflicts with intent, surface the conflict for human resolution.
 
