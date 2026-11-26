@@ -511,14 +511,14 @@ The journal assumes that, while the Agent holds it open, this Agent process is i
 The in-memory membership does not see records another process creates under a privileged account until the next Agent start.
 A delivery whose operation ID matches a recorded or in-flight operation but has a different payload is rejected without submission and reports `UNKNOWN`.
 When the Authority has recorded a known result for an operation ID, a later `UNKNOWN` for that ID does not replace it.
-When the Agent detects a missing, corrupt or unindexed record in an existing journal, it refuses new remote package writes on that device and reports `UNKNOWN`.
-The same refusal applies when the journal's records directory or index is missing, or the index is corrupt or inconsistent with its records.
+When an operation's index entry survives but its record is missing or corrupt, that operation reports `UNKNOWN` without dispatch, and other operations continue without recovery.
+When the Agent detects an unindexed record, or a records directory or index that is missing, replaced, corrupt or inconsistent with its records, it refuses new remote package writes on that device and reports `UNKNOWN`.
 After detecting a missing index, the Agent does not recreate it during that process's lifetime.
-When a journal write fails and its state cannot be trusted, the Agent also refuses new remote package writes.
+When an index write fails, the Agent also refuses new remote package writes.
 During refusal, a repeated delivery with the same payload and an intact, valid record returns its recorded status without dispatch.
 A delivery without a record, or with a missing or corrupt record, reports `UNKNOWN` without dispatch.
 An intact record without a recorded outcome reports `UNKNOWN` during refusal.
-The refusal lasts for the life of the Agent process and recurs after restart if the journal remains damaged.
+The refusal lasts for the life of the Agent process; a later Agent start that finds the index intact and listing every record accepts writes again.
 Discovery and inventory remain available when their own dependencies are healthy.
 Already active operations are not assumed to have stopped.
 An operation admitted before the refusal still records its start evidence and outcome when those writes succeed.

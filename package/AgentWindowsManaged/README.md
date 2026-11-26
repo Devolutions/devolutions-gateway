@@ -39,11 +39,11 @@ When upgrading from a release without the UniGetUI Package Broker option, setup 
 
 ## Package operation journal recovery
 
-When its operation journal cannot be trusted, the Agent refuses new remote package writes and reports `UNKNOWN` to the authority.
+When its operation journal's index cannot be trusted, the Agent refuses new remote package writes and reports `UNKNOWN` to the authority.
 Previously recorded operations with intact records retain their recorded results.
-It logs `Cannot open the device-management operation journal; package writes are unavailable` or `Package operation journal is unrecoverable; package writes are unavailable` when it detects damage.
-The refusal remains until the journal is recovered and the Agent is restarted.
-A crash during admission can leave the journal incomplete and cause refusal after restart.
+It logs `Cannot open the device-management operation journal; package writes are unavailable` or `Package operation journal is unrecoverable; package writes are unavailable` when it detects this.
+The refusal remains until the Agent starts again and finds the index intact.
+An operation whose record alone is missing or corrupt, as after a crash during its admission, reports `UNKNOWN` while other operations continue; it needs no recovery.
 Discovery and inventory remain available when their own dependencies are healthy.
 An `UNKNOWN` result does not prove that an earlier operation with the same ID did not run.
 If an index entry and its record are both lost, the loss can go undetected after restart and that operation ID may execute again.
