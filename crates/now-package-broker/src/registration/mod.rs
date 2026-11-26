@@ -293,7 +293,7 @@ fn authenticate(server: &NamedPipeServer, client: &PipeClient) -> anyhow::Result
     let (pipe_sid, pipe_session_id) = pipe_client_identity(server)?;
 
     // The process ID only names the process that connected, so the token it holds must agree with the pipe's.
-    let session_id = client.session_id()?;
+    let session_id = client.session_id();
     if pipe_sid != *client.user_sid() || pipe_session_id != session_id {
         bail!("pipe client identity does not match its process token");
     }

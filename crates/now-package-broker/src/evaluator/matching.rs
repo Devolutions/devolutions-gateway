@@ -136,7 +136,7 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
 /// - PowerShell installs and updates default to `CurrentUser`.
 /// - Chocolatey always runs machine-wide.
 /// - WinGet leaves the scope to the installer.
-fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
+pub(super) fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
     use now_policy_api::{ManagerName as M, Operation as O, Scope as S};
 
     if matches!(request.manager, M::PowerShell | M::PowerShell7 | M::Pip) && request.operation == O::Uninstall {
@@ -421,6 +421,26 @@ mod tests {
         });
 
         assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
+    }
+
+    #[test]
+    fn elevated_user_scope_request_uses_standard_execution_privilege() {
+        // oracle: mutant Matching elevated policy rules for typed user-scope requests.
+        let mut request = request();
+        request.client.requested_elevation = api::Elevation::Elevated;
+        request.options.scope = Some(api::Scope::User);
+        let flags = RequestFlags::from_request(&request);
+        let standard = rule(PolicyMatch {
+            execution_elevation: BTreeSet::from([Elevation::Standard]),
+            ..Default::default()
+        });
+        let elevated = rule(PolicyMatch {
+            execution_elevation: BTreeSet::from([Elevation::Elevated]),
+            ..Default::default()
+        });
+
+        assert!(rule_matches(&standard, &request, &flags, Some("1.2.3")));
+        assert!(!rule_matches(&elevated, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
