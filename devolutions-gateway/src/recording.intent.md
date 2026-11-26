@@ -26,5 +26,5 @@ Gateway does not refuse a later push for the same session with a new token after
 
 <a id="compaction"></a>
 # Compaction
-Gateway always remuxes a finished WebM recording, whether or not compaction then runs or succeeds.
-Compaction replaces the recording only when its remuxed output is strictly smaller; otherwise the remuxed recording stays.
+When the XMF native library is loaded, Gateway remuxes each WebM clip once its push ends, whether or not compaction then runs or succeeds; without the library, the clip stays exactly as recorded.
+Compaction replaces the clip only when its remuxed output is strictly smaller; otherwise the remuxed clip stays.

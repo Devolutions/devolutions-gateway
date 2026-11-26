@@ -1,12 +1,12 @@
 <a id="compaction"></a>
 # Compaction
-Compaction re-encodes a finished WebM recording, keeping only the frames whose picture changed.
+Compaction re-encodes a finished WebM clip, keeping only the frames whose picture changed.
 *Avoid:* dedup, deduplication.
 
 <a id="changed-frame"></a>
 # Changed frame
 A frame is kept when any 8×8 block of its luma differs from the last kept frame by a mean absolute difference of more than 12.
-The first and the last frame are always kept, so the recording keeps its duration.
+The first and the last frame are always kept, so the clip keeps its duration.
 
 <a id="encoding"></a>
 # Encoding
