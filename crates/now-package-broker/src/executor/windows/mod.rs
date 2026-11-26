@@ -1523,6 +1523,7 @@ mod tests {
         assert_eq!(script, "@chcp 65001 > nul\r\necho héllo");
     }
 
+    // oracle: mutant writing the script to a temporary `.ps1` file, which a `Restricted` execution policy refuses to run
     #[test]
     fn powershell_command_runs_its_script_inline() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
@@ -1579,7 +1580,7 @@ mod tests {
         hosts
     }
 
-    // oracle: PowerShell single-quoted string literal rules (about_Quoting_Rules) and Windows command-line argument parsing
+    // oracle: spec PowerShell about_Quoting_Rules §Single-quoted strings
     #[test]
     fn quoted_values_reach_the_inline_script_unchanged() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");

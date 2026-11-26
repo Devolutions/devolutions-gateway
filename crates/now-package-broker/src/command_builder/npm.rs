@@ -458,6 +458,7 @@ mod tests {
         }
     }
 
+    // oracle: mutant accepting script syntax in an npm package id or version, which could escape its literal in the inline script
     #[test]
     fn script_syntax_in_package_ids_and_versions_is_rejected() {
         for value in [
