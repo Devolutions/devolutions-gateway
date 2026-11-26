@@ -604,7 +604,8 @@ fn prepare_powershell_script(
 
 /// Returns the `-Command` text that runs `script` inline and exits with the script's own exit code.
 ///
-/// Execution policy governs script files, not `-Command` text, so the script also runs under the default `Restricted` policy.
+/// Execution policy governs script files, not `-Command` text, so the script itself also runs under the default `Restricted` policy.
+/// Modules the script loads remain subject to the policy: under `Restricted`, Windows PowerShell loads only catalog-signed modules such as the inbox PowerShellGet, so a PowerShellGet updated from the Gallery fails to load and the operation fails.
 /// `-EncodedCommand` is avoided because Windows PowerShell then writes redirected error output as CLIXML.
 /// The sentinel makes a script that sets no exit code, because it runs no native command and never calls `exit`, report failure rather than success.
 /// The generated manager scripts therefore always end with an explicit `exit`.
@@ -1428,17 +1429,27 @@ impl PreparedCommand {
 /// `path_prefix`, when set, is searched first for the manager, so tests can substitute a fake one.
 #[cfg(test)]
 pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> Option<i32> {
-    output_of_prepared_for_test(command, path_prefix).status.code()
+    output_of_prepared_for_test(command, path_prefix, &[]).status.code()
 }
 
+/// Runs a manager command as [`run_prepared_for_test`] does, with `env` added to its environment, and returns its output.
+///
+/// The arguments are encoded with the same `CommandLine` encoder the executor uses.
 #[cfg(test)]
-fn output_of_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> std::process::Output {
+pub(crate) fn output_of_prepared_for_test(
+    command: &[String],
+    path_prefix: Option<&Path>,
+    env: &[(&str, &str)],
+) -> std::process::Output {
+    use std::os::windows::process::CommandExt as _;
+
     let temp_dir = tempfile::tempdir().expect("create temp dir");
     let prepared =
         prepare_main_command_in(command, Some(temp_dir.path()), None, false).expect("prepare manager command");
     let mut process = std::process::Command::new(&prepared.args()[0]);
     process
-        .args(&prepared.args()[1..])
+        .raw_arg(win_api_wrappers::utils::CommandLine::new(prepared.args()[1..].to_vec()).to_command_line())
+        .envs(env.iter().copied())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -1594,7 +1605,7 @@ mod tests {
                     crate::command_builder::quote_powershell_literal(value)
                 );
                 let output =
-                    super::output_of_prepared_for_test(&powershell_under_restricted_policy(host, &script), None);
+                    super::output_of_prepared_for_test(&powershell_under_restricted_policy(host, &script), None, &[]);
 
                 assert_eq!(output.status.code(), Some(0), "{host}: {value:?}");
                 assert_eq!(

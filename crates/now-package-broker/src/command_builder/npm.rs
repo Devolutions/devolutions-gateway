@@ -3,7 +3,9 @@
 //! UniGetUI runs npm through Windows PowerShell on Windows.
 //! The broker follows the same shape so the Windows executor can materialize the
 //! script through its protected PowerShell wrapper.
-//! The script calls `npm.cmd` rather than `npm`, which PowerShell resolves to the `npm.ps1` shim that a `Restricted` execution policy refuses to run.
+//! The script launches the first `npm.cmd` or `npm.exe` on `PATH`, in the order a bare `npm` would resolve them.
+//! A bare `npm` can resolve to the `npm.ps1` shim, which a `Restricted` execution policy refuses to run.
+//! The script also clears any inherited `ERRORLEVEL`, which would otherwise mask npm's exit code in a shim that ends with `exit /b %errorlevel%`.
 //!
 //! Elevated npm operations are rejected because npm resolves through user PATH
 //! and a `npm.cmd` shim.
@@ -16,11 +18,19 @@ use super::{quote_powershell_literal, uses_default_source, validate_npm_package_
 /// npm version selectors that are inert when passed through the `npm.cmd` shim, such as `~1.2` or `1.x`.
 const NPM_VERSION_EXTRA_CHARACTERS: &[char] = &['~', '*'];
 
+/// Script prefix that fails closed, resolves npm, and leaves the call operator ready for npm's arguments.
+const SCRIPT_PREFIX: &str = "$ErrorActionPreference = 'Stop'; \
+    $npm = Get-Command -Name npm -CommandType Application -ErrorAction SilentlyContinue | \
+    Where-Object { $_.Extension -in '.cmd', '.exe' } | Select-Object -First 1; \
+    if (-not $npm) { throw 'npm.cmd or npm.exe was not found on PATH' }; \
+    $env:ERRORLEVEL = $null; \
+    & $npm.Source";
+
 /// Build an npm command from a validated request.
 pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_npm_request(request)?;
 
-    let mut script = String::from("$ErrorActionPreference = 'Stop'; npm.cmd");
+    let mut script = String::from(SCRIPT_PREFIX);
 
     match request.operation {
         Operation::Install | Operation::Update => {
@@ -234,7 +244,8 @@ mod tests {
         assert_eq!(cmd[1], "-NoProfile");
         assert_eq!(cmd[2], "-Command");
         cmd[3]
-            .strip_prefix("$ErrorActionPreference = 'Stop'; ")
+            .strip_prefix(SCRIPT_PREFIX)
+            .and_then(|script| script.strip_prefix(' '))
             .and_then(|script| script.strip_suffix("; exit $LASTEXITCODE"))
             .expect("npm script fails closed and forwards npm's exit code")
     }
@@ -267,7 +278,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool@1.2.3' --global");
+        assert_eq!(script_of(&cmd), "install 'contoso-tool@1.2.3' --global");
     }
 
     #[test]
@@ -278,7 +289,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool@2.0.0' --global");
+        assert_eq!(script_of(&cmd), "install 'contoso-tool@2.0.0' --global");
     }
 
     #[test]
@@ -288,7 +299,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool' --global");
+        assert_eq!(script_of(&cmd), "install 'contoso-tool' --global");
     }
 
     #[test]
@@ -302,7 +313,7 @@ mod tests {
 
         assert_eq!(
             script_of(&cmd),
-            "npm.cmd install 'babel-core-legacy@npm:@babel/core@7.28.0' --global"
+            "install 'babel-core-legacy@npm:@babel/core@7.28.0' --global"
         );
     }
 
@@ -314,7 +325,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm.cmd uninstall 'eslint-v9' --global");
+        assert_eq!(script_of(&cmd), "uninstall 'eslint-v9' --global");
     }
 
     #[test]
@@ -324,7 +335,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool@1.2.3' --global");
+        assert_eq!(script_of(&cmd), "install 'contoso-tool@1.2.3' --global");
     }
 
     #[test]
@@ -417,7 +428,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("uninstall ignores the version");
 
-        assert_eq!(script_of(&cmd), "npm.cmd uninstall 'contoso-tool' --global");
+        assert_eq!(script_of(&cmd), "uninstall 'contoso-tool' --global");
     }
 
     #[test]
@@ -478,7 +489,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm.cmd install '@contoso/tool' --global");
+        assert_eq!(script_of(&cmd), "install '@contoso/tool' --global");
     }
 
     /// Runs the generated script under a `Restricted` execution policy for this process only, as on a default Windows client.
@@ -502,6 +513,8 @@ mod tests {
                     .expect("write fake npm");
                 // PowerShell prefers this shim over `npm.cmd` for a bare `npm`, and `Restricted` refuses to run it.
                 std::fs::write(fake_npm.path().join("npm.ps1"), "exit 99\r\n").expect("write fake npm shim");
+                // npm's POSIX shell shim, which PowerShell also lists as an application.
+                std::fs::write(fake_npm.path().join("npm"), "exit 98\n").expect("write fake npm shell shim");
                 assert_eq!(
                     crate::executor::run_prepared_for_test(&cmd, Some(fake_npm.path())),
                     Some(code),
@@ -514,11 +527,52 @@ mod tests {
     // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
     #[cfg(windows)]
     #[test]
+    fn inherited_errorlevel_does_not_mask_npm_exit_code() {
+        let fake_npm = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(fake_npm.path().join("npm-cli.cmd"), "@exit /b 7\r\n").expect("write fake npm cli");
+        // A shim that forwards `%errorlevel%`, which expands to an `ERRORLEVEL` environment variable when one is set.
+        std::fs::write(
+            fake_npm.path().join("npm.cmd"),
+            "@call \"%~dp0npm-cli.cmd\" %*\r\n@exit /b %errorlevel%\r\n",
+        )
+        .expect("write fake npm");
+        let cmd = under_restricted_policy(build_npm_command(&make_request()).expect("build command"));
+
+        let output = crate::executor::output_of_prepared_for_test(&cmd, Some(fake_npm.path()), &[("ERRORLEVEL", "0")]);
+
+        assert_eq!(output.status.code(), Some(7));
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
+    fn npm_exe_is_used_when_it_comes_first_on_path() {
+        let fake_npm = tempfile::tempdir().expect("create temp dir");
+        for decoy in ["npm.exe", "npm.ps1", "npm"] {
+            std::fs::write(fake_npm.path().join(decoy), "").expect("write fake npm");
+        }
+        let mut cmd = under_restricted_policy(build_npm_command(&make_request()).expect("build command"));
+        let script = cmd.last_mut().expect("script");
+        let resolution_end = script.find("& $npm.Source").expect("npm call");
+        *script = format!("{}$npm.Source; exit 0", &script[..resolution_end]);
+
+        let output = crate::executor::output_of_prepared_for_test(&cmd, Some(fake_npm.path()), &[]);
+
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim_end(),
+            fake_npm.path().join("npm.exe").display().to_string()
+        );
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    #[cfg(windows)]
+    #[test]
     fn generated_script_fails_when_npm_cannot_be_found() {
         let empty_path = tempfile::tempdir().expect("create temp dir");
         let mut cmd = under_restricted_policy(build_npm_command(&make_request()).expect("build command"));
         let script = cmd.last_mut().expect("script");
-        *script = script.replacen("npm.cmd ", "no-such-npm-xyz ", 1);
+        *script = script.replacen("-Name npm ", "-Name no-such-npm-xyz ", 1);
         assert_ne!(
             crate::executor::run_prepared_for_test(&cmd, Some(empty_path.path())),
             Some(0)

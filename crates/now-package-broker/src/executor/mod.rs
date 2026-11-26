@@ -22,7 +22,7 @@ pub use windows::WindowsExecutor;
 #[cfg(windows)]
 pub(crate) use windows::ensure_session_user;
 #[cfg(all(test, windows))]
-pub(crate) use windows::run_prepared_for_test;
+pub(crate) use windows::{output_of_prepared_for_test, run_prepared_for_test};
 
 /// How strictly the executor checks the elevation of the token that launches the plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
