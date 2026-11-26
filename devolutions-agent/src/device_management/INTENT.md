@@ -56,7 +56,11 @@ Repeated delivery of an operation ID recorded in the journal returns its recorde
 
 When the operation journal is missing, the Agent creates a new journal; operations recorded in the missing journal may execute again.
 
-When the journal is found damaged or partly missing, the Agent refuses new remote package writes on the device until it starts again and finds the journal intact; discovery and inventory remain available.
+The journal's index is what keeps an operation from running twice; an operation's record only holds its details and status.
+When an operation's index entry survives but its record is missing or unreadable, its status is `UNKNOWN`, because its outcome is lost, and it never runs again, because its index entry still identifies it.
+Other operations continue, because each keeps its own index entry, so the damage removes no protection against running twice.
+A missing record alone never stops remote package writes on the device, because a crash between writing an index entry and its record leaves exactly that state, and refusing would stop remote package management until someone repairs the journal by hand.
+When the index itself is shown unreliable (a record with no index entry, an index that is corrupt, missing, replaced or could not be written, or a records directory that is missing or replaced), the Agent refuses new remote package writes on the device until it starts again and finds the index reliable, because an operation the index no longer lists could run again; discovery and inventory remain available.
 
 When an operation's outcome cannot be recovered after a crash or disconnection, its status is `UNKNOWN`, except when its record was lost with a missing journal.
 
