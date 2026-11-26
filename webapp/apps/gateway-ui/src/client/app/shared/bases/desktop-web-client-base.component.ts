@@ -12,6 +12,11 @@ import {
 } from '@angular/core';
 import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
 import { DVL_WARNING_ICON } from '@gateway/app.constants';
+import {
+  Credentials,
+  CredentialsPromptComponent,
+  CredentialsRequirement,
+} from '@gateway/modules/web-client/credentials-prompt/credentials-prompt.component';
 import { ClipboardActionButton } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-action.model';
 import { ScreenMode } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
 import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
@@ -68,6 +73,11 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
   @Output() readonly sizeChange = new EventEmitter<void>();
 
   @ViewChild('ironRemoteDesktopElement') ironRemoteDesktopElement: ElementRef;
+
+  @ViewChild(CredentialsPromptComponent) private credentialsPrompt: CredentialsPromptComponent;
+
+  /** Set when the user dismisses the credentials prompt, so the resulting connection failure reads as a cancellation. */
+  private credentialsPromptCancelled = false;
 
   /** Stored so it can be called to remove the 'ready' event listener on destroy. */
   protected unlistenRemoteClient: (() => void) | null = null;
@@ -379,7 +389,29 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
     this.initializeStatus();
   }
 
+  /** Asks the user for the credentials `host` requests, through the template's credentials prompt. */
+  protected async promptCredentials(requirement: CredentialsRequirement, host: string): Promise<Credentials> {
+    const credentials = await this.credentialsPrompt.request(requirement, host).catch((error: unknown) => {
+      this.credentialsPromptCancelled = true;
+      throw error;
+    });
+    if (credentials.username != null) {
+      this.sessionInfoUsername = credentials.username;
+      this.refreshSessionInfo();
+    }
+    return credentials;
+  }
+
   protected handleSessionTerminatedWithError(error: unknown): void {
+    if (this.credentialsPromptCancelled) {
+      this.sessionTerminationMessage = {
+        summary: 'Connection cancelled',
+        severity: 'warn',
+      };
+      this.handleSessionTerminated();
+      return;
+    }
+
     if (this.isIronError(error)) {
       this.sessionTerminationMessage = {
         summary: this.getIronErrorMessageTitle(error),

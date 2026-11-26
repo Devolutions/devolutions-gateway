@@ -15,6 +15,7 @@ import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
   Backend,
+  credentialsCallback,
   dynamicResizingSupportedCallback,
   enableCursor,
   enabledEncodings,
@@ -161,7 +162,6 @@ export class WebClientVncComponent
       map((currentWebSession) => {
         // It's not possibe to infer the type of currentWebSession.data, we case it on the fly
         this.formData = currentWebSession.data as unknown as VncFormDataInput;
-        this.sessionInfoUsername = this.formData.username ?? null;
         this.refreshSessionInfo();
       }),
     );
@@ -170,8 +170,6 @@ export class WebClientVncComponent
   private fetchParameters(formData: VncFormDataInput): Observable<IronVNCConnectionParameters> {
     const {
       hostname,
-      username,
-      password,
       enableCursor,
       enableExtendedClipboard,
       enabledEncodings,
@@ -187,15 +185,12 @@ export class WebClientVncComponent
     const gatewayHttpAddress: URL = new URL(JET_VNC_URL + `/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
     this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
-    this.sessionInfoUsername = username ?? null;
     this.refreshSessionInfo();
 
     const desktopScreenSize: DesktopSize =
       this.webClientService.getDesktopSize(this.formData) ?? this.webSessionService.getWebSessionScreenSizeSnapshot();
 
     const connectionParameters: IronVNCConnectionParameters = {
-      username,
-      password,
       host: extractedData.hostname,
       port: extractedData.port,
       gatewayAddress,
@@ -230,6 +225,9 @@ export class WebClientVncComponent
       .withProxyAddress(connectionParameters.gatewayAddress)
       .withAuthToken(connectionParameters.token)
       .withExtension(
+        credentialsCallback((requirement) => this.promptCredentials(requirement, connectionParameters.host)),
+      )
+      .withExtension(
         dynamicResizingSupportedCallback(() => {
           this.dynamicResizeSupported = true;
         }),
@@ -237,14 +235,6 @@ export class WebClientVncComponent
       .withExtension(enableCursor(connectionParameters.enableCursor))
       .withExtension(ultraVirtualDisplay(connectionParameters.ultraVirtualDisplay))
       .withExtension(enableExtendedClipboard(connectionParameters.enableExtendedClipboard));
-
-    if (connectionParameters.username != null) {
-      configBuilder.withUsername(connectionParameters.username);
-    }
-
-    if (connectionParameters.password != null) {
-      configBuilder.withPassword(connectionParameters.password);
-    }
 
     if (connectionParameters.screenSize != null) {
       configBuilder.withDesktopSize(connectionParameters.screenSize);

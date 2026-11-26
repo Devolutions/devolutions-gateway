@@ -30,8 +30,6 @@ export interface IronRDPConnectionParameters {
 
 export interface IronVNCConnectionParameters {
   host: string;
-  username?: string;
-  password: string;
   port?: number;
   gatewayAddress?: string;
   token?: string;
@@ -48,8 +46,6 @@ export interface IronVNCConnectionParameters {
 
 export interface IronARDConnectionParameters {
   host: string;
-  username: string;
-  password: string;
   port?: number;
   gatewayAddress?: string;
   token?: string;

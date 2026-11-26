@@ -28,4 +28,8 @@
       </vnc-toolbar-wrapper>
     </div>
   }
+
+  <!-- UNTESTED: the prompt is appended to the element that requestFullscreen() targets, because the browser draws nothing outside it while fullscreen.
+       Appended elsewhere, a fullscreen session waits on a prompt nobody can see; keep appendTo on that element. -->
+  <credentials-prompt [appendTo]="sessionsContainerElement.nativeElement"></credentials-prompt>
 </div>
