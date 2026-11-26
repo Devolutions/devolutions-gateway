@@ -1,7 +1,7 @@
 # INTENT.md: Durable Human Intent for AI-Assisted Codebases
 
 `INTENT.md` records the parts of a software design that humans have deliberately made durable.
-Agents may read and implement it; they change it only to apply wording a human approved verbatim.
+Agents may read and implement it; they change it only to apply an exact result explicitly approved by a human, including the wording and placement of any text.
 
 `INTENT.md` is optional.
 Its absence does not block AI-assisted contributions.
