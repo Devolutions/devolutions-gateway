@@ -3,6 +3,7 @@
 //! UniGetUI runs npm through Windows PowerShell on Windows.
 //! The broker follows the same shape so the Windows executor can materialize the
 //! script through its protected PowerShell wrapper.
+//! The script calls `npm.cmd` rather than `npm`, which PowerShell resolves to the `npm.ps1` shim that a `Restricted` execution policy refuses to run.
 //!
 //! Elevated npm operations are rejected because npm resolves through user PATH
 //! and a `npm.cmd` shim.
@@ -19,7 +20,7 @@ const NPM_VERSION_EXTRA_CHARACTERS: &[char] = &['~', '*'];
 pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
     validate_npm_request(request)?;
 
-    let mut script = String::from("$ErrorActionPreference = 'Stop'; npm");
+    let mut script = String::from("$ErrorActionPreference = 'Stop'; npm.cmd");
 
     match request.operation {
         Operation::Install | Operation::Update => {
@@ -266,7 +267,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@1.2.3' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool@1.2.3' --global");
     }
 
     #[test]
@@ -277,7 +278,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@2.0.0' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool@2.0.0' --global");
     }
 
     #[test]
@@ -287,7 +288,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool' --global");
     }
 
     #[test]
@@ -301,7 +302,7 @@ mod tests {
 
         assert_eq!(
             script_of(&cmd),
-            "npm install 'babel-core-legacy@npm:@babel/core@7.28.0' --global"
+            "npm.cmd install 'babel-core-legacy@npm:@babel/core@7.28.0' --global"
         );
     }
 
@@ -313,7 +314,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm uninstall 'eslint-v9' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd uninstall 'eslint-v9' --global");
     }
 
     #[test]
@@ -323,7 +324,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install 'contoso-tool@1.2.3' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd install 'contoso-tool@1.2.3' --global");
     }
 
     #[test]
@@ -416,7 +417,7 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("uninstall ignores the version");
 
-        assert_eq!(script_of(&cmd), "npm uninstall 'contoso-tool' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd uninstall 'contoso-tool' --global");
     }
 
     #[test]
@@ -447,6 +448,29 @@ mod tests {
     }
 
     #[test]
+    fn script_syntax_in_package_ids_and_versions_is_rejected() {
+        for value in [
+            "tool'",
+            "tool\"",
+            "tool;calc",
+            "$(calc)",
+            "tool`calc",
+            "tool\ncalc",
+            "tool\r\ncalc",
+            "tool&calc",
+            "tool|calc",
+        ] {
+            let mut request = make_request();
+            request.package.id = PackageIdentifier::from(value.to_owned());
+            build_npm_command(&request).expect_err("package id with script syntax must be rejected");
+
+            let mut request = make_request();
+            request.package.version = Some(VersionString(value.to_owned()));
+            build_npm_command(&request).expect_err("version with script syntax must be rejected");
+        }
+    }
+
+    #[test]
     fn scoped_package_ids_are_accepted() {
         let mut request = make_request();
         request.package.version = None;
@@ -454,13 +478,13 @@ mod tests {
 
         let cmd = build_npm_command(&request).expect("build command");
 
-        assert_eq!(script_of(&cmd), "npm install '@contoso/tool' --global");
+        assert_eq!(script_of(&cmd), "npm.cmd install '@contoso/tool' --global");
     }
 
-    /// Lets the generated script run whatever the machine's execution policy is.
+    /// Runs the generated script under a `Restricted` execution policy for this process only, as on a default Windows client.
     #[cfg(windows)]
-    fn bypassing_execution_policy(mut cmd: Vec<String>) -> Vec<String> {
-        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Bypass".to_owned()]);
+    fn under_restricted_policy(mut cmd: Vec<String>) -> Vec<String> {
+        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Restricted".to_owned()]);
         cmd
     }
 
@@ -472,10 +496,12 @@ mod tests {
         for operation in [Operation::Install, Operation::Update, Operation::Uninstall] {
             let mut request = make_request();
             request.operation = operation;
-            let cmd = bypassing_execution_policy(build_npm_command(&request).expect("build command"));
+            let cmd = under_restricted_policy(build_npm_command(&request).expect("build command"));
             for code in [7, 0] {
                 std::fs::write(fake_npm.path().join("npm.cmd"), format!("@exit /b {code}\r\n"))
                     .expect("write fake npm");
+                // PowerShell prefers this shim over `npm.cmd` for a bare `npm`, and `Restricted` refuses to run it.
+                std::fs::write(fake_npm.path().join("npm.ps1"), "exit 99\r\n").expect("write fake npm shim");
                 assert_eq!(
                     crate::executor::run_prepared_for_test(&cmd, Some(fake_npm.path())),
                     Some(code),
@@ -490,9 +516,9 @@ mod tests {
     #[test]
     fn generated_script_fails_when_npm_cannot_be_found() {
         let empty_path = tempfile::tempdir().expect("create temp dir");
-        let mut cmd = bypassing_execution_policy(build_npm_command(&make_request()).expect("build command"));
+        let mut cmd = under_restricted_policy(build_npm_command(&make_request()).expect("build command"));
         let script = cmd.last_mut().expect("script");
-        *script = script.replacen("npm ", "no-such-npm-xyz ", 1);
+        *script = script.replacen("npm.cmd ", "no-such-npm-xyz ", 1);
         assert_ne!(
             crate::executor::run_prepared_for_test(&cmd, Some(empty_path.path())),
             Some(0)

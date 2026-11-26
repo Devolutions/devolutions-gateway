@@ -689,6 +689,10 @@ mod tests {
             "1.0\u{201B}",
             "1.0;x",
             "$x",
+            "$(calc)",
+            "1.0`x",
+            "1.0\"",
+            "1.0\nx",
             "-1.0",
         ] {
             let mut request = make_request(ManagerName::PowerShell);
@@ -702,6 +706,10 @@ mod tests {
             "PS\u{2019}Gallery",
             "PS;Gallery",
             "$Gallery",
+            "PS$(calc)",
+            "PS`Gallery",
+            "PS\"Gallery",
+            "PS\nGallery",
             "-Gallery",
         ] {
             let mut request = make_request(ManagerName::PowerShell7);
@@ -722,7 +730,7 @@ mod tests {
         build_powershell5_command(&request).expect_err("PowerShellGet -RequiredVersion only accepts exact versions");
     }
 
-    /// Runs the generated script for a module that is not installed, whatever the execution policy is.
+    /// Runs the generated script for a module that is not installed, under a `Restricted` execution policy for this process only.
     #[cfg(windows)]
     fn run_for_missing_module(manager: ManagerName, operation: Operation, source: &str) -> Option<i32> {
         let mut request = make_request(manager);
@@ -735,7 +743,7 @@ mod tests {
             build_powershell5_command
         };
         let mut cmd = build(&request).expect("build command");
-        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Bypass".to_owned()]);
+        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Restricted".to_owned()]);
         crate::executor::run_prepared_for_test(&cmd, None)
     }
 
@@ -801,19 +809,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn script_fails_on_a_non_terminating_error_inside_a_module_function() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let module = temp_dir.path().join("Fails.psm1");
-        std::fs::write(
-            &module,
-            "function Test-Fails { [CmdletBinding()] param() Write-Error 'failed'; 'continued' }",
-        )
-        .expect("write module");
-
         let mut cmd = build_powershell5_command(&make_request(ManagerName::PowerShell)).expect("build command");
-        cmd.splice(2..2, ["-ExecutionPolicy".to_owned(), "Bypass".to_owned()]);
+        // A dynamic module has its own session state, like PowerShellGet's script module.
         *cmd.last_mut().expect("script argument") = format!(
-            "{SCRIPT_PREFIX} Import-Module '{}'; Test-Fails{SCRIPT_SUFFIX}",
-            module.display()
+            "{SCRIPT_PREFIX} New-Module -ScriptBlock {{ function Test-Fails {{ [CmdletBinding()] param() Write-Error 'failed'; 'continued' }} }} | Import-Module; Test-Fails{SCRIPT_SUFFIX}"
         );
 
         assert_ne!(crate::executor::run_prepared_for_test(&cmd, None), Some(0));

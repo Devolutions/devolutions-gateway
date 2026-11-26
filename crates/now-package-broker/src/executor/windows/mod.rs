@@ -22,7 +22,7 @@ use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
     ProcessStartedCallback, TokenElevationCheck, is_canceled_error,
 };
-use crate::command_builder::{BATCH_METACHARACTERS, quote_powershell_literal};
+use crate::command_builder::BATCH_METACHARACTERS;
 use crate::policy_security;
 
 mod privileges;
@@ -505,14 +505,7 @@ fn prepare_main_command_in(
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     if let Some((script, command_arg_index)) = powershell_inline_script(command) {
-        return prepare_powershell_script(
-            command,
-            command_arg_index,
-            script,
-            temp_dir,
-            user_env,
-            requires_elevation,
-        );
+        return prepare_powershell_script(command, command_arg_index, script, user_env, requires_elevation);
     }
 
     if executable_is(command, "winget.exe") {
@@ -585,29 +578,11 @@ fn prepare_powershell_script(
     command: &[String],
     command_arg_index: usize,
     script: &str,
-    temp_dir: Option<&Path>,
     user_env: Option<&UserEnv<'_>>,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     command.first().context("empty PowerShell command")?;
     let is_windows_powershell = executable_is(command, "powershell.exe");
-    let script = powershell_script_with_utf8_preamble(script);
-    let temp_script = broker_temp_script("ps1", temp_dir)?;
-    if is_windows_powershell {
-        temp_script.write_content_utf8_bom(&script).with_context(|| {
-            format!(
-                "failed to write broker temporary script at {}",
-                temp_script.path().display()
-            )
-        })?;
-    } else {
-        temp_script.write_content(&script).with_context(|| {
-            format!(
-                "failed to write broker temporary script at {}",
-                temp_script.path().display()
-            )
-        })?;
-    }
 
     let mut prepared = command[..command_arg_index].to_vec();
     let mut exe_guard = None;
@@ -622,25 +597,19 @@ fn prepare_powershell_script(
         executable.display().to_string()
     };
     prepared.push("-Command".to_owned());
-    prepared.push(powershell_script_invocation(&temp_script.path_string()));
+    prepared.push(powershell_inline_command(script));
 
-    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
+    Ok(PreparedCommand::raw(&prepared).with_exe_guard(exe_guard))
 }
 
-/// Returns the `-Command` text that runs `path` and exits with the script's own exit code.
+/// Returns the `-Command` text that runs `script` inline and exits with the script's own exit code.
 ///
-/// A bare `& 'path'` makes the host exit with 0 or 1 only, whatever the script passed to `exit`.
-/// `exit $LASTEXITCODE` forwards the code, and the sentinel makes a script that sets no exit code, because it runs no native command and never calls `exit`, report failure rather than success.
+/// Execution policy governs script files, not `-Command` text, so the script also runs under the default `Restricted` policy.
+/// `-EncodedCommand` is avoided because Windows PowerShell then writes redirected error output as CLIXML.
+/// The sentinel makes a script that sets no exit code, because it runs no native command and never calls `exit`, report failure rather than success.
 /// The generated manager scripts therefore always end with an explicit `exit`.
-fn powershell_script_invocation(path: &str) -> String {
-    format!(
-        "$global:LASTEXITCODE = 1; & {}; exit $LASTEXITCODE",
-        quote_powershell_literal(path)
-    )
-}
-
-fn powershell_script_with_utf8_preamble(script: &str) -> String {
-    format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n{script}")
+fn powershell_inline_command(script: &str) -> String {
+    format!("{POWERSHELL_UTF8_ENCODING_PREAMBLE}\r\n$global:LASTEXITCODE = 1\r\n{script}\r\nexit $LASTEXITCODE")
 }
 
 fn prepare_winget_script(
@@ -1459,6 +1428,11 @@ impl PreparedCommand {
 /// `path_prefix`, when set, is searched first for the manager, so tests can substitute a fake one.
 #[cfg(test)]
 pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> Option<i32> {
+    output_of_prepared_for_test(command, path_prefix).status.code()
+}
+
+#[cfg(test)]
+fn output_of_prepared_for_test(command: &[String], path_prefix: Option<&Path>) -> std::process::Output {
     let temp_dir = tempfile::tempdir().expect("create temp dir");
     let prepared =
         prepare_main_command_in(command, Some(temp_dir.path()), None, false).expect("prepare manager command");
@@ -1473,7 +1447,7 @@ pub(crate) fn run_prepared_for_test(command: &[String], path_prefix: Option<&Pat
         let paths = std::iter::once(prefix.to_path_buf()).chain(std::env::split_paths(&path));
         process.env("PATH", std::env::join_paths(paths).expect("join PATH"));
     }
-    process.output().expect("run manager command").status.code()
+    process.output().expect("run manager command")
 }
 
 #[cfg(test)]
@@ -1493,10 +1467,10 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, TOKEN_ALL_ACCESS, WinWorldSid};
 
     use super::{
-        BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, UserEnv, WindowsExecutor, append_batch_executable,
-        execute_as_current_user, prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root,
-        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
-        resolve_trusted_chocolatey_executable, resolve_winget_executable, run_plan, verify_token_elevation,
+        BATCH_METACHARACTERS, UserEnv, WindowsExecutor, append_batch_executable, execute_as_current_user,
+        prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in,
+        prepare_shell_command_in, reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable,
+        resolve_winget_executable, run_plan, verify_token_elevation,
     };
     use crate::executor::{CommandExecutor as _, ExecutionContext, TokenElevationCheck};
 
@@ -1539,92 +1513,103 @@ mod tests {
     }
 
     #[test]
-    fn powershell_command_uses_temp_script_file() {
+    fn powershell_command_runs_its_script_inline() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            "powershell.exe".to_owned(),
-            "-NoProfile".to_owned(),
-            "-Command".to_owned(),
-            "Write-Output 'héllo'".to_owned(),
-        ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
+        for (host, trusted_suffix) in [
+            ("powershell.exe", r"\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            ("pwsh.exe", r"\PowerShell\7\pwsh.exe"),
+        ] {
+            let command = [
+                host,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Write-Output 'héllo'; exit 0",
+            ]
+            .map(str::to_owned);
+            let command = prepare_main_command_in(&command, Some(temp_dir.path()), None, false)
+                .expect("prepare PowerShell command");
 
-        assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
-        assert_eq!(command.args()[1], "-NoProfile");
-        assert_eq!(command.args()[2], "-Command");
-
-        let script = std::fs::read(script_path_of(&command.args()[3])).expect("read temp script");
-        assert!(script.starts_with(b"\xEF\xBB\xBF"));
-        let script = String::from_utf8_lossy(&script);
-        assert!(script.contains(POWERSHELL_UTF8_ENCODING_PREAMBLE));
-        assert!(script.contains("\r\nWrite-Output 'héllo'"));
+            assert!(command.args()[0].ends_with(trusted_suffix), "{host}");
+            assert_eq!(
+                command.args()[1..4],
+                ["-NoProfile", "-NonInteractive", "-Command"],
+                "{host}"
+            );
+            assert_eq!(command.args().len(), 5, "{host}");
+            assert!(command.args()[4].contains("Write-Output 'héllo'; exit 0"), "{host}");
+        }
+        assert_eq!(
+            std::fs::read_dir(temp_dir.path()).expect("read temp dir").count(),
+            0,
+            "no script file is written"
+        );
     }
 
-    #[test]
-    fn powershell_command_preserves_host_flags_before_command() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            "powershell.exe".to_owned(),
-            "-NoProfile".to_owned(),
-            "-ExecutionPolicy".to_owned(),
-            "Bypass".to_owned(),
-            "-Command".to_owned(),
-            "Write-Output 'héllo'".to_owned(),
-        ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
-
-        assert!(command.args()[0].ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe"));
-        assert_eq!(command.args()[1], "-NoProfile");
-        assert_eq!(command.args()[2], "-ExecutionPolicy");
-        assert_eq!(command.args()[3], "Bypass");
-        assert_eq!(command.args()[4], "-Command");
-        script_path_of(&command.args()[5]);
-    }
-
-    #[test]
-    fn powershell7_command_uses_bomless_utf8_temp_script_file() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let command = vec![
-            "pwsh.exe".to_owned(),
-            "-NoProfile".to_owned(),
-            "-Command".to_owned(),
-            "Write-Output 'héllo'".to_owned(),
-        ];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare PowerShell command");
-
-        assert!(command.args()[0].ends_with(r"\PowerShell\7\pwsh.exe"));
-        assert_eq!(command.args()[1], "-NoProfile");
-        assert_eq!(command.args()[2], "-Command");
-
-        let script = std::fs::read(script_path_of(&command.args()[3])).expect("read temp script");
-        assert!(!script.starts_with(b"\xEF\xBB\xBF"));
-        let script = String::from_utf8(script).expect("script is UTF-8");
-        assert!(script.starts_with(POWERSHELL_UTF8_ENCODING_PREAMBLE));
-        assert!(script.contains("\r\nWrite-Output 'héllo'"));
-    }
-
-    fn script_path_of(command_arg: &str) -> &str {
-        command_arg
-            .strip_prefix("$global:LASTEXITCODE = 1; & '")
-            .and_then(|rest| rest.strip_suffix("'; exit $LASTEXITCODE"))
-            .unwrap_or_else(|| panic!("unexpected PowerShell invocation: {command_arg}"))
-    }
-
-    fn run_powershell_script(host: &str, script: &str) -> Option<i32> {
-        let command = [
+    fn powershell_under_restricted_policy(host: &str, script: &str) -> [String; 7] {
+        [
             host,
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
-            "Bypass",
+            "Restricted",
             "-Command",
             script,
         ]
-        .map(str::to_owned);
-        super::run_prepared_for_test(&command, None)
+        .map(str::to_owned)
+    }
+
+    fn powershell_hosts() -> Vec<&'static str> {
+        let mut hosts = vec!["powershell.exe"];
+        // PowerShell 7 is optional on Windows; skip it when absent.
+        if Path::new(&super::trusted_powershell7_executable()).exists() {
+            hosts.push("pwsh.exe");
+        }
+        hosts
+    }
+
+    // oracle: PowerShell single-quoted string literal rules (about_Quoting_Rules) and Windows command-line argument parsing
+    #[test]
+    fn quoted_values_reach_the_inline_script_unchanged() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let marker = temp_dir.path().join("escaped");
+        let create = format!("New-Item -ItemType File -Path '{}'", marker.display());
+        let values = [
+            "héllo".to_owned(),
+            format!("x'; {create}; '"),
+            format!("x\u{2019}; {create}; \u{2019}"),
+            format!("x\"; {create}; \""),
+            format!("x\\\"; {create}; \\\""),
+            "x\\".to_owned(),
+            format!("$({create})"),
+            format!("x`'; {create}; `'"),
+            format!("x\n{create}\n"),
+            format!("x\r\n{create}\r\n"),
+            format!("x # {create}"),
+        ];
+        for host in powershell_hosts() {
+            for value in &values {
+                let script = format!(
+                    "Write-Output {}; exit 0",
+                    crate::command_builder::quote_powershell_literal(value)
+                );
+                let output =
+                    super::output_of_prepared_for_test(&powershell_under_restricted_policy(host, &script), None);
+
+                assert_eq!(output.status.code(), Some(0), "{host}: {value:?}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout).strip_suffix("\r\n"),
+                    Some(value.as_str()),
+                    "{host}"
+                );
+                assert!(!marker.exists(), "{host}: {value:?} escaped its literal");
+            }
+        }
+    }
+
+    /// Runs `script` as the executor prepares it, under a `Restricted` execution policy for this process only, as on a default Windows client.
+    fn run_powershell_script(host: &str, script: &str) -> Option<i32> {
+        super::run_prepared_for_test(&powershell_under_restricted_policy(host, script), None)
     }
 
     fn assert_powershell_host_reports_script_exit(host: &str) {
