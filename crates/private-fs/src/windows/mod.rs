@@ -460,6 +460,10 @@ fn entry_kind(attributes: u32, tag: u32) -> EntryKind {
     }
 }
 
+pub(crate) fn is_same_directory(first: &Dir, second: &Dir) -> io::Result<bool> {
+    Ok(nt::file_id(first.handle())? == nt::file_id(second.handle())?)
+}
+
 pub(crate) fn sync(dir: &Dir, path: &Utf8Path) -> Result<()> {
     // FlushFileBuffers needs write access, which on a directory is FILE_ADD_FILE.
     // A directory this handle didn't create is opened again with it, which fails when the directory is open

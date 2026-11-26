@@ -61,6 +61,7 @@ const RECORDS_NAME: &str = "records";
 const INITIALIZATION_LOCK_NAME: &str = ".package-operations-initialization.lock";
 const LOCK_FILE_NAME: &str = ".lock";
 const INDEX_NAME: &str = "journal.json";
+const PREVIOUS_INDEX_NAME: &str = ".journal.json.previous";
 const VERSION: u32 = 1;
 const MAX_RECORD_SIZE: u64 = 1024 * 1024;
 const MAX_INDEX_SIZE: u64 = 64 * 1024 * 1024;
@@ -455,7 +456,10 @@ impl OperationJournal {
                 let state = journal.state.get_mut();
                 state.admitted = admitted;
                 state.index_identity = Some(identity);
-                if let Err(error) = journal.validate_records() {
+                if let Err(error) = journal
+                    .validate_records()
+                    .and_then(|()| journal.clear_previous_index().map(drop))
+                {
                     journal.make_unavailable(&mut journal.state.lock(), &error);
                 }
             }
@@ -486,6 +490,7 @@ impl OperationJournal {
             ensure!(
                 name == INDEX_NAME
                     || state.admitted.contains(name)
+                    || name == PREVIOUS_INDEX_NAME
                     || (name.starts_with('.') && name.ends_with(".tmp")),
                 "package operation record is not in the journal index, so the journal cannot vouch for it"
             );
@@ -494,11 +499,7 @@ impl OperationJournal {
     }
 
     fn load_index(&self, was_missing: bool) -> anyhow::Result<(BTreeSet<String>, FileIdentity)> {
-        let Some(file) = self
-            .directory
-            .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
-            .context("open package operation journal index")?
-        else {
+        let Some(file) = self.open_index()? else {
             ensure!(was_missing, "package operation journal index is missing");
             ensure!(
                 self.directory
@@ -509,53 +510,136 @@ impl OperationJournal {
             );
             let admitted = BTreeSet::new();
             let bytes = index_bytes(&admitted, self.index_size_limit)?;
-            self.write_index(&bytes)
+            let file = self
+                .write(INDEX_NAME, &bytes, Replace::Refuse)
                 .context("persist package operation journal index")?;
-            return Ok((admitted, self.index_identity()?));
+            return Ok((admitted, file_identity(&file)?));
         };
 
         let identity = file_identity(&file)?;
         Ok((read_index(file)?, identity))
     }
 
-    fn index_identity(&self) -> anyhow::Result<FileIdentity> {
-        let file = self
+    /// Opens the index, restoring the previous index if installation was interrupted before the new index appeared.
+    fn open_index(&self) -> anyhow::Result<Option<std::fs::File>> {
+        let open = || {
+            self.directory
+                .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
+                .context("open package operation journal index")
+        };
+        if let Some(file) = open()? {
+            return Ok(Some(file));
+        }
+        if self
             .directory
-            .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
-            .context("open package operation journal index")?
-            .context("package operation journal index is missing")?;
-        file_identity(&file)
+            .open_file(PREVIOUS_INDEX_NAME, &file_rule(), FileOptions::new())
+            .context("open previous package operation journal index")?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.directory
+            .rename(PREVIOUS_INDEX_NAME, INDEX_NAME, Replace::Refuse)
+            .context("restore previous package operation journal index")?;
+        open()
     }
 
-    /// Fails when the records directory or index was removed, replaced or changed since this journal last wrote it.
-    ///
-    /// It reads the whole index, so only new admissions call it; they already rewrite the whole index.
-    fn check_live_index(&self, state: &State) -> anyhow::Result<()> {
+    fn clear_previous_index(&self) -> anyhow::Result<bool> {
+        let removed = self
+            .directory
+            .remove_file(PREVIOUS_INDEX_NAME)
+            .context("remove previous package operation journal index")?;
+        if removed {
+            self.directory
+                .sync()
+                .context("sync package operation records directory")?;
+        }
+        Ok(removed)
+    }
+
+    /// Fails when the records directory or index was removed or replaced since this journal last read or wrote it.
+    fn check_live_index(&self, state: &State) -> anyhow::Result<std::fs::File> {
         let directory = self
             ._lock
             .dir
             .open_dir(RECORDS_NAME, &directory_rule(), Share::Shared)
             .context("open package operation records directory")?
             .context("package operation records directory is missing")?;
+        ensure!(
+            self.directory.is_same_directory(&directory)?,
+            "package operation records directory was replaced while open"
+        );
         let current = directory
             .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
             .context("open current package operation journal index")?
             .context("package operation journal index is missing")?;
-        let retained = self
-            .directory
-            .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
-            .context("open retained package operation journal index")?
-            .context("package operation journal index is missing")?;
         ensure!(
-            file_identity(&current)? == file_identity(&retained)?,
-            "package operation records directory or index changed while open"
+            Some(file_identity(&current)?) == state.index_identity,
+            "package operation journal index was replaced while open"
         );
+        Ok(current)
+    }
+
+    /// Replaces the index, which must still be `current` and list exactly `admitted`, with `bytes`.
+    ///
+    /// The index is set aside and checked rather than overwritten, and its successor is installed only where no index
+    /// exists, so an index removed, replaced or changed meanwhile fails the replacement instead of being lost.
+    fn replace_index(
+        &self,
+        current: std::fs::File,
+        admitted: &BTreeSet<String>,
+        bytes: &[u8],
+    ) -> anyhow::Result<std::fs::File> {
+        #[cfg(test)]
+        let hook = self.index_write_hook.lock().take();
+        #[cfg(test)]
+        if let Some(hook) = &hook {
+            hook.before()?;
+        }
+        self.directory
+            .rename(INDEX_NAME, PREVIOUS_INDEX_NAME, Replace::Refuse)
+            .context("move package operation journal index aside")?;
+        let replaced = self.check_previous_index(&current, admitted).and_then(|()| {
+            #[cfg(test)]
+            if let Some(hook) = &hook {
+                hook.install()?;
+            }
+            self.write(INDEX_NAME, bytes, Replace::Refuse)
+        });
+        let file = match replaced {
+            Ok(file) => file,
+            Err(error) => {
+                // Put the index back unless another index is already present; restart can also recover it.
+                let _ = self.directory.rename(PREVIOUS_INDEX_NAME, INDEX_NAME, Replace::Refuse);
+                return Err(error);
+            }
+        };
+        drop(current);
+        // UNTESTED: The old index must not survive a power cut after a new operation is dispatched.
+        // Keep its removal durable before the pending record is written, so recovery cannot reinstall a stale index.
         ensure!(
-            Some(file_identity(&retained)?) == state.index_identity,
+            self.clear_previous_index()?,
+            "previous package operation journal index disappeared"
+        );
+        #[cfg(test)]
+        if let Some(hook) = &hook {
+            hook.after()?;
+        }
+        Ok(file)
+    }
+
+    fn check_previous_index(&self, current: &std::fs::File, admitted: &BTreeSet<String>) -> anyhow::Result<()> {
+        let file = self
+            .directory
+            .open_file(PREVIOUS_INDEX_NAME, &file_rule(), FileOptions::new().read(true))
+            .context("open previous package operation journal index")?
+            .context("previous package operation journal index is missing")?;
+        ensure!(
+            file_identity(&file)? == file_identity(current)?,
             "package operation journal index was replaced while open"
         );
         ensure!(
-            read_index(retained)? == state.admitted,
+            read_index(file)? == *admitted,
             "package operation journal index changed while open"
         );
         Ok(())
@@ -578,7 +662,7 @@ impl OperationJournal {
             "package operation journal requires recovery and Agent restart"
         );
         let checked = self.check_live_index(&state);
-        self.refuse_on_error(&mut state, checked)?;
+        let current = self.refuse_on_error(&mut state, checked)?;
 
         let mut admitted = state.admitted.clone();
         admitted.insert(name.clone());
@@ -586,14 +670,13 @@ impl OperationJournal {
         membership.insert(name.clone(), self.index_size_limit)?;
         let bytes = index_bytes(&admitted, self.index_size_limit)?;
         self.membership.store(Arc::new(membership));
-        state.admitted = admitted;
-        // UNTESTED: A privileged writer can remove the index or replace the records directory after validation.
-        // The write can then recreate the index or use a disconnected directory; check this window when changing it.
+        let previous = std::mem::replace(&mut state.admitted, admitted);
         let written = self
-            .write_index(&bytes)
-            .context("persist package operation journal index")
-            .and_then(|()| self.index_identity());
-        state.index_identity = Some(self.refuse_on_error(&mut state, written)?);
+            .replace_index(current, &previous, &bytes)
+            .context("persist package operation journal index");
+        let installed = self.refuse_on_error(&mut state, written)?;
+        let identity = file_identity(&installed);
+        state.index_identity = Some(self.refuse_on_error(&mut state, identity)?);
 
         let record = Record {
             version: VERSION,
@@ -604,8 +687,12 @@ impl OperationJournal {
             execution_started: false,
         };
         // A failed record write leaves the name listed, so this operation reads as unknown and others continue.
-        self.write_record(&name, &record, Replace::Refuse)
-            .context("persist pending package operation record")?;
+        let written = self
+            .write_record(&name, &record, Replace::Refuse)
+            .context("persist pending package operation record");
+        let checked = self.check_live_index(&state);
+        self.refuse_on_error(&mut state, checked)?;
+        written?;
         state.in_flight.insert(name);
         Ok(Admission::Admitted)
     }
@@ -836,29 +923,14 @@ impl OperationJournal {
         result
     }
 
-    fn write_index(&self, bytes: &[u8]) -> anyhow::Result<()> {
-        #[cfg(test)]
-        let hook = self.index_write_hook.lock().take();
-        #[cfg(test)]
-        if let Some(hook) = &hook {
-            hook.before()?;
-        }
-        self.write(INDEX_NAME, bytes, Replace::Allow)?;
-        #[cfg(test)]
-        if let Some(hook) = &hook {
-            hook.after()?;
-        }
-        Ok(())
-    }
-
     fn write_record(&self, name: &str, record: &Record, replace: Replace) -> anyhow::Result<()> {
         let bytes = serde_json::to_vec(record).context("serialize package operation record")?;
-        self.write(name, &bytes, replace)
+        self.write(name, &bytes, replace).map(drop)
     }
 
     /// Makes `bytes` durable as `name`; a crash leaves either the old file or the new one, and possibly a stray
     /// temporary file, which nothing reads.
-    fn write(&self, name: &str, bytes: &[u8], replace: Replace) -> anyhow::Result<()> {
+    fn write(&self, name: &str, bytes: &[u8], replace: Replace) -> anyhow::Result<std::fs::File> {
         let temporary = format!(".{name}-{}.tmp", Uuid::new_v4());
         let mut file = self
             .directory
@@ -875,7 +947,7 @@ impl OperationJournal {
         if persisted.is_err() {
             let _ = self.directory.discard(&file, &temporary);
         }
-        persisted
+        persisted.map(|()| file)
     }
 }
 
@@ -1008,11 +1080,19 @@ impl OperationJournal {
     pub(crate) fn pause_index_write_for_test(
         &mut self,
     ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        self.pause_index_write(false)
+    }
+
+    fn pause_index_write(
+        &mut self,
+        after_persist: bool,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (resume_tx, resume_rx) = std::sync::mpsc::channel();
         let hook = tests::IndexWriteHook::Pause {
             entered: entered_tx,
             resume: resume_rx,
+            after_persist,
         };
         assert!(self.index_write_hook.get_mut().replace(hook).is_none());
         (entered_rx, resume_tx)
@@ -1050,22 +1130,45 @@ mod tests {
         Pause {
             entered: mpsc::Sender<()>,
             resume: mpsc::Receiver<()>,
+            after_persist: bool,
         },
+        FailBeforeInstall,
         FailAfterPersist,
     }
 
     impl IndexWriteHook {
         pub(super) fn before(&self) -> anyhow::Result<()> {
-            if let Self::Pause { entered, resume } = self {
+            if let Self::Pause {
+                entered,
+                resume,
+                after_persist: false,
+            } = self
+            {
                 entered.send(())?;
                 resume.recv()?;
             }
             Ok(())
         }
 
+        pub(super) fn install(&self) -> anyhow::Result<()> {
+            if let Self::FailBeforeInstall = self {
+                bail!("injected index installation failure");
+            }
+            Ok(())
+        }
+
         pub(super) fn after(&self) -> anyhow::Result<()> {
-            if let Self::FailAfterPersist = self {
-                bail!("injected index persistence failure");
+            match self {
+                Self::FailAfterPersist => bail!("injected index persistence failure"),
+                Self::Pause {
+                    entered,
+                    resume,
+                    after_persist: true,
+                } => {
+                    entered.send(())?;
+                    resume.recv()?;
+                }
+                _ => {}
             }
             Ok(())
         }
@@ -1978,6 +2081,151 @@ mod tests {
         Ok(())
     }
 
+    fn admit_across(
+        mut journal: OperationJournal,
+        after_persist: bool,
+        change: impl FnOnce(&OperationJournal) -> anyhow::Result<()>,
+    ) -> anyhow::Result<Arc<OperationJournal>> {
+        let (entered_rx, resume_tx) = journal.pause_index_write(after_persist);
+        let journal = Arc::new(journal);
+        let writer = {
+            let journal = Arc::clone(&journal);
+            std::thread::spawn(move || journal.admit("authority", &request("new", "pkg")))
+        };
+        let changed = (|| {
+            entered_rx.recv_timeout(Duration::from_secs(10))?;
+            change(&journal)?;
+            resume_tx.send(())?;
+            anyhow::Ok(())
+        })();
+        drop(resume_tx);
+        let admission = writer.join().expect("writer thread panicked");
+        changed?;
+        assert!(admission.is_err(), "admission succeeded: {admission:?}");
+        Ok(journal)
+    }
+
+    #[test]
+    fn index_replaced_during_admission_is_refused_instead_of_overwritten() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let index = journal_path(&data).join(INDEX_NAME);
+        let replacement = journal_path(&data).join("replacement");
+
+        let journal = admit_across(journal, false, |journal| {
+            std::fs::copy(&index, &replacement)?;
+            journal.directory.rename("replacement", INDEX_NAME, Replace::Allow)?;
+            Ok(())
+        })?;
+
+        let found: Index = serde_json::from_slice(&std::fs::read(&index)?)?;
+        assert!(found.operations.is_empty());
+        assert!(journal.admit("authority", &request("other", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn index_removed_during_admission_is_refused_instead_of_recreated() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let index = journal_path(&data).join(INDEX_NAME);
+
+        let journal = admit_across(journal, false, |journal| {
+            assert!(journal.directory.remove_file(INDEX_NAME)?);
+            Ok(())
+        })?;
+
+        assert!(!index.exists());
+        assert!(journal.admit("authority", &request("other", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn successor_index_replaced_during_admission_refuses_it() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let index = journal_path(&data).join(INDEX_NAME);
+        let replacement = journal_path(&data).join("replacement");
+
+        let journal = admit_across(journal, true, |journal| {
+            std::fs::copy(&index, &replacement)?;
+            journal.directory.rename("replacement", INDEX_NAME, Replace::Allow)?;
+            Ok(())
+        })?;
+
+        assert!(journal.admit("authority", &request("other", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn records_directory_replaced_during_admission_refuses_it() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let records = journal_path(&data);
+        let moved = data.join(DIRECTORY_NAME).join("moved-records");
+
+        let journal = admit_across(journal, true, |journal| {
+            std::fs::rename(&records, &moved)?;
+            journal
+                ._lock
+                .dir
+                .create_dir(RECORDS_NAME, &directory_rule(), Existing::Check)?;
+            std::fs::rename(moved.join(INDEX_NAME), records.join(INDEX_NAME))?;
+            Ok(())
+        })?;
+
+        assert!(journal.admit("authority", &request("other", "pkg")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn index_replacement_interrupted_before_install_is_restored_at_start() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        drop(journal);
+        std::fs::rename(
+            journal_path(&data).join(INDEX_NAME),
+            journal_path(&data).join(PREVIOUS_INDEX_NAME),
+        )?;
+
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(
+            journal.admit("authority", &existing)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
+        Ok(())
+    }
+
+    #[test]
+    fn newer_index_survives_restart_after_interrupted_cleanup() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let records = journal_path(&data);
+        let old_index = std::fs::read(records.join(INDEX_NAME))?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        drop(journal);
+        std::fs::remove_file(record_path(&data, "existing"))?;
+        std::fs::write(records.join(PREVIOUS_INDEX_NAME), old_index)?;
+
+        let journal = OperationJournal::open(&data)?;
+        assert!(journal.admit("authority", &existing).is_err());
+        assert!(!records.join(PREVIOUS_INDEX_NAME).exists());
+        assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
+        Ok(())
+    }
+
     #[test]
     fn operation_admitted_before_refusal_records_its_start_and_outcome() -> anyhow::Result<()> {
         // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
@@ -2050,22 +2298,22 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(windows)]
     #[test]
-    fn failed_index_write_refuses_later_writes_after_access_is_restored() -> anyhow::Result<()> {
-        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    fn failed_index_write_refuses_later_writes_until_restart() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
         let (_dir, data) = data_dir()?;
         let journal = OperationJournal::open(&data)?;
-        let index = journal_path(&data).join(INDEX_NAME);
-        let original = std::fs::metadata(&index)?.permissions();
-        let mut read_only = original.clone();
-        read_only.set_readonly(true);
-        std::fs::set_permissions(&index, read_only)?;
-        let first = journal.admit("authority", &request("first", "pkg"));
-        std::fs::set_permissions(&index, original)?;
+        *journal.index_write_hook.lock() = Some(IndexWriteHook::FailBeforeInstall);
 
-        assert!(first.is_err());
+        assert!(journal.admit("authority", &request("first", "pkg")).is_err());
         assert!(journal.admit("authority", &request("second", "pkg")).is_err());
+        drop(journal);
+
+        let journal = OperationJournal::open(&data)?;
+        assert_eq!(
+            journal.admit("authority", &request("second", "pkg"))?,
+            Admission::Admitted
+        );
         Ok(())
     }
 

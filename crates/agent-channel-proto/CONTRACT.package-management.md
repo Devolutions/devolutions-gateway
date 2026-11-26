@@ -523,8 +523,8 @@ Discovery and inventory remain available when their own dependencies are healthy
 Already active operations are not assumed to have stopped.
 An operation admitted before the refusal still records its start evidence and outcome when those writes succeed.
 After restart, if an index entry and its record are both lost, the surviving journal cannot identify that operation and the operation ID may execute again.
-If SYSTEM, an administrator or the Agent account removes the index between its integrity check and atomic replacement, the Agent can recreate it from memory without detecting the loss.
-If one of these accounts replaces the records directory after the check and before admission completes, the Agent can write to a disconnected directory without detecting the loss.
+If the Agent detects during admission that the index or records directory was removed or replaced, it reports `UNKNOWN` for that delivery without dispatch.
+An interrupted index replacement does not discard the entries that the Agent persisted before it began the replacement.
 When the operation journal is missing, the Agent creates a new one; operations recorded only in the missing journal may execute again.
 The Authority may submit a new operation ID after an `UNKNOWN` outcome only by explicitly accepting that the earlier operation may have completed.
 The Broker's request-ID replay tracking does not replace this Authority operation-ID tracking.
