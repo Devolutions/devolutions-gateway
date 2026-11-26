@@ -150,6 +150,9 @@ struct State {
     in_flight: HashSet<String>,
     /// Once the index is shown unreliable, only reopening a consistent journal can allow admissions again.
     unavailable: bool,
+    /// The identity of the index file this journal last read or wrote, so a replacement is detected even when its
+    /// content is unchanged.
+    index_identity: Option<FileIdentity>,
 }
 
 #[derive(Clone, Debug)]
@@ -432,6 +435,7 @@ impl OperationJournal {
                 admitted: BTreeSet::new(),
                 in_flight: HashSet::new(),
                 unavailable: false,
+                index_identity: None,
             }),
             unavailable: AtomicBool::new(false),
             membership: ArcSwap::from_pointee(Membership::new(BTreeSet::new(), limit)?),
@@ -447,8 +451,10 @@ impl OperationJournal {
             failed_completion_writes_after_install: AtomicUsize::new(0),
         };
         match journal.load_index(was_missing) {
-            Ok(admitted) => {
-                journal.state.get_mut().admitted = admitted;
+            Ok((admitted, identity)) => {
+                let state = journal.state.get_mut();
+                state.admitted = admitted;
+                state.index_identity = Some(identity);
                 if let Err(error) = journal.validate_records() {
                     journal.make_unavailable(&mut journal.state.lock(), &error);
                 }
@@ -487,7 +493,7 @@ impl OperationJournal {
         Ok(())
     }
 
-    fn load_index(&self, was_missing: bool) -> anyhow::Result<BTreeSet<String>> {
+    fn load_index(&self, was_missing: bool) -> anyhow::Result<(BTreeSet<String>, FileIdentity)> {
         let Some(file) = self
             .directory
             .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
@@ -505,12 +511,25 @@ impl OperationJournal {
             let bytes = index_bytes(&admitted, self.index_size_limit)?;
             self.write_index(&bytes)
                 .context("persist package operation journal index")?;
-            return Ok(admitted);
+            return Ok((admitted, self.index_identity()?));
         };
 
-        read_index(file)
+        let identity = file_identity(&file)?;
+        Ok((read_index(file)?, identity))
     }
 
+    fn index_identity(&self) -> anyhow::Result<FileIdentity> {
+        let file = self
+            .directory
+            .open_file(INDEX_NAME, &file_rule(), FileOptions::new().read(true))
+            .context("open package operation journal index")?
+            .context("package operation journal index is missing")?;
+        file_identity(&file)
+    }
+
+    /// Fails when the records directory or index was removed, replaced or changed since this journal last wrote it.
+    ///
+    /// It reads the whole index, so only new admissions call it; they already rewrite the whole index.
     fn check_live_index(&self, state: &State) -> anyhow::Result<()> {
         let directory = self
             ._lock
@@ -530,6 +549,10 @@ impl OperationJournal {
         ensure!(
             file_identity(&current)? == file_identity(&retained)?,
             "package operation records directory or index changed while open"
+        );
+        ensure!(
+            Some(file_identity(&retained)?) == state.index_identity,
+            "package operation journal index was replaced while open"
         );
         ensure!(
             read_index(retained)? == state.admitted,
@@ -554,6 +577,8 @@ impl OperationJournal {
             !state.unavailable,
             "package operation journal requires recovery and Agent restart"
         );
+        let checked = self.check_live_index(&state);
+        self.refuse_on_error(&mut state, checked)?;
 
         let mut admitted = state.admitted.clone();
         admitted.insert(name.clone());
@@ -566,8 +591,9 @@ impl OperationJournal {
         // The write can then recreate the index or use a disconnected directory; check this window when changing it.
         let written = self
             .write_index(&bytes)
-            .context("persist package operation journal index");
-        self.refuse_on_error(&mut state, written)?;
+            .context("persist package operation journal index")
+            .and_then(|()| self.index_identity());
+        state.index_identity = Some(self.refuse_on_error(&mut state, written)?);
 
         let record = Record {
             version: VERSION,
@@ -759,14 +785,9 @@ impl OperationJournal {
 
     /// Reads and validates `name`, and returns `None` only when the journal establishes that it is absent.
     ///
-    /// A changed live index or a record that the index does not list latches refusal.
+    /// A record that the index does not list latches refusal.
     /// A listed record that is missing or unreadable is an error for this operation alone.
     fn read(&self, state: &mut State, name: &str, operation_id: &str) -> anyhow::Result<Option<Record>> {
-        if !state.unavailable
-            && let Err(error) = self.check_live_index(state)
-        {
-            self.make_unavailable(state, &error);
-        }
         let listed = state.admitted.contains(name);
         let Some(file) = self
             .directory
@@ -902,7 +923,13 @@ fn parse_record(file: std::fs::File, name: &str) -> anyhow::Result<Record> {
 }
 
 #[cfg(unix)]
-fn file_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+type FileIdentity = (u64, u64);
+
+#[cfg(windows)]
+type FileIdentity = (u64, [u8; 16]);
+
+#[cfg(unix)]
+fn file_identity(file: &std::fs::File) -> anyhow::Result<FileIdentity> {
     use std::os::unix::fs::MetadataExt as _;
 
     let metadata = file.metadata()?;
@@ -910,7 +937,7 @@ fn file_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
 }
 
 #[cfg(windows)]
-fn file_identity(file: &std::fs::File) -> anyhow::Result<(u64, [u8; 16])> {
+fn file_identity(file: &std::fs::File) -> anyhow::Result<FileIdentity> {
     use std::os::windows::io::AsRawHandle as _;
 
     use windows::Win32::Foundation::HANDLE;
@@ -1927,6 +1954,48 @@ mod tests {
 
         let journal = OperationJournal::open(&data)?;
         assert_eq!(journal.admit("authority", &request("new", "pkg"))?, Admission::Admitted);
+        Ok(())
+    }
+
+    #[test]
+    fn same_content_index_replacement_refuses_new_writes() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/device_management/INTENT.md §device-management-operation-journal
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let existing = request("existing", "pkg");
+        journal.admit("authority", &existing)?;
+        journal.complete("authority", &existing, Outcome::Succeeded)?;
+        let index = journal_path(&data).join(INDEX_NAME);
+        let replacement = journal_path(&data).join("replacement");
+        std::fs::copy(&index, &replacement)?;
+        std::fs::rename(&replacement, &index)?;
+
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+        assert_eq!(
+            journal.admit("authority", &existing)?,
+            Admission::Recorded(settled(Outcome::Succeeded))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn operation_admitted_before_refusal_records_its_start_and_outcome() -> anyhow::Result<()> {
+        // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+        let (_dir, data) = data_dir()?;
+        let journal = OperationJournal::open(&data)?;
+        let active = request("active", "pkg");
+        journal.admit("authority", &active)?;
+        std::fs::remove_file(journal_path(&data).join(INDEX_NAME))?;
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
+
+        journal.mark_started("authority", &active)?;
+        journal.complete("authority", &active, Outcome::Succeeded)?;
+
+        assert_eq!(
+            journal.admit("authority", &active)?,
+            Admission::Recorded(Settled::new(Outcome::Succeeded, true))
+        );
+        assert!(journal.admit("authority", &request("new", "pkg")).is_err());
         Ok(())
     }
 
