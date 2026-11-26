@@ -288,6 +288,13 @@ impl Coordinator {
             return;
         }
 
+        // A refused journal has no record of an ID outside its membership snapshot, so a lookup could only report it unknown.
+        if journal.is_unavailable() {
+            drop(tracked);
+            reply(result(operation_id, unknown(false)));
+            return;
+        }
+
         // INVARIANT: The tracked lock stays held from this check through worker acquisition.
         // A queued admission rechecks capacity after acquiring the I/O permit.
         if !journal.has_index_capacity(&name) {
@@ -441,7 +448,7 @@ impl Coordinator {
             .await
             .expect("admission semaphore stays open");
         // An earlier admission may have used the last index space while this one waited.
-        if !journal.has_index_capacity(&name) {
+        if !journal.is_unavailable() && !journal.has_index_capacity(&name) {
             drop(admission);
             drop(worker);
             self.finish(name, journal_full());
@@ -3040,6 +3047,37 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_secs(10), changed_result).await??;
         assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
         journal.complete("authority", &other, Outcome::Unknown)?;
+        Ok(())
+    }
+
+    // oracle: contract crates/agent-channel-proto/CONTRACT.package-management.md §operations
+    // oracle: regression #2197 refused-journal deliveries queued lookups without bound
+    #[tokio::test]
+    async fn a_refused_journal_answers_an_unrecorded_operation_without_a_lookup() -> anyhow::Result<()> {
+        let root = test_tempdir()?;
+        let data = camino::Utf8Path::from_path(root.path()).expect("test path is UTF-8");
+        drop(OperationJournal::open(data)?);
+        std::fs::write(
+            data.join("package-operations").join("records").join("journal.json"),
+            b"{",
+        )?;
+        let journal = Arc::new(OperationJournal::open(data)?);
+        let coordinator = Arc::new(Coordinator::default());
+        let _stalled_lookups = Arc::clone(&coordinator.admission)
+            .try_acquire_many_owned(u32::try_from(coordinator.admission.available_permits())?)?;
+
+        let (reply, result) = response();
+        coordinator.submit(
+            journal,
+            "authority".to_owned(),
+            request(PackageOperationType::Install, "Winget", "winget", "user"),
+            reply,
+            |_| async { panic!("a refused journal must not dispatch an operation") },
+        );
+
+        let result = tokio::time::timeout(Duration::from_secs(10), result).await??;
+        assert_eq!(result.status, i32::from(PackageOperationStatus::Unknown));
+        assert!(coordinator.tracked.lock().is_empty());
         Ok(())
     }
 

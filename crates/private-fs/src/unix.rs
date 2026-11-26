@@ -41,6 +41,12 @@ pub(crate) struct Dir {
     file: File,
 }
 
+pub(crate) fn is_same_directory(first: &Dir, second: &Dir) -> io::Result<bool> {
+    let first = first.file.metadata()?;
+    let second = second.file.metadata()?;
+    Ok((first.dev(), first.ino()) == (second.dev(), second.ino()))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Directory,

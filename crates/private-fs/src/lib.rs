@@ -179,6 +179,12 @@ impl Dir {
         &self.path
     }
 
+    /// Returns whether both handles refer to the same directory, even if it has been renamed.
+    pub fn is_same_directory(&self, other: &Self) -> Result<bool> {
+        sys::is_same_directory(&self.inner, &other.inner)
+            .map_err(|error| Error::io(&self.path, "compare directories", error))
+    }
+
     /// Creates the directory `name` with exactly `rule` from the moment it exists, and makes its entry durable.
     pub fn create_dir(&self, name: &str, rule: &Rule, existing: Existing) -> Result<Self> {
         let path = self.child(name)?;
