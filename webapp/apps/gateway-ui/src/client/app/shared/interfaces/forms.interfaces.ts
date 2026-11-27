@@ -41,8 +41,6 @@ export interface RdpFormDataInput {
 export interface VncFormDataInput {
   autoComplete: AutoCompleteInput;
   hostname: string;
-  username: string;
-  password: string;
   protocol: number;
   enableCursor: boolean;
   // The extended clipboard control may not be initialized if the browser does not support the clipboard API.
@@ -62,8 +60,6 @@ export interface VncFormDataInput {
 export interface ArdFormDataInput {
   autoComplete: AutoCompleteInput;
   hostname: string;
-  username: string;
-  password: string;
   protocol: number;
   wheelSpeedFactor: number;
   resolutionQuality: ResolutionQuality;

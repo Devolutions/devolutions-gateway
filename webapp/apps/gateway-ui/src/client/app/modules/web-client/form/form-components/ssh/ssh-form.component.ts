@@ -1,6 +1,6 @@
 import { AfterViewInit, ChangeDetectorRef, Component, Injectable, Input, OnDestroy, OnInit } from '@angular/core';
 import { FormGroup } from '@angular/forms';
-import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
+import { SshAuthMode, WebClientAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { BaseComponent } from '@shared/bases/base.component';
@@ -50,7 +50,7 @@ export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy
   }
 
   ngOnInit(): void {
-    this.initializeFormOptions();
+    this.authModeOptions = WebClientAuthMode.getSelectSshItems();
     this.addControlsToParentForm(this.inputFormData);
   }
 
@@ -78,18 +78,6 @@ export class SshFormComponent extends BaseComponent implements OnInit, OnDestroy
     if (this.form.contains('authMode')) {
       this.form.removeControl('authMode');
     }
-  }
-
-  private initializeFormOptions(): void {
-    this.formService
-      .getAuthModeOptions('ssh')
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe({
-        next: (authModeOptions) => {
-          this.authModeOptions = authModeOptions;
-        },
-        error: (error) => console.error('Error fetching dropdown options', error),
-      });
   }
 
   private subscribeToAuthModeChanges(): void {

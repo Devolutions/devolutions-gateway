@@ -1,33 +1,4 @@
 <div [formGroup]="form">
-  <div class="col-4 gateway-form-group">
-    <label for="authSettings">Authentication</label>
-    <div class="gateway-form-input">
-      <p-select
-        id="authSettings"
-        appendTo="body"
-        formControlName="authMode"
-        [options]="authModeOptions"
-      >
-      </p-select>
-    </div>
-  </div>
-
-  <div class="col-12 gateway-form-group" [hidden]="!showUsernameInput()">
-    <web-client-username-control
-      [parentForm]="form"
-      [inputFormData]="inputFormData"
-      [isEnabled]="showUsernameInput()"
-    ></web-client-username-control>
-  </div>
-
-  <div class="col-12 gateway-form-group" [hidden]="!showPasswordInput()">
-    <web-client-password-control
-      [parentForm]="form"
-      [inputFormData]="inputFormData"
-      [isEnabled]="showPasswordInput()"
-    ></web-client-password-control>
-  </div>
-
   <div class="col-12 gateway-form-group">
     <a class="gateway-more-settings-link" href="#" (click)="toggleMoreSettings($event)"
     >More Settings

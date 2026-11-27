@@ -5,6 +5,7 @@ import { RouterModule, Routes } from '@angular/router';
 import { WebActiveDirectoryComponent } from '@devolutions/web-active-directory-gui';
 import { ArdToolbarWrapperComponent } from '@gateway/modules/web-client/ard/ard-toolbar-wrapper.component';
 import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
+import { CredentialsPromptComponent } from '@gateway/modules/web-client/credentials-prompt/credentials-prompt.component';
 import { ActiveDirectoryFormComponent } from '@gateway/modules/web-client/form/form-components/active-directory/active-directory-form.component';
 import { ArdFormComponent } from '@gateway/modules/web-client/form/form-components/ard/ard-form.component';
 import { RdpFormComponent } from '@gateway/modules/web-client/form/form-components/rdp/rdp-form.component';
@@ -78,6 +79,7 @@ const routes: Routes = [
     RdpToolbarWrapperComponent,
     VncToolbarWrapperComponent,
     WebActiveDirectoryComponent,
+    CredentialsPromptComponent,
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   declarations: [

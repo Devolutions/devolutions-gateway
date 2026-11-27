@@ -20,6 +20,7 @@ import {
   ardQualityMode,
   ardShowCurtain,
   Backend,
+  credentialsCallback,
   resolutionQuality,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
@@ -366,7 +367,6 @@ export class WebClientArdComponent
       map((currentWebSession) => {
         this.formData = currentWebSession.data as ArdFormDataInput;
         this.wheelSpeed = this.formData.wheelSpeedFactor ?? 1;
-        this.sessionInfoUsername = this.formData.username || null;
         this.refreshSessionInfo();
       }),
     );
@@ -375,8 +375,6 @@ export class WebClientArdComponent
   private fetchParameters(formData: ArdFormDataInput): Observable<IronARDConnectionParameters> {
     const {
       hostname,
-      username,
-      password,
       resolutionQuality,
       ardQualityMode,
       wheelSpeedFactor = 1,
@@ -388,12 +386,9 @@ export class WebClientArdComponent
     const sessionId: string = uuidv4();
     const gatewayAddress = this.getGatewayWebSocketUrl(JET_ARD_URL, sessionId);
     this.sessionInfoUrl = this.toUserFacingUrl(gatewayAddress);
-    this.sessionInfoUsername = username || null;
     this.refreshSessionInfo();
 
     const connectionParameters: IronARDConnectionParameters = {
-      username,
-      password,
       host: extractedData.hostname,
       port: extractedData.port,
       gatewayAddress,
@@ -414,11 +409,12 @@ export class WebClientArdComponent
   protected callConnect(connectionParameters: IronARDConnectionParameters): void {
     const configBuilder = this.remoteClient
       .configBuilder()
-      .withUsername(connectionParameters.username)
-      .withPassword(connectionParameters.password)
       .withDestination(connectionParameters.host)
       .withProxyAddress(connectionParameters.gatewayAddress)
-      .withAuthToken(connectionParameters.token);
+      .withAuthToken(connectionParameters.token)
+      .withExtension(
+        credentialsCallback((requirement) => this.promptCredentials(requirement, connectionParameters.host)),
+      );
 
     if (connectionParameters.resolutionQuality != null) {
       configBuilder.withExtension(resolutionQuality(connectionParameters.resolutionQuality));
