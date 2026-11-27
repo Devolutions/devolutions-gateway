@@ -11,11 +11,12 @@ import {
   ViewChild,
 } from '@angular/core';
 import { IronError, SessionTerminationInfo, UserInteraction } from '@devolutions/iron-remote-desktop';
+import type { CredentialsRequirement } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_WARNING_ICON } from '@gateway/app.constants';
 import {
   Credentials,
+  CredentialsPromptCancelledError,
   CredentialsPromptComponent,
-  CredentialsRequirement,
 } from '@gateway/modules/web-client/credentials-prompt/credentials-prompt.component';
 import { ClipboardActionButton } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-action.model';
 import { ScreenMode } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
@@ -391,8 +392,9 @@ export abstract class DesktopWebClientBaseComponent<TFormData extends DesktopFor
 
   /** Asks the user for the credentials `host` requests, through the template's credentials prompt. */
   protected async promptCredentials(requirement: CredentialsRequirement, host: string): Promise<Credentials> {
+    this.credentialsPromptCancelled = false;
     const credentials = await this.credentialsPrompt.request(requirement, host).catch((error: unknown) => {
-      this.credentialsPromptCancelled = true;
+      this.credentialsPromptCancelled = error instanceof CredentialsPromptCancelledError;
       throw error;
     });
     if (credentials.username != null) {
